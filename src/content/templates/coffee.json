@@ -1,0 +1,88 @@
+{
+  "slug": "coffee",
+  "name": {
+    "zh": "咖啡杯",
+    "en": "Coffee"
+  },
+  "category": "liquid",
+  "sort_order": 40,
+  "price_cents": 199,
+  "preview": {
+    "shape": "cup"
+  },
+  "perception": [
+    "segmentation"
+  ],
+  "emitter": {
+    "shape": "cup",
+    "aspect": 0.85,
+    "port": {
+      "x": 0.059,
+      "y": 0.258
+    },
+    "band": 0.06,
+    "tilt": 0.38,
+    "draggable": true,
+    "default": {
+      "x": -0.18,
+      "y": 0.34
+    }
+  },
+  "substance": {
+    "gravity": -1480,
+    "friction": 0.13,
+    "streak": 0.034,
+    "color": [
+      0.46,
+      0.27,
+      0.14
+    ],
+    "size": [
+      1.8,
+      3.6
+    ],
+    "speed": [
+      240,
+      340
+    ],
+    "spread": 0.12,
+    "splash": 2,
+    "settle": false,
+    "twinkle": false
+  },
+  "controls": [
+    {
+      "key": "rate",
+      "label": {
+        "zh": "流量",
+        "en": "Flow"
+      },
+      "min": 200,
+      "max": 2000,
+      "default": 800,
+      "step": 50
+    },
+    {
+      "key": "wind",
+      "label": {
+        "zh": "风",
+        "en": "Wind"
+      },
+      "min": -300,
+      "max": 300,
+      "default": 0,
+      "step": 10
+    },
+    {
+      "key": "stick",
+      "label": {
+        "zh": "黏附",
+        "en": "Stickiness"
+      },
+      "min": 0,
+      "max": 100,
+      "default": 45,
+      "step": 5
+    }
+  ]
+}

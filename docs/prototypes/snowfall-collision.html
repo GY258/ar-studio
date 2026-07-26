@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>落雪碰撞滤镜</title>
+<style>
+  :root{
+    --bg:#0E0E10; --panel:#17171B; --line:#26262C;
+    --fg:#EDEBE6; --muted:#8A8A93; --accent:#C9A0FF; --rec:#FF5A52;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;min-height:100vh;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:20px;
+  }
+  #stage{
+    position:relative;width:min(100%,880px);aspect-ratio:16/9;
+    background:#000;border-radius:14px;overflow:hidden;border:1px solid var(--line);
+  }
+  #gl{display:block;width:100%;height:100%}
+  video{display:none}
+  #mask{
+    position:absolute;left:10px;bottom:10px;width:112px;height:63px;
+    border-radius:6px;opacity:.85;display:none;image-rendering:pixelated;
+    border:1px solid var(--line);
+  }
+  #boot{
+    position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:16px;text-align:center;padding:24px;background:var(--bg);z-index:5;
+  }
+  #boot p{margin:0;color:var(--muted);font-size:13px;line-height:1.7;max-width:38ch}
+  #start{background:var(--accent);color:#1A0F2E;border:0;border-radius:999px;
+         padding:12px 28px;font-size:15px;font-weight:500;cursor:pointer}
+  #start:disabled{background:var(--line);color:var(--muted);cursor:default}
+
+  #bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center;
+       background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px 18px;
+       max-width:880px}
+  label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+  input[type=range]{width:92px;accent-color:var(--accent)}
+  input[type=checkbox]{accent-color:var(--accent)}
+  .val{font-family:var(--mono);font-size:11px;min-width:30px;text-align:right;color:var(--fg)}
+  .sep{width:1px;height:24px;background:var(--line)}
+  #rec{display:flex;align-items:center;gap:8px;background:transparent;border:0;color:var(--muted);
+       border-radius:999px;padding:7px 14px;font-size:13px;cursor:pointer;font-family:inherit}
+  #rec:hover{color:var(--fg)}
+  #rec .dot{width:9px;height:9px;border-radius:50%;background:var(--rec)}
+  #rec[data-on="1"]{color:var(--rec)}
+  #rec[data-on="1"] .dot{animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:.2}}
+  @media (prefers-reduced-motion:reduce){#rec[data-on="1"] .dot{animation:none}}
+  #start:focus-visible,#rec:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #stat{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.04em}
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <video id="cam" playsinline muted autoplay></video>
+  <canvas id="gl"></canvas>
+  <canvas id="mask" width="112" height="63"></canvas>
+  <div id="boot">
+    <button id="start" disabled>正在加载分割模型…</button>
+    <p>需要摄像头权限，必须用 https:// 或 localhost 打开。</p>
+  </div>
+</div>
+
+<div id="bar">
+  <label>雪量<input type="range" id="rate" min="60" max="1200" step="20" value="420"><span class="val" id="rateV">420</span></label>
+  <label>雪花<input type="range" id="size" min="60" max="320" step="10" value="170"><span class="val" id="sizeV">170</span></label>
+  <label>积雪<input type="range" id="thick" min="0" max="100" step="5" value="60"><span class="val" id="thickV">60</span></label>
+  <label>摩擦<input type="range" id="stick" min="0" max="100" step="5" value="70"><span class="val" id="stickV">70</span></label>
+  <label>风<input type="range" id="wind" min="-300" max="300" step="10" value="0"><span class="val" id="windV">0</span></label>
+  <label>雪区<input type="range" id="zone" min="20" max="100" step="5" value="55"><span class="val" id="zoneV">55</span></label>
+  <span class="sep"></span>
+  <label><input type="checkbox" id="showMask">看遮罩</label>
+  <button id="rec" data-on="0"><span class="dot"></span>录制</button>
+</div>
+<div id="stat">未启动</div>
+
+<script type="module">
+import * as THREE from "https://esm.sh/three@0.160.0";
+import { FilesetResolver, ImageSegmenter } from "https://esm.sh/@mediapipe/tasks-vision@0.10.14";
+
+const video=document.getElementById("cam"), canvas=document.getElementById("gl");
+const stage=document.getElementById("stage"), startB=document.getElementById("start");
+const boot=document.getElementById("boot"), statEl=document.getElementById("stat");
+const maskCv=document.getElementById("mask"), mctx=maskCv.getContext("2d");
+
+/* ---------------- 占据图：分割遮罩 → 低分辨率标量场 ---------------- */
+const GW=112, GH=63;                      // 够粗糙，但法线足够平滑
+const body = new Float32Array(GW*GH);     // 人像占据度 0~1（时间平滑后）
+const snow = new Float32Array(GW*GH);     // 积雪深度，粒子撞上去后沉积在这
+const snowB= new Float32Array(GW*GH);     // 积雪模糊版，碰撞和渲染都读它
+const field= new Float32Array(GW*GH);     // body + 积雪，雪真正撞的是这个
+const raw  = new Float32Array(GW*GH);
+const tmp  = new Float32Array(GW*GH);
+let maskSeen=false;
+
+function ingest(result){
+  const m = result.categoryMask;
+  if(!m){ result.close?.(); return; }
+  const data = m.getAsUint8Array(), mw=m.width, mh=m.height;
+
+  // 不同模型/版本里“人”到底是 0 还是非 0 并不一致。
+  // 用四角采样定出背景值，自动适配，省得猜错整个效果反过来。
+  const corners=[data[0], data[mw-1], data[(mh-1)*mw], data[mh*mw-1]];
+  const bgVal = corners.sort((a,b)=>a-b)[1];
+
+  for(let y=0;y<GH;y++){
+    const sy=(y*mh/GH)|0;
+    for(let x=0;x<GW;x++){
+      const sx=(x*mw/GW)|0;
+      raw[y*GW+x] = (data[sy*mw+sx]!==bgVal) ? 1 : 0;
+    }
+  }
+  m.close?.(); result.close?.();
+  maskSeen=true;
+
+  // 3x3 盒式模糊：让边缘有梯度，法线才不会一格一跳
+  blur3(raw,tmp);
+  // 时间平滑：单帧分割会闪，直接用会让雪抽搐
+  for(let i=0;i<body.length;i++) body[i] += (tmp[i]-body[i])*0.45;
+}
+
+function blur3(src,dst){
+  for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){
+    let s=0,n=0;
+    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+      const yy=y+dy, xx=x+dx;
+      if(yy<0||yy>=GH||xx<0||xx>=GW) continue;
+      s+=src[yy*GW+xx]; n++;
+    }
+    dst[y*GW+x]=s/n;
+  }
+}
+
+/* 积雪场每帧维护：没支撑的塌掉，有支撑的慢慢化，封顶决定“能堆多厚” */
+function updateSnow(dt,maxD){
+  const collapse=Math.exp(-dt*7), melt=Math.exp(-dt*0.22);
+  for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){
+    const i=y*GW+x;
+    let s=snow[i];
+    if(s<=1e-4){ snow[i]=0; continue; }
+    // 支撑 = 本格是人 / 正下方是人 / 正下方也有雪。人一走开，雪就没依托，塌。
+    let sup=0;
+    if(y+1<GH) sup=Math.max(body[i], body[(y+1)*GW+x], snow[(y+1)*GW+x]);
+    s *= (sup<0.35 ? collapse : melt);
+    snow[i]=Math.min(s,maxD);
+  }
+  blur3(snow,snowB);
+  for(let i=0;i<field.length;i++) field[i]=Math.min(2, body[i]+snowB[i]*1.35);
+}
+
+function occAt(wx,wy){
+  const u=0.5-wx/W, v=0.5-wy/H;
+  if(u<0||u>1||v<0||v>1) return 0;
+  const gx=u*(GW-1), gy=v*(GH-1);
+  const x0=gx|0, y0=gy|0;
+  const x1=Math.min(x0+1,GW-1), y1=Math.min(y0+1,GH-1);
+  const fx=gx-x0, fy=gy-y0;
+  const a=field[y0*GW+x0], b=field[y0*GW+x1], c=field[y1*GW+x0], d=field[y1*GW+x1];
+  return (a*(1-fx)+b*fx)*(1-fy)+(c*(1-fx)+d*fx)*fy;
+}
+
+function depositAt(wx,wy,amt){
+  const u=0.5-wx/W, v=0.5-wy/H;
+  if(u<0||u>1||v<0||v>1) return;
+  const gx=u*(GW-1), gy=v*(GH-1);
+  const x0=gx|0, y0=gy|0;
+  const x1=Math.min(x0+1,GW-1), y1=Math.min(y0+1,GH-1);
+  const fx=gx-x0, fy=gy-y0;
+  snow[y0*GW+x0]+=amt*(1-fx)*(1-fy);
+  snow[y0*GW+x1]+=amt*fx*(1-fy);
+  snow[y1*GW+x0]+=amt*(1-fx)*fy;
+  snow[y1*GW+x1]+=amt*fx*fy;
+}
+
+function drawMask(){
+  const img=mctx.createImageData(GW,GH);
+  for(let i=0;i<GW*GH;i++){
+    const b=body[i], s=Math.min(1,snowB[i]*1.6);
+    img.data[i*4]  =Math.min(255,b*92 +s*255)|0;
+    img.data[i*4+1]=Math.min(255,b*74 +s*255)|0;
+    img.data[i*4+2]=Math.min(255,b*145+s*255)|0;
+    img.data[i*4+3]=255;
+  }
+  mctx.putImageData(img,0,0);
+}
+
+/* ---------------- 场景 ---------------- */
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setClearColor(0x000000,1);
+const scene=new THREE.Scene();
+let W=1280,H=720;
+const camera=new THREE.OrthographicCamera(-W/2,W/2,H/2,-H/2,-100,100);
+
+const videoTex=new THREE.VideoTexture(video);
+videoTex.colorSpace=THREE.SRGBColorSpace;
+const bg=new THREE.Mesh(new THREE.PlaneGeometry(1,1), new THREE.MeshBasicMaterial({map:videoTex}));
+bg.scale.x=-1; bg.position.z=-1; bg.renderOrder=0; scene.add(bg);
+
+/* 积雪层：把 snowB 当成一张 alpha 图贴回画面。分辨率低没关系，
+   雪本来就没有硬边，linear 采样 + smoothstep 出来正好是软堆积。 */
+const snowTexData=new Uint8Array(GW*GH*4);
+const snowTex=new THREE.DataTexture(snowTexData,GW,GH,THREE.RGBAFormat);
+snowTex.minFilter=snowTex.magFilter=THREE.LinearFilter;
+snowTex.needsUpdate=true;
+const snowMat=new THREE.ShaderMaterial({
+  transparent:true, depthWrite:false, depthTest:false, side:THREE.DoubleSide,
+  uniforms:{ map:{value:snowTex} },
+  vertexShader:`
+    varying vec2 vUv;
+    void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    uniform sampler2D map; varying vec2 vUv;
+    void main(){
+      float d=texture2D(map,vUv).a;
+      float a=smoothstep(0.10,0.42,d);
+      if(a<0.004) discard;
+      vec3 col=mix(vec3(0.80,0.85,0.97), vec3(1.0), smoothstep(0.2,0.7,d));
+      gl_FragColor=vec4(col,a*0.96);
+    }`
+});
+const snowLayer=new THREE.Mesh(new THREE.PlaneGeometry(1,1),snowMat);
+snowLayer.position.z=-0.5; snowLayer.renderOrder=1; scene.add(snowLayer);
+
+function uploadSnowTex(){
+  const d=snowTexData;
+  for(let y=0;y<GH;y++){
+    const src=(GH-1-y)*GW;                 // 纹理 v=0 在底部，行序要翻
+    for(let x=0;x<GW;x++){
+      const o=(y*GW+x)*4;
+      d[o]=255; d[o+1]=255; d[o+2]=255;
+      d[o+3]=Math.min(1,snowB[src+x])*255|0;
+    }
+  }
+  snowTex.needsUpdate=true;
+}
+
+/* ---------------- 发射区 ---------------- */
+/* 不画任何东西，只是一条在画面顶边之上的横向区间。
+   慢漂一点，雪落下来的那一片才不是死死钉在同一个位置。 */
+let emitW=640, emitX=0;
+function placeEmitter(t){
+  emitW=W*(Number(zoneEl.value)/100);
+  emitX=Math.sin(t*0.13)*W*0.045;
+}
+
+function resize(){
+  const r=stage.getBoundingClientRect();
+  W=Math.max(2,Math.round(r.width)); H=Math.max(2,Math.round(r.height));
+  renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+  renderer.setSize(W,H,false);
+  camera.left=-W/2;camera.right=W/2;camera.top=H/2;camera.bottom=-H/2;
+  camera.updateProjectionMatrix();
+  bg.scale.set(-W,H,1);
+  snowLayer.scale.set(-W,H,1);          // 和 bg 同样镜像，才对得上 occAt 的映射
+}
+addEventListener("resize",resize);
+
+/* ---------------- 粒子 ---------------- */
+const MAX=12000;
+const pPos=new Float32Array(MAX*3), pSiz=new Float32Array(MAX), pAlp=new Float32Array(MAX);
+const vx=new Float32Array(MAX), vy=new Float32Array(MAX);
+const term=new Float32Array(MAX), sway=new Float32Array(MAX);
+const life=new Float32Array(MAX), phase=new Float32Array(MAX), settled=new Uint8Array(MAX);
+let cursor=0;
+
+const geo=new THREE.BufferGeometry();
+geo.setAttribute("position",new THREE.BufferAttribute(pPos,3));
+geo.setAttribute("psize",new THREE.BufferAttribute(pSiz,1));
+geo.setAttribute("palpha",new THREE.BufferAttribute(pAlp,1));
+const mat=new THREE.ShaderMaterial({
+  transparent:true, depthWrite:false, depthTest:false, blending:THREE.NormalBlending,
+  uniforms:{ uSize:{value:2} },
+  vertexShader:`
+    uniform float uSize;
+    attribute float psize; attribute float palpha; varying float vA;
+    void main(){ vA=palpha;
+      gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);
+      gl_PointSize=psize*uSize; }`,
+  fragmentShader:`
+    varying float vA;
+    void main(){
+      float d=length(gl_PointCoord-0.5);
+      if(d>0.5) discard;
+      float a=smoothstep(0.5,0.12,d);            // 软边，大颗粒才不像塑料球
+      gl_FragColor=vec4(1.0,1.0,1.0,a*vA); }`
+});
+const points=new THREE.Points(geo,mat); points.frustumCulled=false;
+points.renderOrder=2; scene.add(points);
+
+function spawn(){
+  const i=cursor; cursor=(cursor+1)%MAX;
+  const tri=Math.random()+Math.random()-1;          // 三角分布，中间密两边疏，没有硬边界
+  pPos[i*3]=emitX+tri*emitW*0.5;
+  pPos[i*3+1]=H/2+8+Math.random()*40;               // 从顶边外面进来，不凭空冒出
+  pPos[i*3+2]=0;
+  vx[i]=(Math.random()-0.5)*24;
+  vy[i]=-(15+Math.random()*35);
+  pSiz[i]=2.4+Math.random()*3.4;
+  term[i]=95+Math.random()*115;                     // 终速，雪不会一路加速成雨
+  sway[i]=28+Math.random()*62;
+  phase[i]=Math.random()*Math.PI*2;
+  life[i]=14; settled[i]=0; pAlp[i]=1;
+}
+
+const GRAV=-430, E=10;
+function step(dt,t,windV,stickF,depGain){
+  for(let i=0;i<MAX;i++){
+    if(life[i]<=0){ pAlp[i]=0; continue; }
+    life[i]-=dt;
+    if(life[i]<=0){ pAlp[i]=0; continue; }
+
+    vy[i]+=GRAV*dt;
+    if(!settled[i] && vy[i]<-term[i]) vy[i]=-term[i];
+    vx[i]+=(windV-vx[i])*0.6*dt;
+    if(!settled[i]) vx[i]+=Math.sin(t*1.3+phase[i])*sway[i]*dt;
+
+    let px=pPos[i*3]+vx[i]*dt, py=pPos[i*3+1]+vy[i]*dt;
+
+    if(maskSeen && occAt(px,py)>0.5){
+      // 表面法线 = 占据度的负梯度，直接在世界坐标里差分，不用换算
+      let nx=occAt(px-E,py)-occAt(px+E,py);
+      let ny=occAt(px,py-E)-occAt(px,py+E);
+      const L=Math.hypot(nx,ny);
+      if(L<1e-4){ nx=0; ny=1; } else { nx/=L; ny/=L; }
+
+      px+=nx*7; py+=ny*7;                      // 推出体外
+      const vn=vx[i]*nx+vy[i]*ny;
+      vx[i]-=vn*nx; vy[i]-=vn*ny;              // 只留切向 → 顺着肩膀往下溜
+      vx[i]*=stickF; vy[i]*=stickF;            // 摩擦，决定是堆住还是滑走
+
+      if(!settled[i]){
+        settled[i]=1;
+        life[i]=Math.min(life[i],0.5+Math.random()*0.7);
+        // 只有朝上的面吃得住雪：ny 越接近 1 越是头顶那种水平面
+        const up=Math.max(0,ny);
+        if(depGain>0) depositAt(px,py,0.055*up*up*depGain);
+      }
+    }
+
+    pPos[i*3]=px; pPos[i*3+1]=py;
+    if(py<-H/2-20){ life[i]=0; pAlp[i]=0; continue; }
+
+    const fade=Math.min(1,life[i]/(settled[i]?0.5:1.0));
+    pAlp[i]=fade*(0.78+0.22*Math.sin(t*2.4+phase[i]));
+  }
+  geo.attributes.position.needsUpdate=true;
+  geo.attributes.psize.needsUpdate=true;
+  geo.attributes.palpha.needsUpdate=true;
+}
+
+/* ---------------- 模型 ---------------- */
+let segmenter=null;
+async function initModel(){
+  const fileset=await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  segmenter=await ImageSegmenter.createFromOptions(fileset,{
+    baseOptions:{
+      modelAssetPath:"https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite",
+      delegate:"GPU"
+    },
+    runningMode:"VIDEO",
+    outputCategoryMask:true,
+    outputConfidenceMasks:false
+  });
+  startB.disabled=false; startB.textContent="开启摄像头";
+}
+
+function runSeg(ts){
+  let got=false;
+  const cb=r=>{ got=true; ingest(r); };
+  let ret;
+  try{ ret=segmenter.segmentForVideo(video,ts,cb); }
+  catch(e){ ret=segmenter.segmentForVideo(video,ts); }
+  if(!got&&ret) ingest(ret);
+}
+
+async function start(){
+  startB.disabled=true; startB.textContent="连接中…";
+  try{
+    video.srcObject=await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:1280},height:{ideal:720},facingMode:"user"},audio:false});
+    await video.play();
+    stage.style.aspectRatio=`${video.videoWidth} / ${video.videoHeight}`;
+    boot.style.display="none"; resize();
+    requestAnimationFrame(loop);
+  }catch(e){
+    startB.disabled=false; startB.textContent="重试";
+    statEl.textContent="摄像头打不开："+e.name;
+  }
+}
+startB.addEventListener("click",start);
+
+/* ---------------- 循环 ---------------- */
+const rateEl=document.getElementById("rate"), windEl=document.getElementById("wind"),
+      stickEl=document.getElementById("stick"), sizeEl=document.getElementById("size"),
+      thickEl=document.getElementById("thick"), zoneEl=document.getElementById("zone"),
+      showMask=document.getElementById("showMask");
+[["rate","rateV"],["size","sizeV"],["thick","thickV"],
+ ["stick","stickV"],["wind","windV"],["zone","zoneV"]].forEach(([a,b])=>{
+  const el=document.getElementById(a), out=document.getElementById(b);
+  out.textContent=el.value;
+  el.addEventListener("input",()=>out.textContent=el.value);
+});
+showMask.addEventListener("change",()=>maskCv.style.display=showMask.checked?"block":"none");
+
+let lastT=0,lastVT=-1,acc=0,fpsA=0,fpsN=0,fps=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  const t=now/1000, dt=Math.min(lastT?t-lastT:0.016,0.05); lastT=t;
+  if(dt<=0) return;
+
+  if(segmenter && video.currentTime!==lastVT){ lastVT=video.currentTime; runSeg(now); }
+
+  placeEmitter(t);
+
+  const thick=Number(thickEl.value)/100;
+  updateSnow(dt, 0.15+thick*1.5);          // 滑块同时决定封顶厚度和沉积速率
+  uploadSnowTex();
+
+  acc+=Number(rateEl.value)*dt;
+  const n=Math.min(acc|0,400); acc-=n;
+  for(let i=0;i<n;i++) spawn();
+
+  mat.uniforms.uSize.value=Number(sizeEl.value)/100*renderer.getPixelRatio();
+  const stickF=1-Number(stickEl.value)/100*0.55;   // 滑块越大摩擦越大
+  step(dt,t,Number(windEl.value),stickF,thick*2);
+  renderer.render(scene,camera);
+  if(showMask.checked) drawMask();
+
+  fpsA+=1/dt; fpsN++;
+  if(fpsN>=20){ fps=Math.round(fpsA/fpsN); fpsA=0; fpsN=0; }
+  statEl.textContent=`${maskSeen?"已锁定人像":"等待分割"} · ${fps} fps`;
+}
+
+/* ---------------- 录制 ---------------- */
+const recBtn=document.getElementById("rec");
+let recorder=null,chunks=[];
+recBtn.addEventListener("click",()=>{
+  if(recorder){ recorder.stop(); return; }
+  const type=MediaRecorder.isTypeSupported("video/webm;codecs=vp9")?"video/webm;codecs=vp9":"video/webm";
+  recorder=new MediaRecorder(canvas.captureStream(30),{mimeType:type,videoBitsPerSecond:8e6});
+  chunks=[];
+  recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  recorder.onstop=()=>{
+    const url=URL.createObjectURL(new Blob(chunks,{type:"video/webm"}));
+    const a=document.createElement("a"); a.href=url; a.download=`snow-${Date.now()}.webm`; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    recorder=null; recBtn.dataset.on="0"; recBtn.lastChild.textContent="录制";
+  };
+  recorder.start(); recBtn.dataset.on="1"; recBtn.lastChild.textContent="停止并下载";
+});
+
+resize();
+initModel().catch(e=>{ startB.textContent="模型加载失败"; statEl.textContent=String(e.message||e); });
+</script>
+</body>
+</html>

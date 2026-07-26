@@ -1,0 +1,88 @@
+{
+  "slug": "shower",
+  "name": {
+    "zh": "花洒",
+    "en": "Shower"
+  },
+  "category": "liquid",
+  "sort_order": 20,
+  "price_cents": 99,
+  "preview": {
+    "shape": "shower"
+  },
+  "perception": [
+    "segmentation"
+  ],
+  "emitter": {
+    "shape": "shower",
+    "aspect": 0.6,
+    "port": {
+      "x": 0.11,
+      "y": 0.21
+    },
+    "band": 0.55,
+    "tilt": 0,
+    "draggable": true,
+    "default": {
+      "x": 0,
+      "y": 0.36
+    }
+  },
+  "substance": {
+    "gravity": -1750,
+    "friction": 0.05,
+    "streak": 0.04,
+    "color": [
+      0.6,
+      0.84,
+      1
+    ],
+    "size": [
+      1.4,
+      3
+    ],
+    "speed": [
+      420,
+      620
+    ],
+    "spread": 0.2,
+    "splash": 3,
+    "settle": false,
+    "twinkle": false
+  },
+  "controls": [
+    {
+      "key": "rate",
+      "label": {
+        "zh": "水量",
+        "en": "Flow"
+      },
+      "min": 200,
+      "max": 2200,
+      "default": 1100,
+      "step": 50
+    },
+    {
+      "key": "wind",
+      "label": {
+        "zh": "风",
+        "en": "Wind"
+      },
+      "min": -300,
+      "max": 300,
+      "default": 0,
+      "step": 10
+    },
+    {
+      "key": "stick",
+      "label": {
+        "zh": "黏附",
+        "en": "Stickiness"
+      },
+      "min": 0,
+      "max": 100,
+      "default": 30,
+      "step": 5
+    }
+  ]
+}

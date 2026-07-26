@@ -1,0 +1,7 @@
+# CLI 直接部署本地目录时，别把这些几百兆的东西传上去
+node_modules
+.next
+.next-build
+tsconfig.tsbuildinfo
+docs/prototypes
+public/vendor

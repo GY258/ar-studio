@@ -1,0 +1,60 @@
+{
+  "slug": "golddust",
+  "name": { "zh": "金粉", "en": "Gold Dust" },
+  "category": "snow",
+  "sort_order": 15,
+  "price_cents": 99,
+  "preview": { "shape": "cloud" },
+  "perception": ["segmentation"],
+  "emitter": {
+    "shape": "cloud",
+    "aspect": 0.42,
+    "port": { "x": 0, "y": 0.3 },
+    "band": 0.5,
+    "tilt": 0,
+    "draggable": true,
+    "default": { "x": 0, "y": 0.34 }
+  },
+  "substance": {
+    "gravity": -300,
+    "friction": 0.6,
+    "streak": 0,
+    "color": [1, 0.82, 0.42],
+    "size": [1.6, 4.5],
+    "speed": [50, 150],
+    "spread": 1.1,
+    "splash": 0,
+    "settle": true,
+    "twinkle": true
+  },
+  "controls": [
+    {
+      "key": "rate",
+      "label": { "zh": "粉量", "en": "Amount" },
+      "min": 200,
+      "max": 2200,
+      "default": 1200,
+      "step": 50
+    },
+    {
+      "key": "grain",
+      "label": { "zh": "颗粒", "en": "Grain size" },
+      "min": 40,
+      "max": 220,
+      "default": 100,
+      "step": 10,
+      "target": "substance.size",
+      "mode": "scale"
+    },
+    {
+      "key": "drift",
+      "label": { "zh": "飘散", "en": "Drift" },
+      "min": 20,
+      "max": 200,
+      "default": 100,
+      "step": 10,
+      "target": "substance.spread",
+      "mode": "scale"
+    }
+  ]
+}

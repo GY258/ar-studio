@@ -1,0 +1,88 @@
+{
+  "slug": "cloud",
+  "name": {
+    "zh": "云朵落雪",
+    "en": "Snow Cloud"
+  },
+  "category": "snow",
+  "sort_order": 10,
+  "price_cents": 0,
+  "preview": {
+    "shape": "cloud"
+  },
+  "perception": [
+    "segmentation"
+  ],
+  "emitter": {
+    "shape": "cloud",
+    "aspect": 0.42,
+    "port": {
+      "x": 0,
+      "y": 0.3
+    },
+    "band": 0.42,
+    "tilt": 0,
+    "draggable": true,
+    "default": {
+      "x": 0,
+      "y": 0.34
+    }
+  },
+  "substance": {
+    "gravity": -560,
+    "friction": 0.45,
+    "streak": 0,
+    "color": [
+      1,
+      1,
+      1
+    ],
+    "size": [
+      3,
+      8
+    ],
+    "speed": [
+      90,
+      220
+    ],
+    "spread": 0.9,
+    "splash": 0,
+    "settle": true,
+    "twinkle": true
+  },
+  "controls": [
+    {
+      "key": "rate",
+      "label": {
+        "zh": "雪量",
+        "en": "Snowfall"
+      },
+      "min": 100,
+      "max": 2200,
+      "default": 700,
+      "step": 50
+    },
+    {
+      "key": "wind",
+      "label": {
+        "zh": "风",
+        "en": "Wind"
+      },
+      "min": -300,
+      "max": 300,
+      "default": 0,
+      "step": 10
+    },
+    {
+      "key": "stick",
+      "label": {
+        "zh": "黏附",
+        "en": "Stickiness"
+      },
+      "min": 0,
+      "max": 100,
+      "default": 60,
+      "step": 5
+    }
+  ]
+}

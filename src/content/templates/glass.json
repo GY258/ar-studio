@@ -1,0 +1,88 @@
+{
+  "slug": "glass",
+  "name": {
+    "zh": "水杯",
+    "en": "Glass"
+  },
+  "category": "liquid",
+  "sort_order": 30,
+  "price_cents": 99,
+  "preview": {
+    "shape": "glass"
+  },
+  "perception": [
+    "segmentation"
+  ],
+  "emitter": {
+    "shape": "glass",
+    "aspect": 0.85,
+    "port": {
+      "x": 0.079,
+      "y": 0.259
+    },
+    "band": 0.05,
+    "tilt": 0.42,
+    "draggable": true,
+    "default": {
+      "x": -0.18,
+      "y": 0.34
+    }
+  },
+  "substance": {
+    "gravity": -1750,
+    "friction": 0.05,
+    "streak": 0.04,
+    "color": [
+      0.6,
+      0.84,
+      1
+    ],
+    "size": [
+      1.6,
+      3.2
+    ],
+    "speed": [
+      260,
+      380
+    ],
+    "spread": 0.12,
+    "splash": 3,
+    "settle": false,
+    "twinkle": false
+  },
+  "controls": [
+    {
+      "key": "rate",
+      "label": {
+        "zh": "水量",
+        "en": "Flow"
+      },
+      "min": 200,
+      "max": 2200,
+      "default": 900,
+      "step": 50
+    },
+    {
+      "key": "wind",
+      "label": {
+        "zh": "风",
+        "en": "Wind"
+      },
+      "min": -300,
+      "max": 300,
+      "default": 0,
+      "step": 10
+    },
+    {
+      "key": "stick",
+      "label": {
+        "zh": "黏附",
+        "en": "Stickiness"
+      },
+      "min": 0,
+      "max": 100,
+      "default": 30,
+      "step": 5
+    }
+  ]
+}
