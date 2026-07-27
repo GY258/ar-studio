@@ -235,7 +235,7 @@ export class FaceRenderer {
         continue;
       }
 
-      // --- tear-pool: 动态往下流 ---
+      // --- tear-pool: T 型固定在眼下不动 ---
       if (elem.type === "tear-pool" && elem.landmark !== undefined) {
         const anchor = lm[elem.landmark];
         const wx = (0.5 - anchor.x) * this.W;
@@ -248,23 +248,6 @@ export class FaceRenderer {
         mesh.scale.set(sw, h, 1);
         mesh.position.set(wx, wy - h * 0.5, 3);
         mesh.rotation.z = -roll;
-
-        // 用 UV offset 模拟从上往下流：循环滚动纹理
-        const tex = (mesh.material as THREE.MeshBasicMaterial).map;
-        if (tex) {
-          // 2.5 秒一轮，泪痕从上往下展开
-          const period = 2.5;
-          const progress = (t % period) / period;
-          // 淡入淡出
-          const mat = mesh.material as THREE.MeshBasicMaterial;
-          if (progress < 0.1) mat.opacity = progress / 0.1;
-          else if (progress > 0.85) mat.opacity = (1 - progress) / 0.15;
-          else mat.opacity = 0.92;
-          // 用 scale.y 控制展开程度（从短到长再消失）
-          const reveal = Math.min(1, progress * 1.5);
-          mesh.scale.set(sw, h * reveal, 1);
-          mesh.position.set(wx, wy - h * reveal * 0.5, 3);
-        }
         continue;
       }
 
