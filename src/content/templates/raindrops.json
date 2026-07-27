@@ -23,11 +23,6 @@
     { "id": "d14", "type": "svg", "svgAsset": "crayon-drop",       "nx": 0.09, "ny": 0.78, "sizeW": 0.051, "aspect": 2.37 },
     { "id": "d15", "type": "svg", "svgAsset": "crayon-drop",       "nx": 0.52, "ny": 0.85, "sizeW": 0.042, "aspect": 2.32 },
     { "id": "d16", "type": "svg", "svgAsset": "crayon-drop-solid", "nx": 0.93, "ny": 0.91, "sizeW": 0.041, "aspect": 2.21 },
-    { "id": "d17", "type": "svg", "svgAsset": "crayon-drop",       "nx": 0.22, "ny": 0.93, "sizeW": 0.044, "aspect": 2.08 },
-
-    { "id": "tx1", "type": "text", "text": "summer season", "nx": 0.47, "ny": 0.57, "sizeW": 0.14, "fontSizeW": 0.039, "fontWeight": 800, "color": "#F2E126", "rotation": 55, "shadow": "0 0 2 rgba(90,110,0,.35)" },
-    { "id": "tx2", "type": "text", "text": "Fragments",     "nx": 0.56, "ny": 0.63, "sizeW": 0.10, "fontSizeW": 0.034, "fontWeight": 800, "color": "#F2E126", "rotation": 90, "shadow": "0 0 2 rgba(90,110,0,.35)" },
-    { "id": "tx3", "type": "text", "text": "Comfortable",   "nx": 0.37, "ny": 0.64, "sizeW": 0.12, "fontSizeW": 0.029, "fontWeight": 800, "color": "#F2E126", "rotation": 90, "shadow": "0 0 2 rgba(90,110,0,.35)" },
-    { "id": "tx4", "type": "text", "text": "Chill My Day",  "nx": 0.46, "ny": 0.61, "sizeW": 0.12, "fontSizeW": 0.031, "fontWeight": 800, "color": "#F2E126", "rotation": 0,  "shadow": "0 0 2 rgba(90,110,0,.35)" }
+    { "id": "d17", "type": "svg", "svgAsset": "crayon-drop",       "nx": 0.22, "ny": 0.93, "sizeW": 0.044, "aspect": 2.08 }
   ]
 }

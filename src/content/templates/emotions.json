@@ -7,28 +7,26 @@
   "template_type": "facetrack",
   "preview": {},
   "face_track_elements": [
-    { "id": "f-l1", "type": "sticker", "svgAsset": "folder", "landmark": 145, "offsetX": -0.15, "offsetY": 0.25, "iodScale": 0.22, "aspect": 0.889, "float": { "amplitude": 0.015, "period": 3.2 } },
-    { "id": "f-l2", "type": "sticker", "svgAsset": "folder", "landmark": 145, "offsetX": 0.10,  "offsetY": 0.25, "iodScale": 0.22, "aspect": 0.889, "float": { "amplitude": 0.015, "period": 3.5 } },
-    { "id": "f-l3", "type": "sticker", "svgAsset": "folder", "landmark": 145, "offsetX": -0.25, "offsetY": 0.55, "iodScale": 0.22, "aspect": 0.889, "float": { "amplitude": 0.015, "period": 3.8 } },
-    { "id": "f-l4", "type": "sticker", "svgAsset": "folder", "landmark": 145, "offsetX": 0.0,   "offsetY": 0.55, "iodScale": 0.22, "aspect": 0.889, "float": { "amplitude": 0.015, "period": 3.1 } },
-    { "id": "f-l5", "type": "sticker", "svgAsset": "folder", "landmark": 145, "offsetX": -0.12, "offsetY": 0.85, "iodScale": 0.22, "aspect": 0.889, "float": { "amplitude": 0.015, "period": 3.6 } },
+    { "id": "f-l1", "type": "sticker", "svgAsset": "folder", "landmark": 168, "offsetX": -0.35, "offsetY": 0.30, "iodScale": 0.25, "aspect": 0.889, "float": { "amplitude": 0.012, "period": 3.2 } },
+    { "id": "f-r1", "type": "sticker", "svgAsset": "folder", "landmark": 168, "offsetX": 0.35,  "offsetY": 0.30, "iodScale": 0.25, "aspect": 0.889, "float": { "amplitude": 0.012, "period": 3.5 } },
+    { "id": "f-l2", "type": "sticker", "svgAsset": "folder", "landmark": 168, "offsetX": -0.45, "offsetY": 0.80, "iodScale": 0.25, "aspect": 0.889, "float": { "amplitude": 0.012, "period": 3.8 } },
+    { "id": "f-r2", "type": "sticker", "svgAsset": "folder", "landmark": 168, "offsetX": 0.45,  "offsetY": 0.80, "iodScale": 0.25, "aspect": 0.889, "float": { "amplitude": 0.012, "period": 3.1 } },
+    { "id": "f-l3", "type": "sticker", "svgAsset": "folder", "landmark": 168, "offsetX": -0.55, "offsetY": 1.30, "iodScale": 0.25, "aspect": 0.889, "float": { "amplitude": 0.012, "period": 3.6 } },
+    { "id": "f-r3", "type": "sticker", "svgAsset": "folder", "landmark": 168, "offsetX": 0.55,  "offsetY": 1.30, "iodScale": 0.25, "aspect": 0.889, "float": { "amplitude": 0.012, "period": 3.3 } },
+    { "id": "f-l4", "type": "sticker", "svgAsset": "folder", "landmark": 168, "offsetX": -0.65, "offsetY": 1.80, "iodScale": 0.25, "aspect": 0.889, "float": { "amplitude": 0.012, "period": 3.9 } },
+    { "id": "f-r4", "type": "sticker", "svgAsset": "folder", "landmark": 168, "offsetX": 0.65,  "offsetY": 1.80, "iodScale": 0.25, "aspect": 0.889, "float": { "amplitude": 0.012, "period": 3.4 } },
+    { "id": "f-l5", "type": "sticker", "svgAsset": "folder", "landmark": 168, "offsetX": -0.75, "offsetY": 2.30, "iodScale": 0.25, "aspect": 0.889, "float": { "amplitude": 0.012, "period": 3.7 } },
+    { "id": "f-r5", "type": "sticker", "svgAsset": "folder", "landmark": 168, "offsetX": 0.75,  "offsetY": 2.30, "iodScale": 0.25, "aspect": 0.889, "float": { "amplitude": 0.012, "period": 3.0 } },
 
-    { "id": "f-r1", "type": "sticker", "svgAsset": "folder", "landmark": 374, "offsetX": -0.10, "offsetY": 0.25, "iodScale": 0.22, "aspect": 0.889, "float": { "amplitude": 0.015, "period": 3.4 } },
-    { "id": "f-r2", "type": "sticker", "svgAsset": "folder", "landmark": 374, "offsetX": 0.15,  "offsetY": 0.25, "iodScale": 0.22, "aspect": 0.889, "float": { "amplitude": 0.015, "period": 3.7 } },
-    { "id": "f-r3", "type": "sticker", "svgAsset": "folder", "landmark": 374, "offsetX": 0.0,   "offsetY": 0.55, "iodScale": 0.22, "aspect": 0.889, "float": { "amplitude": 0.015, "period": 3.0 } },
-    { "id": "f-r4", "type": "sticker", "svgAsset": "folder", "landmark": 374, "offsetX": 0.25,  "offsetY": 0.55, "iodScale": 0.22, "aspect": 0.889, "float": { "amplitude": 0.015, "period": 3.3 } },
-    { "id": "f-r5", "type": "sticker", "svgAsset": "folder", "landmark": 374, "offsetX": 0.12,  "offsetY": 0.85, "iodScale": 0.22, "aspect": 0.889, "float": { "amplitude": 0.015, "period": 3.9 } },
-
-    { "id": "t-l1", "type": "sticker", "text": "Fear",      "landmark": 145, "offsetX": -0.15, "offsetY": 0.45, "iodScale": 0.15, "fontSizeW": 0.02, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
-    { "id": "t-l2", "type": "sticker", "text": "Delighted", "landmark": 145, "offsetX": 0.10,  "offsetY": 0.45, "iodScale": 0.15, "fontSizeW": 0.02, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
-    { "id": "t-l3", "type": "sticker", "text": "Painful",   "landmark": 145, "offsetX": -0.25, "offsetY": 0.75, "iodScale": 0.15, "fontSizeW": 0.02, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
-    { "id": "t-l4", "type": "sticker", "text": "Weary",     "landmark": 145, "offsetX": 0.0,   "offsetY": 0.75, "iodScale": 0.15, "fontSizeW": 0.02, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
-    { "id": "t-l5", "type": "sticker", "text": "Worried",   "landmark": 145, "offsetX": -0.12, "offsetY": 1.05, "iodScale": 0.15, "fontSizeW": 0.02, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
-
-    { "id": "t-r1", "type": "sticker", "text": "Happy",     "landmark": 374, "offsetX": -0.10, "offsetY": 0.45, "iodScale": 0.15, "fontSizeW": 0.02, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
-    { "id": "t-r2", "type": "sticker", "text": "Sad",       "landmark": 374, "offsetX": 0.15,  "offsetY": 0.45, "iodScale": 0.15, "fontSizeW": 0.02, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
-    { "id": "t-r3", "type": "sticker", "text": "Get angry", "landmark": 374, "offsetX": 0.0,   "offsetY": 0.75, "iodScale": 0.15, "fontSizeW": 0.02, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
-    { "id": "t-r4", "type": "sticker", "text": "Laugh",     "landmark": 374, "offsetX": 0.25,  "offsetY": 0.75, "iodScale": 0.15, "fontSizeW": 0.02, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
-    { "id": "t-r5", "type": "sticker", "text": "Enjoy",     "landmark": 374, "offsetX": 0.12,  "offsetY": 1.05, "iodScale": 0.15, "fontSizeW": 0.02, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" }
+    { "id": "t-l1", "type": "sticker", "text": "Fear",      "landmark": 168, "offsetX": -0.35, "offsetY": 0.52, "iodScale": 0.15, "fontSizeW": 0.022, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
+    { "id": "t-r1", "type": "sticker", "text": "Happy",     "landmark": 168, "offsetX": 0.35,  "offsetY": 0.52, "iodScale": 0.15, "fontSizeW": 0.022, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
+    { "id": "t-l2", "type": "sticker", "text": "Delighted", "landmark": 168, "offsetX": -0.45, "offsetY": 1.02, "iodScale": 0.15, "fontSizeW": 0.022, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
+    { "id": "t-r2", "type": "sticker", "text": "Sad",       "landmark": 168, "offsetX": 0.45,  "offsetY": 1.02, "iodScale": 0.15, "fontSizeW": 0.022, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
+    { "id": "t-l3", "type": "sticker", "text": "Painful",   "landmark": 168, "offsetX": -0.55, "offsetY": 1.52, "iodScale": 0.15, "fontSizeW": 0.022, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
+    { "id": "t-r3", "type": "sticker", "text": "Get angry", "landmark": 168, "offsetX": 0.55,  "offsetY": 1.52, "iodScale": 0.15, "fontSizeW": 0.022, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
+    { "id": "t-l4", "type": "sticker", "text": "Weary",     "landmark": 168, "offsetX": -0.65, "offsetY": 2.02, "iodScale": 0.15, "fontSizeW": 0.022, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
+    { "id": "t-r4", "type": "sticker", "text": "Laugh",     "landmark": 168, "offsetX": 0.65,  "offsetY": 2.02, "iodScale": 0.15, "fontSizeW": 0.022, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
+    { "id": "t-l5", "type": "sticker", "text": "Worried",   "landmark": 168, "offsetX": -0.75, "offsetY": 2.52, "iodScale": 0.15, "fontSizeW": 0.022, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" },
+    { "id": "t-r5", "type": "sticker", "text": "Enjoy",     "landmark": 168, "offsetX": 0.75,  "offsetY": 2.52, "iodScale": 0.15, "fontSizeW": 0.022, "fontWeight": 600, "color": "#FFFFFF", "shadow": "0 1 3 rgba(0,0,0,.45)" }
   ]
 }
