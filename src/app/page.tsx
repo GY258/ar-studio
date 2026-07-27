@@ -18,12 +18,17 @@ export default function HomePage() {
       <header className="sticky top-0 z-20 border-b border-line/60 bg-bg/80 backdrop-blur">
         <nav className="mx-auto flex h-16 max-w-content items-center justify-between px-6">
           <span className="font-mono text-note tracking-[0.18em] text-fg">{COPY.brand}</span>
-          <Link
-            href="/studio"
-            className="rounded-full bg-accent px-5 py-2 text-[14px] font-medium text-[#1A0F2E] ease-brand transition hover:-translate-y-px"
-          >
-            {COPY.nav.cta}
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href="/feedback" className="text-[14px] text-muted hover:text-fg transition">
+              Feedback
+            </Link>
+            <Link
+              href="/studio"
+              className="rounded-full bg-accent px-5 py-2 text-[14px] font-medium text-[#1A0F2E] ease-brand transition hover:-translate-y-px"
+            >
+              {COPY.nav.cta}
+            </Link>
+          </div>
         </nav>
       </header>
 
