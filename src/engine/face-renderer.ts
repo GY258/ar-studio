@@ -268,24 +268,50 @@ export class FaceRenderer {
         continue;
       }
 
-      // --- trailing-tear: 静态圆滴沿脸颊排列 ---
+      // --- trailing-tear: 水滴从眼下冒出然后往下掉 ---
       if (elem.type === "trailing-tear" && elem.landmark !== undefined) {
         const anchor = lm[elem.landmark];
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
         const idx = parseInt(elem.id.slice(-1)) || 0;
-        const shrink = 1 - idx * 0.12;
-        const baseScale = iod * (elem.iodScale ?? 0.07) * shrink;
+        const baseScale = iod * (elem.iodScale ?? 0.09);
 
-        mesh.scale.set(baseScale, baseScale * 1.3, 1);
-        // 沿脸颊往下排，每滴间距 0.22 IOD，略向外偏
-        const outward = (elem.mirror ? -1 : 1) * iod * 0.04 * (idx + 1);
-        mesh.position.set(
-          wx + outward,
-          wy - iod * (0.45 + idx * 0.22),
-          3,
-        );
-        (mesh.material as THREE.MeshBasicMaterial).opacity = 0.9;
+        if (this.animation?.tears && this.animation.tears.period > 0) {
+          const a = this.animation.tears;
+          // 每滴错开 phaseShift 秒
+          const phase = ((t + idx * a.phaseShift) % a.period) / a.period;
+
+          // 0~0.15: 在眼下冒出（从小变大）
+          // 0.15~0.85: 往下掉
+          // 0.85~1: 淡出消失
+          let scale: number, dropY: number, opacity: number;
+
+          if (phase < 0.15) {
+            // 冒出阶段
+            const p = phase / 0.15;
+            scale = baseScale * p;
+            dropY = 0;
+            opacity = p;
+          } else if (phase < 0.85) {
+            // 下落阶段
+            const p = (phase - 0.15) / 0.70;
+            scale = baseScale * (1 - p * 0.3); // 下落时略微缩小
+            dropY = p * iod * a.distance;
+            opacity = 0.9;
+          } else {
+            // 淡出阶段
+            const p = (phase - 0.85) / 0.15;
+            scale = baseScale * 0.7;
+            dropY = iod * a.distance;
+            opacity = 1 - p;
+          }
+
+          mesh.scale.set(scale, scale * 1.4, 1); // 水滴比圆稍长
+          // 沿脸颊往下，略向外偏移
+          const outward = (elem.mirror ? -1 : 1) * dropY * 0.08;
+          mesh.position.set(wx + outward, wy - dropY - iod * 0.1, 3);
+          (mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
+        }
         mesh.rotation.z = -roll;
         continue;
       }
