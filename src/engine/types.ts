@@ -104,7 +104,7 @@ export interface OverlayElement {
 /** 人脸追踪配置 */
 export interface FaceTrackElement {
   id: string;
-  type: "tear-pool" | "trailing-tear" | "blush" | "text";
+  type: "tear-pool" | "trailing-tear" | "blush" | "text" | "sticker";
   /** 锚定的 landmark 索引 */
   landmark?: number;
   /** SVG asset key */
@@ -118,10 +118,20 @@ export interface FaceTrackElement {
   /** 固定屏幕位置（不跟踪人脸时） */
   nx?: number;
   ny?: number;
+  /** sticker 相对锚点的偏移，单位 IOD */
+  offsetX?: number;
+  offsetY?: number;
+  /** SVG 高宽比 */
+  aspect?: number;
+  /** 旋转角度 */
+  rotation?: number;
   /** 文字字号 %W */
   fontSizeW?: number;
+  fontWeight?: number;
   color?: string;
   shadow?: string;
+  /** 浮动动画 */
+  float?: { amplitude: number; period: number };
 }
 
 export interface FaceTrackAnimation {
