@@ -16,9 +16,9 @@ export const COPY = {
   },
 
   home: {
-    heroLines: ["No install.", "No screen recording.", "Just open and shoot."],
+    heroLines: ["Real snow.", "On your shoulders.", "In your browser."],
     heroBody:
-      "AR camera filters in your browser. Pick a template, shoot into your camera, download the clip. The snow actually lands on you — it knows where you are.",
+      "AR effects that land on you — not a flat filter stuck to the screen. Pick a template, hit record, and download a clip ready to post. No app, no upload, everything runs on your device.",
     ctaPrimary: "Start free",
     ctaSecondary: "Browse templates",
 
