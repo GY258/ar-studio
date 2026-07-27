@@ -79,6 +79,14 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
   }, []);
 
   useEffect(() => {
+    void fetch("/api/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ events: [{ event: "view", slug: initialSlug }] }),
+    });
+  }, [initialSlug]);
+
+  useEffect(() => {
     let alive = true;
     (async () => {
       const res = await fetch("/api/templates");
