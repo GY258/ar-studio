@@ -9,4 +9,5 @@ public/vendor
 .DS_Store
 .next-build
 .vercel
+.wrangler
 .env*
