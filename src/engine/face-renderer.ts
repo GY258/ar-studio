@@ -4,11 +4,6 @@ import type { FaceTrackElement, FaceTrackAnimation } from "./types";
 import { SVG_ASSETS, rasterizeSvg, rasterizeText } from "./svg-assets";
 import { WASM_BASE } from "@/lib/assets";
 
-/**
- * 人脸追踪渲染器：用 MediaPipe FaceLandmarker 检测关键点，
- * 把泪池、腮红、泪滴等元素锚定到人脸上。
- */
-
 interface FaceMesh {
   mesh: THREE.Mesh;
   elem: FaceTrackElement;
@@ -18,6 +13,7 @@ export class FaceRenderer {
   private readonly group = new THREE.Group();
   private readonly items: FaceMesh[] = [];
   private landmarker: FaceLandmarker | null = null;
+  private loading = false;
   private W = 1280;
   private H = 720;
   private animation: FaceTrackAnimation | null = null;
@@ -34,18 +30,23 @@ export class FaceRenderer {
   }
 
   async loadFaceMesh(): Promise<void> {
-    if (this.landmarker) return;
-    const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
-    this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
-      baseOptions: {
-        modelAssetPath:
-          "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.tflite",
-        delegate: "GPU",
-      },
-      runningMode: "VIDEO",
-      numFaces: 1,
-      outputFaceBlendshapes: true,
-    });
+    if (this.landmarker || this.loading) return;
+    this.loading = true;
+    try {
+      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
+      this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.tflite",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numFaces: 1,
+        outputFaceBlendshapes: false,
+      });
+    } finally {
+      this.loading = false;
+    }
   }
 
   async setElements(elements: FaceTrackElement[], anim?: FaceTrackAnimation) {
@@ -55,11 +56,23 @@ export class FaceRenderer {
     for (const elem of elements) {
       let tex: THREE.Texture;
 
-      if (elem.svgAsset) {
+      if (elem.type === "blush") {
+        // 腮红：程序化绘制粉色径向渐变椭圆
+        const c = document.createElement("canvas");
+        c.width = 128; c.height = 64;
+        const ctx = c.getContext("2d")!;
+        const grd = ctx.createRadialGradient(64, 32, 0, 64, 32, 60);
+        grd.addColorStop(0, "rgba(242,147,126,0.5)");
+        grd.addColorStop(1, "rgba(242,147,126,0)");
+        ctx.fillStyle = grd;
+        ctx.fillRect(0, 0, 128, 64);
+        tex = new THREE.CanvasTexture(c);
+      } else if (elem.svgAsset) {
         const svgStr = SVG_ASSETS[elem.svgAsset];
         if (!svgStr) continue;
         const pw = 128;
-        const ph = elem.type === "blush" ? 64 : 200;
+        const aspect = elem.svgAsset === "tear-cluster" ? 200 / 130 : 1.5;
+        const ph = Math.round(pw * aspect);
         const canvas = await rasterizeSvg(svgStr, pw, ph);
         tex = new THREE.CanvasTexture(canvas);
       } else if (elem.text) {
@@ -85,17 +98,12 @@ export class FaceRenderer {
       });
 
       if (elem.type === "blush") {
-        mat.blending = THREE.AdditiveBlending;
-        mat.opacity = 0.5;
+        mat.blending = THREE.NormalBlending;
       }
 
       const geo = new THREE.PlaneGeometry(1, 1);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.renderOrder = 5;
-
-      if (elem.mirror) {
-        mesh.scale.x = -1;
-      }
 
       this.items.push({ mesh, elem });
       this.group.add(mesh);
@@ -118,48 +126,47 @@ export class FaceRenderer {
 
   update(t: number) {
     const lm = this.lastLandmarks;
-    if (!lm || lm.length < 478) {
-      // 没检测到脸，隐藏所有元素
-      for (const { mesh } of this.items) {
-        mesh.visible = false;
-      }
-      return;
+    const hasFace = lm && lm.length >= 478;
+
+    // 计算 IOD 和 roll（有脸时）
+    let iod = 0;
+    let roll = 0;
+    if (hasFace) {
+      const lIris = lm[468];
+      const rIris = lm[473];
+      iod = Math.hypot((rIris.x - lIris.x) * this.W, (rIris.y - lIris.y) * this.H);
+      roll = Math.atan2(rIris.y - lIris.y, rIris.x - lIris.x);
     }
 
-    // IOD: 虹膜间距 (landmarks 468=左虹膜中心, 473=右虹膜中心)
-    const lIris = lm[468];
-    const rIris = lm[473];
-    const iodNorm = Math.hypot(rIris.x - lIris.x, rIris.y - lIris.y);
-    const iod = iodNorm * this.W;
-
-    // 面部角度（用于旋转）
-    const roll = Math.atan2(rIris.y - lIris.y, rIris.x - lIris.x);
-
     for (const { mesh, elem } of this.items) {
-      mesh.visible = true;
-
+      // 固定屏幕位置的文字：始终显示
       if (elem.type === "text" && elem.nx !== undefined && elem.ny !== undefined) {
-        // 固定屏幕位置的文字
+        mesh.visible = true;
         const wx = (elem.nx - 0.5) * this.W;
         const wy = (0.5 - elem.ny) * this.H;
-        const tex = (mesh.material as THREE.MeshBasicMaterial).map;
-        if (tex?.image) {
-          const img = tex.image as HTMLCanvasElement;
+        const texMap = (mesh.material as THREE.MeshBasicMaterial).map;
+        if (texMap?.image) {
+          const img = texMap.image as HTMLCanvasElement;
           mesh.scale.set(img.width, img.height, 1);
         }
         mesh.position.set(wx, wy, 3);
         continue;
       }
 
+      // 需要人脸的元素：没检测到脸就隐藏
+      if (!hasFace) {
+        mesh.visible = false;
+        continue;
+      }
+      mesh.visible = true;
+
       if (elem.type === "tear-pool" && elem.landmark !== undefined) {
         const anchor = lm[elem.landmark];
-        // 镜像：视频是镜像的，landmark x 需要翻转
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
         const scale = iod * (elem.iodScale ?? 0.24);
-        const aspect = 200 / 130; // tear-cluster SVG viewBox ratio
+        const aspect = 200 / 130;
 
-        // 呼吸动画
         let sy = 1;
         if (this.animation?.breathe) {
           const a = this.animation.breathe;
@@ -167,11 +174,8 @@ export class FaceRenderer {
           sy = a.scaleRange[0] + phase * (a.scaleRange[1] - a.scaleRange[0]);
         }
 
-        mesh.scale.set(
-          elem.mirror ? -scale : scale,
-          scale * aspect * sy,
-          1,
-        );
+        const sw = elem.mirror ? -scale : scale;
+        mesh.scale.set(sw, scale * aspect * sy, 1);
         mesh.position.set(wx, wy - scale * 0.3, 3);
         mesh.rotation.z = -roll;
         continue;
@@ -183,7 +187,6 @@ export class FaceRenderer {
         const wy = (0.5 - anchor.y) * this.H;
         const baseScale = iod * (elem.iodScale ?? 0.08);
 
-        // 泪滴下落动画
         if (this.animation?.tears) {
           const a = this.animation.tears;
           const idx = parseInt(elem.id.slice(-1)) || 0;
@@ -195,7 +198,7 @@ export class FaceRenderer {
           mesh.scale.set(baseScale * shrink, baseScale * 1.5 * shrink, 1);
           mesh.position.set(
             wx + (elem.mirror ? -1 : 1) * iod * 0.04,
-            wy - scale_tearOffset(iod, idx) - dropY,
+            wy - iod * (0.35 + idx * 0.16) - dropY,
             3,
           );
           (mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
@@ -204,16 +207,14 @@ export class FaceRenderer {
         continue;
       }
 
-      if (elem.type === "blush") {
-        if (elem.landmark !== undefined) {
-          const anchor = lm[elem.landmark];
-          const wx = (0.5 - anchor.x) * this.W;
-          const wy = (0.5 - anchor.y) * this.H;
-          const scale = iod * (elem.iodScale ?? 0.4);
-          mesh.scale.set(scale, scale * 0.5, 1);
-          mesh.position.set(wx, wy, 2.5);
-          mesh.rotation.z = -roll;
-        }
+      if (elem.type === "blush" && elem.landmark !== undefined) {
+        const anchor = lm[elem.landmark];
+        const wx = (0.5 - anchor.x) * this.W;
+        const wy = (0.5 - anchor.y) * this.H;
+        const scale = iod * (elem.iodScale ?? 0.4);
+        mesh.scale.set(scale, scale * 0.5, 1);
+        mesh.position.set(wx, wy, 2.5);
+        mesh.rotation.z = -roll;
         continue;
       }
     }
@@ -236,8 +237,4 @@ export class FaceRenderer {
     this.landmarker?.close();
     this.group.parent?.remove(this.group);
   }
-}
-
-function scale_tearOffset(iod: number, idx: number): number {
-  return iod * (0.35 + idx * 0.16);
 }

@@ -176,11 +176,10 @@ export class ArEngine {
       this.layoutProp();
     } else if (this.templateType === "overlay" && cfg.overlayElements) {
       this.overlays.setViewport(this.W, this.H);
-      this.overlays.setElements(cfg.overlayElements);
+      this.overlays.setElements(cfg.overlayElements).catch((e) => this.onError?.(e as Error));
     } else if (this.templateType === "facetrack" && cfg.faceTrackElements) {
       this.faceRenderer.setViewport(this.W, this.H);
-      this.faceRenderer.setElements(cfg.faceTrackElements, cfg.faceTrackAnimation);
-      // 按需加载 FaceMesh
+      this.faceRenderer.setElements(cfg.faceTrackElements, cfg.faceTrackAnimation).catch((e) => this.onError?.(e as Error));
       this.loadFace().catch((e) => this.onError?.(e as Error));
     }
   }
