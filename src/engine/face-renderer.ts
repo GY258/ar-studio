@@ -244,7 +244,7 @@ export class FaceRenderer {
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
         const scale = iod * (elem.iodScale ?? 0.28);
-        const aspect = 56 / 58; // tear-streak-top SVG viewBox ratio
+        const aspect = 28 / 52; // tear-bar SVG viewBox ratio
 
         const sw = elem.mirror ? -scale : scale;
         const h = scale * aspect;

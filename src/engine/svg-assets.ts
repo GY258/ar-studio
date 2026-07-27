@@ -6,22 +6,14 @@ export const SVG_ASSETS: Record<string, string> = {
 
   /* ---- Crying filter: tear streaks ---- */
 
-  "tear-streak-left": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 58 56" fill="none">
-  <g stroke="#62C3F2" stroke-linecap="round" fill="none">
-    <path d="M8 14H38" stroke-width="24"/>
-    <path d="M38 18c4 10 2 18-4 28" stroke-width="18"/>
-  </g>
+  "tear-streak-left": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 28" fill="none">
+  <path d="M8 14H44" stroke="#62C3F2" stroke-width="24" stroke-linecap="round"/>
   <ellipse cx="12" cy="10" rx="5" ry="4" fill="#fff" fill-opacity=".55"/>
 </svg>`,
 
-  "tear-streak-right": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 58 56" fill="none">
-  <g transform="translate(58 0) scale(-1 1)">
-    <g stroke="#62C3F2" stroke-linecap="round" fill="none">
-      <path d="M8 14H38" stroke-width="24"/>
-      <path d="M38 18c4 10 2 18-4 28" stroke-width="18"/>
-    </g>
-    <ellipse cx="12" cy="10" rx="5" ry="4" fill="#fff" fill-opacity=".55"/>
-  </g>
+  "tear-streak-right": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 28" fill="none">
+  <path d="M8 14H44" stroke="#62C3F2" stroke-width="24" stroke-linecap="round"/>
+  <ellipse cx="40" cy="10" rx="5" ry="4" fill="#fff" fill-opacity=".55"/>
 </svg>`,
 
   "tear-drop": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 34" fill="none">
