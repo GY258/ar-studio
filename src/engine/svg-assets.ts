@@ -6,31 +6,21 @@ export const SVG_ASSETS: Record<string, string> = {
 
   /* ---- Crying filter: tear streaks ---- */
 
-  "tear-streak-left": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 210" fill="none">
+  "tear-streak-left": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 58 56" fill="none">
   <g stroke="#62C3F2" stroke-linecap="round" fill="none">
-    <path d="M14 22H44" stroke-width="26"/>
-    <path d="M44 26c4 12 1 22-6 34" stroke-width="20"/>
-    <path d="M36 68l-2 10" stroke-width="14"/>
-    <path d="M32 96v9" stroke-width="13"/>
-    <path d="M30 122v8" stroke-width="12"/>
-    <path d="M28 148v6" stroke-width="11"/>
+    <path d="M8 14H38" stroke-width="24"/>
+    <path d="M38 18c4 10 2 18-4 28" stroke-width="18"/>
   </g>
-  <path d="M27 170c0 0 7 10.8 7 15.2a7 7 0 1 1-14 0c0-4.4 7-15.2 7-15.2Z" fill="#62C3F2"/>
-  <ellipse cx="17" cy="18" rx="6" ry="4.5" fill="#fff" fill-opacity=".55"/>
+  <ellipse cx="12" cy="10" rx="5" ry="4" fill="#fff" fill-opacity=".55"/>
 </svg>`,
 
-  "tear-streak-right": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 210" fill="none">
-  <g transform="translate(72 0) scale(-1 1)">
+  "tear-streak-right": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 58 56" fill="none">
+  <g transform="translate(58 0) scale(-1 1)">
     <g stroke="#62C3F2" stroke-linecap="round" fill="none">
-      <path d="M14 22H44" stroke-width="26"/>
-      <path d="M44 26c4 12 1 22-6 34" stroke-width="20"/>
-      <path d="M36 68l-2 10" stroke-width="14"/>
-      <path d="M32 96v9" stroke-width="13"/>
-      <path d="M30 122v8" stroke-width="12"/>
-      <path d="M28 148v6" stroke-width="11"/>
+      <path d="M8 14H38" stroke-width="24"/>
+      <path d="M38 18c4 10 2 18-4 28" stroke-width="18"/>
     </g>
-    <path d="M27 170c0 0 7 10.8 7 15.2a7 7 0 1 1-14 0c0-4.4 7-15.2 7-15.2Z" fill="#62C3F2"/>
-    <ellipse cx="17" cy="18" rx="6" ry="4.5" fill="#fff" fill-opacity=".55"/>
+    <ellipse cx="12" cy="10" rx="5" ry="4" fill="#fff" fill-opacity=".55"/>
   </g>
 </svg>`,
 
