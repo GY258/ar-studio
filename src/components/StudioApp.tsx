@@ -28,6 +28,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
   const [useMic, setUseMic] = useState(false);
   const [lockedTarget, setLockedTarget] = useState<TemplateListing | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showControls, setShowControls] = useState(false);
 
   /* ---------------- 引擎 ---------------- */
 
@@ -60,7 +61,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
 
   const loadConfig = useCallback(async (slug: string) => {
     const res = await fetch(`/api/templates/${slug}/config`);
-    if (res.status === 403) return null; // 锁着，服务端不给配置
+    if (res.status === 403) return null;
     if (!res.ok) throw new Error(`config ${res.status}`);
     const { config } = (await res.json()) as { config: TemplateConfig };
     return config;
@@ -69,7 +70,6 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
   const applyTemplate = useCallback((cfg: TemplateConfig) => {
     setConfig(cfg);
     engineRef.current?.setTemplate(cfg);
-    // 切模板不丢已调好的参数：同名 key 保留，新模板独有的用默认值
     setValues((prev) => {
       const next: ControlValues = {};
       for (const c of cfg.controls) next[c.key] = prev[c.key] ?? c.default;
@@ -129,11 +129,9 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
         return;
       }
       if (data.mode === "stripe" && data.redirectUrl) {
-        window.location.href = data.redirectUrl; // 托管收银台
+        window.location.href = data.redirectUrl;
         return;
       }
-      // 生产环境没配 Stripe 时 checkout 返回 503。不显式处理的话会掉进下面的
-      // 体验模式分支，表现是弹层静默关闭、什么也没发生，看着就是坏的。
       if (data.error) {
         setProblem(
           data.error === "payments_unavailable"
@@ -143,7 +141,6 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
         setLockedTarget(null);
         return;
       }
-      // 体验模式：权益已发，重新拉一次列表和配置
       const fresh = await fetch("/api/templates").then((r) => r.json() as Promise<{ items: TemplateListing[] }>);
       setListing(fresh.items);
       const cfg = await loadConfig(lockedTarget.slug);
@@ -252,56 +249,66 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     return `${track} · ${stats.fps} fps${stats.degraded ? ` · ${COPY.studio.degraded}` : ""}`;
   }, [phase, stats]);
 
+  /* ============================================================
+   * 单一 DOM 结构，通过 CSS 断点实现：
+   * - 手机 (<md)：全屏竖屏相机，控制件浮在画面上
+   * - 桌面 (md+)：居中 16:9 + 下方控制条
+   * ============================================================ */
+
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-5">
-      {/* 预览区：居中最大化 */}
-      <div className="relative w-full max-w-[1100px] overflow-hidden rounded-2xl border border-line bg-black aspect-video touch-none">
+    <div className="h-[100dvh] md:h-auto md:min-h-[100dvh] w-full bg-black md:bg-bg md:flex md:flex-col md:items-center md:justify-center md:gap-4 md:p-5 relative overflow-hidden">
+
+      {/* 画布容器：手机全屏 / 桌面 16:9 */}
+      <div className="absolute inset-0 md:relative md:w-full md:max-w-[1100px] md:overflow-hidden md:rounded-2xl md:border md:border-line md:aspect-video touch-none">
         <video ref={videoRef} playsInline muted autoPlay className="hidden" />
         <canvas ref={canvasRef} className="block h-full w-full" />
-
-        {phase !== "live" && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-bg px-6 text-center">
-            {phase === "loading" && <p className="text-muted text-body">{COPY.studio.loadingModel}</p>}
-            {phase === "ready" && (
-              <>
-                <button
-                  onClick={openCamera}
-                  disabled={busy}
-                  className="rounded-full bg-accent px-7 py-3 text-[15px] font-medium text-[#1A0F2E] disabled:opacity-50"
-                >
-                  {busy ? COPY.studio.connecting : COPY.studio.openCamera}
-                </button>
-                <p className="max-w-[44ch] text-note text-muted">{COPY.studio.cameraNote}</p>
-              </>
-            )}
-            {(phase === "denied" || phase === "failed") && (
-              <>
-                <p className="max-w-[42ch] text-body text-fg">{problem}</p>
-                <button onClick={openCamera} className="rounded-full border border-line px-6 py-2.5 text-body">
-                  {COPY.studio.retry}
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
-        {config?.emitter.draggable && phase === "live" && (
-          <p className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full bg-black/40 px-3 py-1.5 text-note text-white/60">
-            {COPY.studio.dragHint}
-          </p>
-        )}
-        {recording && (
-          <div className="absolute right-3 top-3 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">
-            <span className="h-2 w-2 animate-blink rounded-full bg-rec" />
-            <span className="font-mono text-note text-fg">
-              {String(Math.floor(elapsed / 1000)).padStart(2, "0")}s / 60s
-            </span>
-          </div>
-        )}
       </div>
 
-      {/* 模板选择器 */}
-      <div className="flex flex-wrap justify-center gap-2.5">
+      {/* 加载/授权覆盖层 */}
+      {phase !== "live" && (
+        <div className="absolute inset-0 md:relative md:inset-auto md:w-full md:max-w-[1100px] md:aspect-video z-10 flex flex-col items-center justify-center gap-4 bg-bg md:rounded-2xl md:border md:border-line px-6 text-center"
+             style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+          {phase === "loading" && <p className="text-muted text-body">{COPY.studio.loadingModel}</p>}
+          {phase === "ready" && (
+            <>
+              <button
+                onClick={openCamera}
+                disabled={busy}
+                className="rounded-full bg-accent px-7 py-3.5 md:py-3 text-[16px] md:text-[15px] font-medium text-[#1A0F2E] disabled:opacity-50"
+              >
+                {busy ? COPY.studio.connecting : COPY.studio.openCamera}
+              </button>
+              <p className="max-w-[44ch] text-note text-muted">{COPY.studio.cameraNote}</p>
+            </>
+          )}
+          {(phase === "denied" || phase === "failed") && (
+            <>
+              <p className="max-w-[42ch] text-body text-fg">{problem}</p>
+              <button onClick={openCamera} className="rounded-full border border-line px-6 py-2.5 text-body">
+                {COPY.studio.retry}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ---- 桌面端 overlay（录制指示器 + 拖拽提示）---- */}
+      {config?.emitter.draggable && phase === "live" && (
+        <p className="hidden md:block pointer-events-none absolute left-1/2 top-8 -translate-x-1/2 rounded-full bg-black/40 px-3 py-1.5 text-note text-white/60 z-20">
+          {COPY.studio.dragHint}
+        </p>
+      )}
+      {recording && (
+        <div className="hidden md:flex absolute right-8 top-8 items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 z-20">
+          <span className="h-2 w-2 animate-blink rounded-full bg-rec" />
+          <span className="font-mono text-note text-fg">
+            {String(Math.floor(elapsed / 1000)).padStart(2, "0")}s / 60s
+          </span>
+        </div>
+      )}
+
+      {/* ---- 桌面端控制件 ---- */}
+      <div className="hidden md:flex flex-wrap justify-center gap-2.5 relative z-10">
         {listing.map((tpl) => {
           const on = tpl.slug === config?.slug;
           return (
@@ -314,11 +321,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
               }`}
             >
               {tpl.preview.shape && (
-                <PropThumb
-                  shape={tpl.preview.shape}
-                  ratio={0.62}
-                  className={`w-full ${tpl.locked ? "opacity-[.42]" : ""}`}
-                />
+                <PropThumb shape={tpl.preview.shape} ratio={0.62} className={`w-full ${tpl.locked ? "opacity-[.42]" : ""}`} />
               )}
               <div className="mt-1 text-center text-[12px]">{t(tpl.name)}</div>
               {tpl.locked && (
@@ -331,8 +334,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
         })}
       </div>
 
-      {/* 控制条：滑块由模板配置定义，不硬编码 */}
-      <div className="flex flex-wrap items-center justify-center gap-4 rounded-2xl border border-line bg-surface px-5 py-3">
+      <div className="hidden md:flex flex-wrap items-center justify-center gap-4 rounded-2xl border border-line bg-surface px-5 py-3 relative z-10">
         {config?.controls.map((c) => (
           <label key={c.key} className="flex items-center gap-2 text-[13px] text-muted">
             {t(c.label)}
@@ -350,14 +352,11 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
             </span>
           </label>
         ))}
-
         <span className="h-6 w-px bg-line" />
-
         <label className="flex items-center gap-2 text-[13px] text-muted">
           <input type="checkbox" checked={useMic} onChange={(e) => toggleMic(e.target.checked)} />
           {COPY.studio.micLabel}
         </label>
-
         <button
           onClick={toggleRecord}
           disabled={phase !== "live"}
@@ -369,17 +368,145 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
         </button>
       </div>
 
-      <p className="font-mono text-note text-muted">{statusLine || problem}</p>
+      <p className="hidden md:block font-mono text-note text-muted relative z-10">{statusLine || problem}</p>
 
-      {/* 录完的预览与下载 */}
+      {/* ==================== 手机端浮层 ==================== */}
+
+      {/* 顶部：模板名 + 录制计时 */}
+      {phase === "live" && (
+        <div className="md:hidden absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4"
+             style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 8px)" }}>
+          <span className="rounded-full bg-black/50 px-3 py-1.5 text-[13px] text-white/80">
+            {config ? t(config.name) : ""}
+          </span>
+          {recording && (
+            <div className="flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">
+              <span className="h-2 w-2 animate-blink rounded-full bg-rec" />
+              <span className="font-mono text-[12px] text-fg">
+                {String(Math.floor(elapsed / 1000)).padStart(2, "0")}s
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 拖拽提示（手机） */}
+      {config?.emitter.draggable && phase === "live" && !recording && (
+        <p className="md:hidden pointer-events-none absolute left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/40 px-3 py-1.5 text-note text-white/60"
+           style={{ top: "calc(env(safe-area-inset-top, 0px) + 52px)" }}>
+          {COPY.studio.dragHint}
+        </p>
+      )}
+
+      {/* 底部控制区（手机） */}
+      {phase === "live" && (
+        <div className="md:hidden absolute bottom-0 left-0 right-0 z-20 flex flex-col gap-3"
+             style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}>
+
+          {/* 模板横向滚动 */}
+          <div className="no-scrollbar flex gap-2 overflow-x-auto px-4">
+            {listing.map((tpl) => {
+              const on = tpl.slug === config?.slug;
+              return (
+                <button
+                  key={tpl.slug}
+                  onClick={() => pick(tpl)}
+                  className={`relative flex-shrink-0 w-[64px] rounded-lg border bg-black/50 backdrop-blur px-1 pb-1.5 pt-1.5 ${
+                    on ? "border-accent" : "border-white/20"
+                  }`}
+                >
+                  {tpl.preview.shape && (
+                    <PropThumb shape={tpl.preview.shape} ratio={0.6} className={`w-full ${tpl.locked ? "opacity-40" : ""}`} />
+                  )}
+                  <div className={`mt-0.5 text-center text-[10px] ${on ? "text-accent" : "text-white/70"}`}>
+                    {t(tpl.name)}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 操作栏：设置 | 快门 | 麦克风 */}
+          <div className="flex items-center justify-center gap-8 px-4">
+            <button
+              onClick={() => setShowControls(!showControls)}
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur text-white/80"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+
+            <button
+              onClick={toggleRecord}
+              disabled={phase !== "live"}
+              className="relative flex h-[72px] w-[72px] items-center justify-center rounded-full border-[3px] border-white/80 disabled:opacity-40"
+            >
+              <span className={`rounded-full transition-all duration-200 ${
+                recording
+                  ? "h-[28px] w-[28px] rounded-[6px] bg-rec"
+                  : "h-[56px] w-[56px] bg-rec"
+              }`} />
+            </button>
+
+            <button
+              onClick={() => toggleMic(!useMic)}
+              className={`flex h-11 w-11 items-center justify-center rounded-full backdrop-blur ${
+                useMic ? "bg-accent text-[#1A0F2E]" : "bg-black/50 text-white/80"
+              }`}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            </button>
+          </div>
+
+          <p className="text-center font-mono text-[11px] text-white/50">{statusLine}</p>
+        </div>
+      )}
+
+      {/* 参数抽屉（手机） */}
+      {showControls && phase === "live" && (
+        <div className="md:hidden absolute inset-x-0 bottom-0 z-30 rounded-t-2xl bg-surface/95 backdrop-blur border-t border-line"
+             style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)" }}>
+          <div className="flex items-center justify-between px-5 py-3 border-b border-line">
+            <span className="text-[14px] font-medium text-fg">Settings</span>
+            <button onClick={() => setShowControls(false)} className="text-muted text-[13px]">Done</button>
+          </div>
+          <div className="px-5 py-4 space-y-5">
+            {config?.controls.map((c) => (
+              <label key={c.key} className="flex items-center gap-3 text-[14px] text-muted">
+                <span className="w-16 shrink-0">{t(c.label)}</span>
+                <input
+                  type="range"
+                  min={c.min}
+                  max={c.max}
+                  step={c.step ?? 1}
+                  value={values[c.key] ?? c.default}
+                  onChange={(e) => setValue(c.key, Number(e.target.value))}
+                  className="flex-1"
+                />
+                <span className="w-10 text-right font-mono text-[12px] text-fg">
+                  {values[c.key] ?? c.default}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ==================== 共享弹层 ==================== */}
+
       {result && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 p-5">
           <div className="w-full max-w-[520px] rounded-2xl border border-[#34343C] bg-surface p-6">
-            <video src={result.url} controls autoPlay loop className="w-full rounded-lg" />
+            <video src={result.url} controls autoPlay loop playsInline className="w-full rounded-lg" />
             {result.container === "webm" && (
-              <p className="mt-3 text-note text-gold">
-                {COPY.studio.webmWarning}
-              </p>
+              <p className="mt-3 text-note text-gold">{COPY.studio.webmWarning}</p>
             )}
             <div className="mt-4 flex gap-3">
               <button
@@ -389,10 +516,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
                 {COPY.studio.resultDownload(result.container.toUpperCase())}
               </button>
               <button
-                onClick={() => {
-                  URL.revokeObjectURL(result.url);
-                  setResult(null);
-                }}
+                onClick={() => { URL.revokeObjectURL(result.url); setResult(null); }}
                 className="rounded-full border border-line px-5 text-[13px] text-muted"
               >
                 {COPY.studio.resultRetake}
@@ -402,14 +526,11 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
         </div>
       )}
 
-      {/* 解锁面板 */}
       {lockedTarget && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/80 p-5">
           <div className="w-full max-w-[340px] rounded-[18px] border border-[#34343C] bg-surface p-7 text-center">
             <h2 className="text-[19px] font-semibold">{COPY.studio.unlockTitle(t(lockedTarget.name))}</h2>
-            <p className="mt-1.5 text-[13px] leading-[1.7] text-muted">
-              {COPY.studio.unlockBody}
-            </p>
+            <p className="mt-1.5 text-[13px] leading-[1.7] text-muted">{COPY.studio.unlockBody}</p>
             <div className="my-4 font-mono text-[26px] text-gold">
               ${(lockedTarget.priceCents / 100).toFixed(2)}
             </div>
@@ -420,10 +541,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
             >
               {busy ? COPY.studio.unlockBusy : COPY.studio.unlockCta}
             </button>
-            <button
-              onClick={() => setLockedTarget(null)}
-              className="mt-3 text-[13px] text-muted"
-            >
+            <button onClick={() => setLockedTarget(null)} className="mt-3 text-[13px] text-muted">
               {COPY.studio.unlockLater}
             </button>
           </div>
