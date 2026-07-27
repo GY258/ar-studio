@@ -20,6 +20,7 @@ export class FaceRenderer {
   private H = 720;
   private animation: FaceTrackAnimation | null = null;
   private lastLandmarks: { x: number; y: number; z: number }[] | null = null;
+  private lastFaceTime = 0;
 
   constructor(private readonly scene: THREE.Scene) {
     this.group.renderOrder = 5;
@@ -141,9 +142,9 @@ export class FaceRenderer {
       const result: FaceLandmarkerResult = this.landmarker.detectForVideo(video, nowMs);
       if (result.faceLandmarks && result.faceLandmarks.length > 0) {
         this.lastLandmarks = result.faceLandmarks[0];
-      } else {
-        this.lastLandmarks = null;
+        this.lastFaceTime = nowMs;
       }
+      // 不立即清空 lastLandmarks，让 update 根据时间判断
     } catch {
       // skip frame
     }
@@ -151,7 +152,9 @@ export class FaceRenderer {
 
   update(t: number) {
     const lm = this.lastLandmarks;
-    const hasFace = lm && lm.length >= 478;
+    // 丢帧容忍：0.5 秒内保持上一帧位置，超过才隐藏
+    const elapsed = performance.now() - this.lastFaceTime;
+    const hasFace = lm && lm.length >= 478 && elapsed < 500;
 
     let iod = 0;
     let roll = 0;
@@ -248,6 +251,7 @@ export class FaceRenderer {
         mesh.scale.set(sw, h, 1);
         mesh.position.set(wx, wy - h * 0.5, 3);
         mesh.rotation.z = -roll;
+        (mesh.material as THREE.MeshBasicMaterial).opacity = 1;
         continue;
       }
 
