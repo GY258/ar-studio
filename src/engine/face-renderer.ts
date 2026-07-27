@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { FilesetResolver, FaceLandmarker, type FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import type { FaceTrackElement, FaceTrackAnimation } from "./types";
 import { SVG_ASSETS, rasterizeSvg, rasterizeText } from "./svg-assets";
-import { WASM_BASE } from "@/lib/assets";
+import { WASM_BASE, FACE_MODEL } from "@/lib/assets";
 
 interface FaceMesh {
   mesh: THREE.Mesh;
@@ -37,8 +37,7 @@ export class FaceRenderer {
       const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
       this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
         baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.tflite",
+          modelAssetPath: FACE_MODEL,
           delegate: "GPU",
         },
         runningMode: "VIDEO",

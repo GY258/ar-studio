@@ -18,4 +18,8 @@ export const SEG_MODEL =
   process.env.NEXT_PUBLIC_SEG_MODEL ||
   "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite";
 
+export const FACE_MODEL =
+  process.env.NEXT_PUBLIC_FACE_MODEL ||
+  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";
+
 export const SELF_HOSTED = WASM_BASE.startsWith("/");
