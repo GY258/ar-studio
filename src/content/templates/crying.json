@@ -7,24 +7,16 @@
   "template_type": "facetrack",
   "preview": {},
   "face_track_elements": [
-    { "id": "tear-l", "type": "tear-pool", "svgAsset": "tear-cluster", "landmark": 145, "iodScale": 0.24, "mirror": false },
-    { "id": "tear-r", "type": "tear-pool", "svgAsset": "tear-cluster", "landmark": 374, "iodScale": 0.24, "mirror": true },
+    { "id": "tear-l", "type": "tear-pool", "svgAsset": "tear-cluster", "landmark": 145, "iodScale": 0.35, "mirror": false },
+    { "id": "tear-r", "type": "tear-pool", "svgAsset": "tear-cluster", "landmark": 374, "iodScale": 0.35, "mirror": true },
 
-    { "id": "drop-l0", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 145, "iodScale": 0.08, "mirror": false },
-    { "id": "drop-l1", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 145, "iodScale": 0.08, "mirror": false },
-    { "id": "drop-l2", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 145, "iodScale": 0.08, "mirror": false },
-    { "id": "drop-r0", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 374, "iodScale": 0.08, "mirror": true },
-    { "id": "drop-r1", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 374, "iodScale": 0.08, "mirror": true },
-    { "id": "drop-r2", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 374, "iodScale": 0.08, "mirror": true },
+    { "id": "blush-l", "type": "blush", "landmark": 50, "iodScale": 0.5 },
+    { "id": "blush-r", "type": "blush", "landmark": 280, "iodScale": 0.5 },
 
-    { "id": "blush-nose", "type": "blush", "svgAsset": "tear-drop", "landmark": 4, "iodScale": 0.8 },
-    { "id": "blush-l", "type": "blush", "svgAsset": "tear-drop", "landmark": 50, "iodScale": 0.55 },
-    { "id": "blush-r", "type": "blush", "svgAsset": "tear-drop", "landmark": 280, "iodScale": 0.55 },
-
-    { "id": "tt-text", "type": "text", "text": "(T_T)", "nx": 0.46, "ny": 0.96, "fontSizeW": 0.08, "color": "#FFFFFF", "shadow": "0 2 5 rgba(0,0,0,.35)" }
+    { "id": "tt-text", "type": "text", "text": "(T_T)", "nx": 0.5, "ny": 0.92, "fontSizeW": 0.07, "color": "#FFFFFF", "shadow": "0 2 5 rgba(0,0,0,.35)" }
   ],
   "face_track_animation": {
-    "breathe": { "scaleRange": [0.95, 1.06], "period": 1.8 },
+    "breathe": { "scaleRange": [0.95, 1.05], "period": 2.0 },
     "tears": { "count": 3, "distance": 0.35, "period": 2.4, "phaseShift": 0.4 }
   }
 }

@@ -49,19 +49,26 @@ export const SVG_ASSETS: Record<string, string> = {
       fill="#7CA3E8" filter="url(#crayonS)" opacity="0.9"/>
 </svg>`,
 
-  "tear-cluster": `<svg viewBox="0 0 130 200" xmlns="http://www.w3.org/2000/svg">
+  "tear-cluster": `<svg viewBox="0 0 120 180" xmlns="http://www.w3.org/2000/svg">
 <defs>
   <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0" stop-color="#9AD6EE"/><stop offset="1" stop-color="#5FB2DC"/>
   </linearGradient>
 </defs>
-<path d="M8 22 q14 -14 30 -6 q12 6 26 0 q14 -7 28 0 q16 8 30 4
-         q4 10 -4 16 q3 16 -6 30 q-8 12 -16 2 q-5 -7 -4 -18 q-9 6 -19 4
-         q1 20 -8 34 q-9 13 -17 1 q-6 -10 -3 -37 q-14 1 -24 -6 q-10 -8 -13 -24 z"
-      fill="url(#tg)" stroke="#4795C4" stroke-width="2.5" stroke-linejoin="round"/>
-<ellipse cx="30" cy="26" rx="9" ry="4" fill="#FFFFFF" opacity="0.85" transform="rotate(-12 30 26)"/>
-<ellipse cx="76" cy="24" rx="7" ry="3" fill="#FFFFFF" opacity="0.8"/>
-<ellipse cx="52" cy="78" rx="3.5" ry="6" fill="#FFFFFF" opacity="0.75"/>
+<!-- 眼下横线 -->
+<path d="M10 10 Q30 2 60 8 Q90 2 110 10" fill="none" stroke="url(#tg)" stroke-width="10" stroke-linecap="round"/>
+<!-- 3 滴水滴 -->
+<ellipse cx="25"  cy="45"  rx="10" ry="12" fill="url(#tg)"/>
+<ellipse cx="60"  cy="55"  rx="10" ry="12" fill="url(#tg)"/>
+<ellipse cx="95"  cy="45"  rx="10" ry="12" fill="url(#tg)"/>
+<!-- 下挂拖尾 -->
+<path d="M25 57 q4 18 0 30 q-4 -12 0 -30z"  fill="url(#tg)"/>
+<path d="M60 67 q5 22 0 40 q-5 -18 0 -40z"  fill="url(#tg)"/>
+<path d="M95 57 q4 18 0 30 q-4 -12 0 -30z"  fill="url(#tg)"/>
+<!-- 高光 -->
+<ellipse cx="25" cy="42" rx="4" ry="3" fill="#FFFFFF" opacity="0.7"/>
+<ellipse cx="60" cy="52" rx="4" ry="3" fill="#FFFFFF" opacity="0.7"/>
+<ellipse cx="95" cy="42" rx="4" ry="3" fill="#FFFFFF" opacity="0.7"/>
 </svg>`,
 
   "tear-drop": `<svg viewBox="0 0 20 30" xmlns="http://www.w3.org/2000/svg">

@@ -15,6 +15,7 @@ export class FaceRenderer {
   private readonly items: FaceMesh[] = [];
   private landmarker: FaceLandmarker | null = null;
   private loading = false;
+  private generation = 0;
   private W = 1280;
   private H = 720;
   private animation: FaceTrackAnimation | null = null;
@@ -52,8 +53,10 @@ export class FaceRenderer {
   async setElements(elements: FaceTrackElement[], anim?: FaceTrackAnimation) {
     this.clear();
     this.animation = anim ?? null;
+    const gen = this.generation;
 
     for (const elem of elements) {
+      if (gen !== this.generation) return;
       let tex: THREE.Texture;
 
       if (elem.type === "blush") {
@@ -72,6 +75,7 @@ export class FaceRenderer {
         const pw = 128;
         const ph = Math.round(pw * (elem.aspect ?? 1));
         const canvas = await rasterizeSvg(svgStr, pw, ph);
+        if (gen !== this.generation) return;
         tex = new THREE.CanvasTexture(canvas);
       } else if ((elem.type === "sticker" || elem.type === "text") && elem.text) {
         const fontSize = Math.round(this.W * (elem.fontSizeW ?? 0.03));
@@ -100,6 +104,7 @@ export class FaceRenderer {
         const aspect = elem.svgAsset === "tear-cluster" ? 200 / 130 : 1.5;
         const ph = Math.round(pw * aspect);
         const canvas = await rasterizeSvg(svgStr, pw, ph);
+        if (gen !== this.generation) return;
         tex = new THREE.CanvasTexture(canvas);
       } else {
         continue;
@@ -235,8 +240,8 @@ export class FaceRenderer {
         const anchor = lm[elem.landmark];
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
-        const scale = iod * (elem.iodScale ?? 0.24);
-        const aspect = 200 / 130;
+        const scale = iod * (elem.iodScale ?? 0.35);
+        const aspect = 180 / 120; // tear-cluster SVG viewBox ratio
 
         let sy = 1;
         if (this.animation?.breathe) {
@@ -247,7 +252,8 @@ export class FaceRenderer {
 
         const sw = elem.mirror ? -scale : scale;
         mesh.scale.set(sw, scale * aspect * sy, 1);
-        mesh.position.set(wx, wy - scale * 0.3, 3);
+        // 紧贴眼下：只往下偏移一点点
+        mesh.position.set(wx, wy - scale * 0.5, 3);
         mesh.rotation.z = -roll;
         continue;
       }
@@ -294,6 +300,7 @@ export class FaceRenderer {
   }
 
   clear() {
+    this.generation++;
     for (const { mesh } of this.items) {
       const mat = mesh.material as THREE.MeshBasicMaterial;
       mat.map?.dispose();
