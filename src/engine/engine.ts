@@ -165,9 +165,11 @@ export class ArEngine {
     this.overlays.clear();
     this.faceRenderer.clear();
     this.particles.clear();
+    this.particles.hide();
     this.prop.visible = false;
 
     if (this.templateType === "particle" && cfg.emitter && cfg.substance) {
+      this.particles.show();
       this.emitPos = { ...cfg.emitter.default };
       this.particles.applySubstance(cfg.substance);
       this.propMat.map = this.propTexture(cfg);

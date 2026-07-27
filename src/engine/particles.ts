@@ -168,6 +168,20 @@ export class ParticleSystem {
     this.liqRad.fill(0);
     this.liqAlp.fill(0);
     this.acc = 0;
+    // 立刻刷新 GPU buffer，否则上一个模板的粒子还会画一帧
+    this.dotGeo.attributes.palpha.needsUpdate = true;
+    this.dotGeo.attributes.psize.needsUpdate = true;
+    for (const k in this.liqAttr) this.liqAttr[k].needsUpdate = true;
+  }
+
+  hide() {
+    this.dots.visible = false;
+    this.liquid.visible = false;
+  }
+
+  show() {
+    this.dots.visible = true;
+    this.liquid.visible = true;
   }
 
   private alloc(): number {
