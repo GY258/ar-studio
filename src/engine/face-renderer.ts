@@ -235,7 +235,7 @@ export class FaceRenderer {
         continue;
       }
 
-      // --- tear-pool ---
+      // --- tear-pool: 动态往下流 ---
       if (elem.type === "tear-pool" && elem.landmark !== undefined) {
         const anchor = lm[elem.landmark];
         const wx = (0.5 - anchor.x) * this.W;
@@ -243,19 +243,28 @@ export class FaceRenderer {
         const scale = iod * (elem.iodScale ?? 0.28);
         const aspect = 210 / 72; // tear-streak SVG viewBox ratio
 
-        let sy = 1;
-        if (this.animation?.breathe) {
-          const a = this.animation.breathe;
-          const phase = (Math.sin(t * Math.PI * 2 / a.period) + 1) / 2;
-          sy = a.scaleRange[0] + phase * (a.scaleRange[1] - a.scaleRange[0]);
-        }
-
         const sw = elem.mirror ? -scale : scale;
-        const h = scale * aspect * sy;
+        const h = scale * aspect;
         mesh.scale.set(sw, h, 1);
-        // mesh 原点在中心，往下移半个高度让 SVG 顶部对齐眼睑
         mesh.position.set(wx, wy - h * 0.5, 3);
         mesh.rotation.z = -roll;
+
+        // 用 UV offset 模拟从上往下流：循环滚动纹理
+        const tex = (mesh.material as THREE.MeshBasicMaterial).map;
+        if (tex) {
+          // 2.5 秒一轮，泪痕从上往下展开
+          const period = 2.5;
+          const progress = (t % period) / period;
+          // 淡入淡出
+          const mat = mesh.material as THREE.MeshBasicMaterial;
+          if (progress < 0.1) mat.opacity = progress / 0.1;
+          else if (progress > 0.85) mat.opacity = (1 - progress) / 0.15;
+          else mat.opacity = 0.92;
+          // 用 scale.y 控制展开程度（从短到长再消失）
+          const reveal = Math.min(1, progress * 1.5);
+          mesh.scale.set(sw, h * reveal, 1);
+          mesh.position.set(wx, wy - h * reveal * 0.5, 3);
+        }
         continue;
       }
 
