@@ -99,10 +99,13 @@ export class ArEngine {
     });
   }
 
-  /** 移动端自动降级：分辨率降到 640×360（PRD 5.2）。 */
+  /** 移动端自动降级：分辨率降到 640×360（PRD 5.2）。手机竖屏时请求竖屏分辨率。 */
   async startCamera(deviceId?: string): Promise<void> {
     this.degraded = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
-    const size = this.degraded ? { width: 640, height: 360 } : { width: 1280, height: 720 };
+    const portrait = this.degraded && window.innerHeight > window.innerWidth;
+    const size = this.degraded
+      ? portrait ? { width: 360, height: 640 } : { width: 640, height: 360 }
+      : { width: 1280, height: 720 };
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: size.width },
@@ -114,6 +117,8 @@ export class ArEngine {
     });
     this.video.srcObject = stream;
     await this.video.play();
+    // videoWidth/videoHeight 在 play 后才可靠，再 resize 一次确保 cover 比例正确
+    this.video.addEventListener("loadedmetadata", () => this.resize(), { once: true });
     this.resize();
   }
 
@@ -215,8 +220,23 @@ export class ArEngine {
     this.camera.top = this.H / 2;
     this.camera.bottom = -this.H / 2;
     this.camera.updateProjectionMatrix();
+    // bg 用 cover 模式：保持视频原始比例，裁掉多余部分，不拉伸
+    const vw = this.video.videoWidth || this.W;
+    const vh = this.video.videoHeight || this.H;
+    const viewAspect = this.W / this.H;
+    const vidAspect = vw / vh;
+    let bgW: number, bgH: number;
+    if (vidAspect > viewAspect) {
+      // 视频比容器宽，按高度匹配，左右裁
+      bgH = this.H;
+      bgW = this.H * vidAspect;
+    } else {
+      // 视频比容器窄，按宽度匹配，上下裁
+      bgW = this.W;
+      bgH = this.W / vidAspect;
+    }
     // 镜像和占据场的 u 映射是一对，改一个就得改另一个
-    this.bg.scale.set(-this.W, this.H, 1);
+    this.bg.scale.set(-bgW, bgH, 1);
     this.field.setViewport(this.W, this.H);
     this.particles.setPixelRatio(dpr);
     this.layoutProp();
