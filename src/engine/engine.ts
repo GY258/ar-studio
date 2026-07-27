@@ -237,7 +237,10 @@ export class ArEngine {
     }
     // 镜像和占据场的 u 映射是一对，改一个就得改另一个
     this.bg.scale.set(-bgW, bgH, 1);
-    this.field.setViewport(this.W, this.H);
+    // 占据场要用 cover 后的尺寸，不是 viewport 尺寸。
+    // 分割遮罩覆盖整个视频帧，视频通过 cover 显示在 bgW×bgH 的区域内，
+    // 粒子碰撞要对齐这个实际显示区域。
+    this.field.setViewport(bgW, bgH);
     this.particles.setPixelRatio(dpr);
     this.layoutProp();
   }
