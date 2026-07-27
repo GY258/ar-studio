@@ -199,9 +199,9 @@ export class FaceRenderer {
         const ax = (0.5 - anchor.x) * this.W;
         const ay = (0.5 - anchor.y) * this.H;
 
-        // 偏移量以 IOD 为单位
+        // 偏移量以 IOD 为单位（offsetY 正 = 往下，Three.js Y 正 = 往上，取反）
         const ox = (elem.offsetX ?? 0) * iod;
-        const oy = (elem.offsetY ?? 0) * iod;
+        const oy = -(elem.offsetY ?? 0) * iod;
 
         // 旋转偏移量跟随头部 roll
         const cosR = Math.cos(-roll);
