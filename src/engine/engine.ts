@@ -163,7 +163,7 @@ export class ArEngine {
 
   setEmitterPos(x: number, y: number) {
     this.emitPos.x = Math.max(-0.48, Math.min(0.48, x));
-    this.emitPos.y = Math.max(-0.3, Math.min(0.48, y));
+    this.emitPos.y = Math.max(-0.3, Math.min(0.25, y));
   }
 
   getEmitterPos() {
