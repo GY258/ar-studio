@@ -2,10 +2,12 @@ import * as THREE from "three";
 import { FilesetResolver, ImageSegmenter, type ImageSegmenterResult } from "@mediapipe/tasks-vision";
 import { OccupancyField } from "./occupancy";
 import { ParticleSystem } from "./particles";
+import { OverlayRenderer } from "./overlay-renderer";
+import { FaceRenderer } from "./face-renderer";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
 import { SEG_MODEL, WASM_BASE } from "@/lib/assets";
-import type { ControlValues, TemplateConfig } from "./types";
+import type { ControlValues, TemplateConfig, TemplateType } from "./types";
 
 export interface EngineStats {
   fps: number;
@@ -45,6 +47,9 @@ export class ArEngine {
   private controls: ControlValues = {};
   /** 归一化屏幕坐标，(0,0) 是中心，y 向上为正。 */
   private emitPos = { x: 0, y: 0.34 };
+  private readonly overlays: OverlayRenderer;
+  private readonly faceRenderer: FaceRenderer;
+  private templateType: TemplateType = "particle";
   private segmenter: ImageSegmenter | null = null;
   private raf = 0;
   private lastT = 0;
@@ -82,6 +87,9 @@ export class ArEngine {
     this.prop.renderOrder = 3; // 必须压在粒子之上，雪才是从云里出来的
     this.scene.add(this.prop);
 
+    this.overlays = new OverlayRenderer(this.scene);
+    this.faceRenderer = new FaceRenderer(this.scene);
+
     this.attachDrag(opts.canvas);
     this.resize();
   }
@@ -97,6 +105,10 @@ export class ArEngine {
       outputCategoryMask: true,
       outputConfidenceMasks: false,
     });
+  }
+
+  async loadFace(): Promise<void> {
+    await this.faceRenderer.loadFaceMesh();
   }
 
   /** 不强制比例，让摄像头用原生分辨率，cover 模式负责显示裁剪。 */
@@ -137,6 +149,8 @@ export class ArEngine {
     this.video.srcObject = null;
     this.segmenter?.close();
     this.particles.dispose();
+    this.overlays.dispose();
+    this.faceRenderer.dispose();
     this.propTextures.forEach((t) => t.dispose());
     this.renderer.dispose();
   }
@@ -145,11 +159,30 @@ export class ArEngine {
 
   setTemplate(cfg: TemplateConfig) {
     this.cfg = cfg;
-    this.emitPos = { ...cfg.emitter.default };
-    this.particles.applySubstance(cfg.substance);
-    this.propMat.map = this.propTexture(cfg);
-    this.propMat.needsUpdate = true;
-    this.layoutProp();
+    this.templateType = cfg.templateType ?? "particle";
+
+    // 清理其他类型的渲染状态
+    this.overlays.clear();
+    this.faceRenderer.clear();
+    this.particles.clear();
+    this.prop.visible = false;
+
+    if (this.templateType === "particle" && cfg.emitter && cfg.substance) {
+      this.emitPos = { ...cfg.emitter.default };
+      this.particles.applySubstance(cfg.substance);
+      this.propMat.map = this.propTexture(cfg);
+      this.propMat.needsUpdate = true;
+      this.prop.visible = true;
+      this.layoutProp();
+    } else if (this.templateType === "overlay" && cfg.overlayElements) {
+      this.overlays.setViewport(this.W, this.H);
+      this.overlays.setElements(cfg.overlayElements);
+    } else if (this.templateType === "facetrack" && cfg.faceTrackElements) {
+      this.faceRenderer.setViewport(this.W, this.H);
+      this.faceRenderer.setElements(cfg.faceTrackElements, cfg.faceTrackAnimation);
+      // 按需加载 FaceMesh
+      this.loadFace().catch((e) => this.onError?.(e as Error));
+    }
   }
 
   /** 切模板不丢已调好的参数：调用方只覆盖新模板有的 key（PRD 4.2 非功能要求）。 */
@@ -181,6 +214,7 @@ export class ArEngine {
   /* ---------------- 内部 ---------------- */
 
   private propTexture(cfg: TemplateConfig): THREE.Texture | null {
+    if (!cfg.emitter) return null;
     const cached = this.propTextures.get(cfg.slug);
     if (cached) return cached;
     let tex: THREE.Texture;
@@ -197,7 +231,7 @@ export class ArEngine {
   }
 
   private layoutProp() {
-    if (!this.cfg) return;
+    if (!this.cfg?.emitter) return;
     const pw = this.W * 0.24 * (this.cfg.emitter.aspect > 0.7 ? 0.85 : 1) * (this.cfg.slug === "cloud" ? 2.1 : 1);
     const ph = pw * this.cfg.emitter.aspect;
     this.prop.scale.set(pw, ph, 1);
@@ -238,6 +272,8 @@ export class ArEngine {
     // 粒子碰撞要对齐这个实际显示区域。
     this.field.setViewport(bgW, bgH);
     this.particles.setPixelRatio(dpr);
+    this.overlays.setViewport(this.W, this.H);
+    this.faceRenderer.setViewport(this.W, this.H);
     this.layoutProp();
   }
 
@@ -247,7 +283,7 @@ export class ArEngine {
       return { x: (ev.clientX - r.left) / r.width - 0.5, y: 0.5 - (ev.clientY - r.top) / r.height };
     };
     canvas.addEventListener("pointerdown", (ev) => {
-      if (!this.cfg?.emitter.draggable) return;
+      if (!this.cfg?.emitter?.draggable) return;
       const p = toNorm(ev);
       this.dragging = true;
       canvas.setPointerCapture(ev.pointerId);
@@ -291,13 +327,21 @@ export class ArEngine {
     this.lastT = t;
     if (dt <= 0) return;
 
-    // 只在有新视频帧时跑分割
+    // 只在有新视频帧时跑感知
     if (this.video.currentTime !== this.lastVideoTime) {
       this.lastVideoTime = this.video.currentTime;
-      this.runSegmentation(now);
+      if (this.templateType === "facetrack") {
+        this.faceRenderer.detectFace(this.video, now);
+      } else if (this.templateType === "particle") {
+        this.runSegmentation(now);
+      }
     }
 
-    if (this.cfg) {
+    if (this.templateType === "overlay") {
+      this.overlays.update(t);
+    } else if (this.templateType === "facetrack") {
+      this.faceRenderer.update(t);
+    } else if (this.cfg && this.cfg.emitter && this.cfg.substance) {
       const e = this.cfg.emitter;
       const pw = this.prop.scale.x;
       const ph = this.prop.scale.y;
@@ -305,7 +349,6 @@ export class ArEngine {
       const oy = this.emitPos.y * this.H - e.port.y * ph;
       this.prop.position.set(this.emitPos.x * this.W, this.emitPos.y * this.H, 1);
 
-      // 引擎不认识任何具体滑块，只问解算器要参数。新模板加新滑块不用动这里。
       const { substance, knobs } = resolveControls(
         this.cfg.substance,
         this.cfg.controls,

@@ -293,7 +293,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
       )}
 
       {/* ---- 桌面端 overlay（录制指示器 + 拖拽提示）---- */}
-      {config?.emitter.draggable && phase === "live" && (
+      {config?.emitter?.draggable && phase === "live" && (
         <p className="hidden md:block pointer-events-none absolute left-1/2 top-8 -translate-x-1/2 rounded-full bg-black/40 px-3 py-1.5 text-note text-white/60 z-20">
           {COPY.studio.dragHint}
         </p>
@@ -391,7 +391,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
       )}
 
       {/* 拖拽提示（手机） */}
-      {config?.emitter.draggable && phase === "live" && !recording && (
+      {config?.emitter?.draggable && phase === "live" && !recording && (
         <p className="md:hidden pointer-events-none absolute left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/40 px-3 py-1.5 text-note text-white/60"
            style={{ top: "calc(env(safe-area-inset-top, 0px) + 52px)" }}>
           {COPY.studio.dragHint}

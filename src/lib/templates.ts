@@ -19,6 +19,7 @@ const DIR = path.join(process.cwd(), "src/content/templates");
 type Raw = Record<string, unknown>;
 
 function toConfig(r: Raw): TemplateConfig {
+  const templateType = (r.template_type as TemplateConfig["templateType"]) ?? "particle";
   return {
     slug: r.slug as string,
     name: r.name as TemplateConfig["name"],
@@ -26,10 +27,14 @@ function toConfig(r: Raw): TemplateConfig {
     priceCents: r.price_cents as number,
     preview: (r.preview ?? {}) as TemplateConfig["preview"],
     locked: false,
-    perception: r.perception as TemplateConfig["perception"],
+    templateType,
+    perception: (r.perception ?? []) as TemplateConfig["perception"],
     emitter: r.emitter as unknown as TemplateConfig["emitter"],
     substance: r.substance as unknown as TemplateConfig["substance"],
-    controls: r.controls as unknown as TemplateConfig["controls"],
+    controls: (r.controls ?? []) as unknown as TemplateConfig["controls"],
+    overlayElements: r.overlay_elements as unknown as TemplateConfig["overlayElements"],
+    faceTrackElements: r.face_track_elements as unknown as TemplateConfig["faceTrackElements"],
+    faceTrackAnimation: r.face_track_animation as unknown as TemplateConfig["faceTrackAnimation"],
   };
 }
 
