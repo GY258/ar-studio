@@ -1,80 +1,106 @@
 /**
- * 内联 SVG 素材。避免外部加载，滤镜激活即可渲染。
+ * 内联 SVG 素材。来源：Teardrop Sticker Kit。
  */
 
 export const SVG_ASSETS: Record<string, string> = {
-  folder: `<svg viewBox="0 0 72 64" xmlns="http://www.w3.org/2000/svg">
-<defs>
-  <linearGradient id="fgBody" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#B5DAF4"/><stop offset="0.45" stop-color="#8CC7F3"/><stop offset="1" stop-color="#6FB4EF"/>
-  </linearGradient>
-  <linearGradient id="fgTab" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#A9D4F4"/><stop offset="1" stop-color="#8CC7F3"/>
-  </linearGradient>
-</defs>
-<path d="M4 12 q0-5 5-5 h16 q4 0 6 3 l3 4 h-30 z" fill="url(#fgTab)"/>
-<rect x="4" y="12" width="64" height="46" rx="7" fill="url(#fgBody)"/>
-<rect x="4" y="12" width="64" height="6" rx="3" fill="#C9E4F8" opacity="0.85"/>
-<g>
-  <ellipse cx="34" cy="36" rx="13" ry="8.5" fill="#FCFFFF"/>
-  <circle cx="27" cy="33" r="6.5" fill="#FCFFFF"/>
-  <circle cx="38" cy="31" r="7.5" fill="#FCFFFF"/>
-  <circle cx="46" cy="35" r="5.5" fill="#FCFFFF"/>
-  <path d="M46 42 q3.5 4 0 7 q-3.5-3 0-7 z" fill="#5FAEE8"/>
-</g>
+
+  /* ---- Crying filter: tear streaks ---- */
+
+  "tear-streak-left": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 210" fill="none">
+  <g stroke="#62C3F2" stroke-linecap="round" fill="none">
+    <path d="M14 22H44" stroke-width="26"/>
+    <path d="M44 26c4 12 1 22-6 34" stroke-width="20"/>
+    <path d="M36 68l-2 10" stroke-width="14"/>
+    <path d="M32 96v9" stroke-width="13"/>
+    <path d="M30 122v8" stroke-width="12"/>
+    <path d="M28 148v6" stroke-width="11"/>
+  </g>
+  <path d="M27 170c0 0 7 10.8 7 15.2a7 7 0 1 1-14 0c0-4.4 7-15.2 7-15.2Z" fill="#62C3F2"/>
+  <ellipse cx="17" cy="18" rx="6" ry="4.5" fill="#fff" fill-opacity=".55"/>
 </svg>`,
 
-  "crayon-drop": `<svg viewBox="0 0 100 200" xmlns="http://www.w3.org/2000/svg">
-<defs>
-<filter id="crayon" x="-20%" y="-20%" width="140%" height="140%">
-  <feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="3" seed="7" result="n"/>
-  <feDisplacementMap in="SourceGraphic" in2="n" scale="9"/>
-  <feComponentTransfer><feFuncA type="gamma" amplitude="1" exponent="1.35" offset="0"/></feComponentTransfer>
-</filter>
-</defs>
-<path d="M50 12 C 58 48, 88 92, 88 136 a38 44 0 1 1 -76 0 C 12 92, 42 48, 50 12 Z"
-      fill="none" stroke="#7CA3E8" stroke-width="15" stroke-linejoin="round"
-      filter="url(#crayon)" opacity="0.92"/>
+  "tear-streak-right": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 210" fill="none">
+  <g transform="translate(72 0) scale(-1 1)">
+    <g stroke="#62C3F2" stroke-linecap="round" fill="none">
+      <path d="M14 22H44" stroke-width="26"/>
+      <path d="M44 26c4 12 1 22-6 34" stroke-width="20"/>
+      <path d="M36 68l-2 10" stroke-width="14"/>
+      <path d="M32 96v9" stroke-width="13"/>
+      <path d="M30 122v8" stroke-width="12"/>
+      <path d="M28 148v6" stroke-width="11"/>
+    </g>
+    <path d="M27 170c0 0 7 10.8 7 15.2a7 7 0 1 1-14 0c0-4.4 7-15.2 7-15.2Z" fill="#62C3F2"/>
+    <ellipse cx="17" cy="18" rx="6" ry="4.5" fill="#fff" fill-opacity=".55"/>
+  </g>
 </svg>`,
 
-  "crayon-drop-solid": `<svg viewBox="0 0 100 200" xmlns="http://www.w3.org/2000/svg">
-<defs>
-<filter id="crayonS" x="-20%" y="-20%" width="140%" height="140%">
-  <feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="3" seed="3" result="n"/>
-  <feDisplacementMap in="SourceGraphic" in2="n" scale="9"/>
-  <feComponentTransfer><feFuncA type="gamma" amplitude="1" exponent="1.35" offset="0"/></feComponentTransfer>
-</filter>
-</defs>
-<path d="M50 30 C 56 60, 80 95, 80 135 a30 36 0 1 1 -60 0 C 20 95, 44 60, 50 30 Z"
-      fill="#7CA3E8" filter="url(#crayonS)" opacity="0.9"/>
+  "tear-drop": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 34" fill="none">
+  <path d="M12 1.5c0 0 9.5 14.6 9.5 20.6a9.5 9.5 0 1 1-19 0C2.5 16.1 12 1.5 12 1.5Z" fill="#62C3F2"/>
+  <path d="M12 1.5c0 0 9.5 14.6 9.5 20.6a9.5 9.5 0 1 1-19 0C2.5 16.1 12 1.5 12 1.5Z" fill="url(#tdShade)"/>
+  <ellipse cx="8.2" cy="23.5" rx="2.4" ry="3.6" transform="rotate(-18 8.2 23.5)" fill="#fff" fill-opacity=".65"/>
+  <defs>
+    <linearGradient id="tdShade" x1="4" y1="4" x2="20" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8FD8FA"/><stop offset="1" stop-color="#4FB4EC"/>
+    </linearGradient>
+  </defs>
 </svg>`,
 
-  "tear-t": `<svg viewBox="0 0 100 70" xmlns="http://www.w3.org/2000/svg">
-<defs>
-  <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#7EC8E3"/><stop offset="1" stop-color="#5BB5D8"/>
-  </linearGradient>
-</defs>
-<!-- T 型：横杆 + 两个下挂圆头 -->
-<path d="M12 16 Q50 4 88 16" fill="none" stroke="url(#tg)" stroke-width="12" stroke-linecap="round"/>
-<ellipse cx="22" cy="38" rx="11" ry="14" fill="url(#tg)"/>
-<ellipse cx="78" cy="38" rx="11" ry="14" fill="url(#tg)"/>
-<!-- 连接横杆到圆头 -->
-<rect x="14" y="14" width="14" height="20" rx="4" fill="url(#tg)"/>
-<rect x="70" y="14" width="14" height="20" rx="4" fill="url(#tg)"/>
-<!-- 高光 -->
-<ellipse cx="22" cy="34" rx="5" ry="4" fill="#FFFFFF" opacity="0.55"/>
-<ellipse cx="78" cy="34" rx="5" ry="4" fill="#FFFFFF" opacity="0.55"/>
+  "tear-splash": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 40" fill="none">
+  <circle cx="16" cy="24" r="11" fill="#62C3F2"/>
+  <circle cx="55" cy="26" r="9" fill="#62C3F2"/>
+  <circle cx="73" cy="20" r="6.5" fill="#62C3F2"/>
+  <circle cx="84" cy="29" r="4.5" fill="#62C3F2"/>
+  <circle cx="12.5" cy="20" r="3.2" fill="#fff" fill-opacity=".6"/>
+  <circle cx="52" cy="23" r="2.6" fill="#fff" fill-opacity=".6"/>
 </svg>`,
 
-  "tear-drop": `<svg viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
-<defs>
-  <radialGradient id="td" cx="0.4" cy="0.35" r="0.6">
-    <stop offset="0" stop-color="#A8DEF0"/><stop offset="1" stop-color="#5BB5D8"/>
-  </radialGradient>
-</defs>
-<circle cx="15" cy="15" r="12" fill="url(#td)"/>
-<ellipse cx="11" cy="11" rx="4" ry="3" fill="#FFFFFF" opacity="0.5"/>
+  /* ---- Emotion Folders filter ---- */
+
+  "folder": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 92" fill="none">
+  <defs>
+    <linearGradient id="fldFront" x1="56" y1="30" x2="56" y2="88" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9AD3F6"/><stop offset="1" stop-color="#4BA6E6"/>
+    </linearGradient>
+    <linearGradient id="fldBack" x1="56" y1="6" x2="56" y2="34" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8FCDF4"/><stop offset="1" stop-color="#63B6EC"/>
+    </linearGradient>
+  </defs>
+  <path d="M6 14a8 8 0 0 1 8-8h26l10 12h46a8 8 0 0 1 8 8v14H6V14Z" fill="url(#fldBack)"/>
+  <rect x="4" y="24" width="104" height="64" rx="10" fill="url(#fldFront)"/>
+  <rect x="4" y="24" width="104" height="10" fill="#fff" fill-opacity=".18"/>
+  <g fill="#fff">
+    <path d="M42 56a11 11 0 0 1 10.8-11 14 14 0 0 1 26.2 4.3A9 9 0 0 1 77 67H52a11 11 0 0 1-10-11Z" fill-opacity=".95"/>
+    <circle cx="53" cy="76" r="3.2" fill-opacity=".9"/>
+    <circle cx="64" cy="79" r="3.2" fill-opacity=".9"/>
+    <circle cx="75" cy="76" r="3.2" fill-opacity=".9"/>
+  </g>
+</svg>`,
+
+  /* ---- Crayon Rain filter ---- */
+
+  "crayon-drop": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 170" fill="none">
+  <defs>
+    <filter id="crayon" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="3" seed="7" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="6" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+  <g filter="url(#crayon)" stroke="#5B94F0" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M60 14c-3 10-11 24-18 38-8 16-14 30-14 44 0 20 15 33 32 33s32-13 32-33c0-14-6-28-14-44-7-14-15-28-18-38Z"/>
+  </g>
+</svg>`,
+
+  "crayon-drop-solid": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 170" fill="none">
+  <defs>
+    <filter id="crayon2" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.055" numOctaves="3" seed="21" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="7" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+  <g filter="url(#crayon2)" stroke="#5B94F0" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M62 16c-6 14-16 30-23 44-6 13-11 26-9 38 3 19 18 30 34 28 17-2 28-16 27-35-1-15-8-30-15-44-6-12-11-22-14-31Z"/>
+    <path d="M52 118c4 6 12 7 17 2" stroke-width="7"/>
+  </g>
 </svg>`,
 };
 
@@ -115,7 +141,7 @@ export function rasterizeText(
 ): HTMLCanvasElement {
   const c = document.createElement("canvas");
   const ctx = c.getContext("2d")!;
-  const font = `${fontWeight} ${fontSize}px "SF Pro Rounded","Nunito","Inter",sans-serif`;
+  const font = `${fontWeight} ${fontSize}px "SF Pro Rounded","Nunito","Inter",system-ui,sans-serif`;
   ctx.font = font;
   const m = ctx.measureText(text);
   const pad = fontSize * 0.5;

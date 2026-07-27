@@ -240,8 +240,8 @@ export class FaceRenderer {
         const anchor = lm[elem.landmark];
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
-        const scale = iod * (elem.iodScale ?? 0.30);
-        const aspect = 70 / 100; // tear-t SVG viewBox ratio
+        const scale = iod * (elem.iodScale ?? 0.28);
+        const aspect = 210 / 72; // tear-streak SVG viewBox ratio
 
         let sy = 1;
         if (this.animation?.breathe) {

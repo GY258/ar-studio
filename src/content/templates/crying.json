@@ -7,23 +7,13 @@
   "template_type": "facetrack",
   "preview": {},
   "face_track_elements": [
-    { "id": "tear-l", "type": "tear-pool", "svgAsset": "tear-t", "landmark": 145, "iodScale": 0.30, "mirror": false },
-    { "id": "tear-r", "type": "tear-pool", "svgAsset": "tear-t", "landmark": 374, "iodScale": 0.30, "mirror": true },
-
-    { "id": "drop-l0", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 145, "iodScale": 0.07, "mirror": false },
-    { "id": "drop-l1", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 145, "iodScale": 0.07, "mirror": false },
-    { "id": "drop-l2", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 145, "iodScale": 0.07, "mirror": false },
-    { "id": "drop-l3", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 145, "iodScale": 0.07, "mirror": false },
-
-    { "id": "drop-r0", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 374, "iodScale": 0.07, "mirror": true },
-    { "id": "drop-r1", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 374, "iodScale": 0.07, "mirror": true },
-    { "id": "drop-r2", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 374, "iodScale": 0.07, "mirror": true },
-    { "id": "drop-r3", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": 374, "iodScale": 0.07, "mirror": true },
+    { "id": "tear-l", "type": "tear-pool", "svgAsset": "tear-streak-left",  "landmark": 145, "iodScale": 0.28, "mirror": false },
+    { "id": "tear-r", "type": "tear-pool", "svgAsset": "tear-streak-right", "landmark": 374, "iodScale": 0.28, "mirror": false },
 
     { "id": "tt-text", "type": "text", "text": "(T_T)", "nx": 0.5, "ny": 0.92, "fontSizeW": 0.07, "color": "#FFFFFF", "shadow": "0 2 5 rgba(0,0,0,.35)" }
   ],
   "face_track_animation": {
-    "breathe": { "scaleRange": [0.96, 1.04], "period": 2.0 },
-    "tears": { "count": 4, "distance": 0.5, "period": 0, "phaseShift": 0 }
+    "breathe": { "scaleRange": [0.97, 1.03], "period": 2.0 },
+    "tears": { "count": 0, "distance": 0, "period": 0, "phaseShift": 0 }
   }
 }
