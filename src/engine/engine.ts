@@ -99,13 +99,13 @@ export class ArEngine {
     });
   }
 
-  /** 移动端自动降级：分辨率降到 640×360（PRD 5.2）。手机竖屏时请求竖屏分辨率。 */
+  /** 移动端请求 720×1280 竖屏，桌面端 1920×1080。 */
   async startCamera(deviceId?: string): Promise<void> {
     this.degraded = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
     const portrait = this.degraded && window.innerHeight > window.innerWidth;
     const size = this.degraded
-      ? portrait ? { width: 360, height: 640 } : { width: 640, height: 360 }
-      : { width: 1280, height: 720 };
+      ? portrait ? { width: 720, height: 1280 } : { width: 1280, height: 720 }
+      : { width: 1920, height: 1080 };
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: size.width },
@@ -212,7 +212,7 @@ export class ArEngine {
     const rect = canvas.getBoundingClientRect();
     this.W = Math.max(2, Math.round(rect.width));
     this.H = Math.max(2, Math.round(rect.height));
-    const dpr = Math.min(devicePixelRatio || 1, this.degraded ? 1.5 : 2);
+    const dpr = Math.min(devicePixelRatio || 1, this.degraded ? 2 : 2.5);
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(this.W, this.H, false);
     this.camera.left = -this.W / 2;
