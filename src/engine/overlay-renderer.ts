@@ -91,7 +91,21 @@ export class OverlayRenderer {
 
   update(t: number) {
     for (const { mesh, elem, baseY } of this.meshes) {
-      if (elem.float) {
+      if (elem.fall) {
+        // 从上方落到下方，循环。phase 错开各滴的起始时间
+        const progress = ((t / elem.fall.period + elem.fall.phase) % 1);
+        // 从画面顶部 (+H/2 + margin) 落到底部 (-H/2 - margin)
+        const topY = this.H / 2 + this.H * 0.15;
+        const botY = -this.H / 2 - this.H * 0.15;
+        mesh.position.y = topY + (botY - topY) * progress;
+        // 保持原始 x 位置
+        mesh.position.x = (elem.nx - 0.5) * this.W;
+        // 淡入淡出
+        const mat = mesh.material as THREE.MeshBasicMaterial;
+        if (progress < 0.08) mat.opacity = progress / 0.08;
+        else if (progress > 0.88) mat.opacity = (1 - progress) / 0.12;
+        else mat.opacity = 0.95;
+      } else if (elem.float) {
         const offset = Math.sin(t * (Math.PI * 2) / elem.float.period) * this.H * elem.float.amplitude;
         mesh.position.y = baseY + offset;
       }

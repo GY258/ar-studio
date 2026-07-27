@@ -99,6 +99,8 @@ export interface OverlayElement {
   shadow?: string;
   /** 浮动动画 */
   float?: { amplitude: number; period: number };
+  /** 下落动画：period 秒从顶到底循环，phase 0~1 错开起始位置 */
+  fall?: { period: number; phase: number };
 }
 
 /** 人脸追踪配置 */
