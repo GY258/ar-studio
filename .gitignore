@@ -8,3 +8,5 @@ next-env.d.ts
 public/vendor
 .DS_Store
 .next-build
+.vercel
+.env*

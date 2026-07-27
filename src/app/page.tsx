@@ -121,6 +121,9 @@ export default function HomePage() {
             <Link href="/legal/terms" className="hover:text-fg">
               {COPY.footer.terms}
             </Link>
+            <Link href="/feedback" className="hover:text-fg">
+              Feedback
+            </Link>
           </div>
         </div>
       </footer>
