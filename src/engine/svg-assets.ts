@@ -49,35 +49,32 @@ export const SVG_ASSETS: Record<string, string> = {
       fill="#7CA3E8" filter="url(#crayonS)" opacity="0.9"/>
 </svg>`,
 
-  "tear-cluster": `<svg viewBox="0 0 120 180" xmlns="http://www.w3.org/2000/svg">
+  "tear-t": `<svg viewBox="0 0 100 70" xmlns="http://www.w3.org/2000/svg">
 <defs>
   <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#9AD6EE"/><stop offset="1" stop-color="#5FB2DC"/>
+    <stop offset="0" stop-color="#7EC8E3"/><stop offset="1" stop-color="#5BB5D8"/>
   </linearGradient>
 </defs>
-<!-- 眼下横线 -->
-<path d="M10 10 Q30 2 60 8 Q90 2 110 10" fill="none" stroke="url(#tg)" stroke-width="10" stroke-linecap="round"/>
-<!-- 3 滴水滴 -->
-<ellipse cx="25"  cy="45"  rx="10" ry="12" fill="url(#tg)"/>
-<ellipse cx="60"  cy="55"  rx="10" ry="12" fill="url(#tg)"/>
-<ellipse cx="95"  cy="45"  rx="10" ry="12" fill="url(#tg)"/>
-<!-- 下挂拖尾 -->
-<path d="M25 57 q4 18 0 30 q-4 -12 0 -30z"  fill="url(#tg)"/>
-<path d="M60 67 q5 22 0 40 q-5 -18 0 -40z"  fill="url(#tg)"/>
-<path d="M95 57 q4 18 0 30 q-4 -12 0 -30z"  fill="url(#tg)"/>
+<!-- T 型：横杆 + 两个下挂圆头 -->
+<path d="M12 16 Q50 4 88 16" fill="none" stroke="url(#tg)" stroke-width="12" stroke-linecap="round"/>
+<ellipse cx="22" cy="38" rx="11" ry="14" fill="url(#tg)"/>
+<ellipse cx="78" cy="38" rx="11" ry="14" fill="url(#tg)"/>
+<!-- 连接横杆到圆头 -->
+<rect x="14" y="14" width="14" height="20" rx="4" fill="url(#tg)"/>
+<rect x="70" y="14" width="14" height="20" rx="4" fill="url(#tg)"/>
 <!-- 高光 -->
-<ellipse cx="25" cy="42" rx="4" ry="3" fill="#FFFFFF" opacity="0.7"/>
-<ellipse cx="60" cy="52" rx="4" ry="3" fill="#FFFFFF" opacity="0.7"/>
-<ellipse cx="95" cy="42" rx="4" ry="3" fill="#FFFFFF" opacity="0.7"/>
+<ellipse cx="22" cy="34" rx="5" ry="4" fill="#FFFFFF" opacity="0.55"/>
+<ellipse cx="78" cy="34" rx="5" ry="4" fill="#FFFFFF" opacity="0.55"/>
 </svg>`,
 
-  "tear-drop": `<svg viewBox="0 0 20 30" xmlns="http://www.w3.org/2000/svg">
+  "tear-drop": `<svg viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
 <defs>
-  <linearGradient id="td" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#9AD6EE"/><stop offset="1" stop-color="#5FB2DC"/>
-  </linearGradient>
+  <radialGradient id="td" cx="0.4" cy="0.35" r="0.6">
+    <stop offset="0" stop-color="#A8DEF0"/><stop offset="1" stop-color="#5BB5D8"/>
+  </radialGradient>
 </defs>
-<path d="M10 2 q5 8 0 15 q-5 -7 0 -15z" fill="url(#td)" stroke="#4795C4" stroke-width="1.5"/>
+<circle cx="15" cy="15" r="12" fill="url(#td)"/>
+<ellipse cx="11" cy="11" rx="4" ry="3" fill="#FFFFFF" opacity="0.5"/>
 </svg>`,
 };
 

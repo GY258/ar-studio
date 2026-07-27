@@ -240,8 +240,8 @@ export class FaceRenderer {
         const anchor = lm[elem.landmark];
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
-        const scale = iod * (elem.iodScale ?? 0.35);
-        const aspect = 180 / 120; // tear-cluster SVG viewBox ratio
+        const scale = iod * (elem.iodScale ?? 0.30);
+        const aspect = 70 / 100; // tear-t SVG viewBox ratio
 
         let sy = 1;
         if (this.animation?.breathe) {
@@ -252,35 +252,30 @@ export class FaceRenderer {
 
         const sw = elem.mirror ? -scale : scale;
         mesh.scale.set(sw, scale * aspect * sy, 1);
-        // 紧贴眼下：只往下偏移一点点
-        mesh.position.set(wx, wy - scale * 0.5, 3);
+        // 紧贴眼下
+        mesh.position.set(wx, wy - scale * 0.25, 3);
         mesh.rotation.z = -roll;
         continue;
       }
 
-      // --- trailing-tear ---
+      // --- trailing-tear: 静态圆滴沿脸颊排列 ---
       if (elem.type === "trailing-tear" && elem.landmark !== undefined) {
         const anchor = lm[elem.landmark];
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
-        const baseScale = iod * (elem.iodScale ?? 0.08);
+        const idx = parseInt(elem.id.slice(-1)) || 0;
+        const shrink = 1 - idx * 0.12;
+        const baseScale = iod * (elem.iodScale ?? 0.07) * shrink;
 
-        if (this.animation?.tears) {
-          const a = this.animation.tears;
-          const idx = parseInt(elem.id.slice(-1)) || 0;
-          const phase = ((t + idx * a.phaseShift) % a.period) / a.period;
-          const dropY = phase * iod * a.distance;
-          const opacity = phase < 0.1 ? phase / 0.1 : phase > 0.8 ? (1 - phase) / 0.2 : 1;
-          const shrink = 1 - idx * 0.15;
-
-          mesh.scale.set(baseScale * shrink, baseScale * 1.5 * shrink, 1);
-          mesh.position.set(
-            wx + (elem.mirror ? -1 : 1) * iod * 0.04,
-            wy - iod * (0.35 + idx * 0.16) - dropY,
-            3,
-          );
-          (mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
-        }
+        mesh.scale.set(baseScale, baseScale * 1.3, 1);
+        // 沿脸颊往下排，每滴间距 0.22 IOD，略向外偏
+        const outward = (elem.mirror ? -1 : 1) * iod * 0.04 * (idx + 1);
+        mesh.position.set(
+          wx + outward,
+          wy - iod * (0.45 + idx * 0.22),
+          3,
+        );
+        (mesh.material as THREE.MeshBasicMaterial).opacity = 0.9;
         mesh.rotation.z = -roll;
         continue;
       }
