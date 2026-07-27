@@ -251,9 +251,10 @@ export class FaceRenderer {
         }
 
         const sw = elem.mirror ? -scale : scale;
-        mesh.scale.set(sw, scale * aspect * sy, 1);
-        // 紧贴眼下
-        mesh.position.set(wx, wy - scale * 0.25, 3);
+        const h = scale * aspect * sy;
+        mesh.scale.set(sw, h, 1);
+        // mesh 原点在中心，往下移半个高度让 SVG 顶部对齐眼睑
+        mesh.position.set(wx, wy - h * 0.5, 3);
         mesh.rotation.z = -roll;
         continue;
       }
