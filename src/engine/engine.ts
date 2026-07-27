@@ -99,17 +99,13 @@ export class ArEngine {
     });
   }
 
-  /** 移动端请求 720×1280 竖屏，桌面端 1920×1080。 */
+  /** 不强制比例，让摄像头用原生分辨率，cover 模式负责显示裁剪。 */
   async startCamera(deviceId?: string): Promise<void> {
     this.degraded = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
-    const portrait = this.degraded && window.innerHeight > window.innerWidth;
-    const size = this.degraded
-      ? portrait ? { width: 720, height: 1280 } : { width: 1280, height: 720 }
-      : { width: 1920, height: 1080 };
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        width: { ideal: size.width },
-        height: { ideal: size.height },
+        width: { ideal: this.degraded ? 1280 : 1920 },
+        height: { ideal: this.degraded ? 960 : 1080 },
         facingMode: "user",
         ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
       },
