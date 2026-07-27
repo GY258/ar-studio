@@ -264,9 +264,9 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
         <canvas ref={canvasRef} className="block h-full w-full" />
       </div>
 
-      {/* 加载/授权覆盖层 */}
+      {/* 加载/授权覆盖层：绝对定位叠在画布上 */}
       {phase !== "live" && (
-        <div className="absolute inset-0 md:relative md:inset-auto md:w-full md:max-w-[1100px] md:aspect-video z-10 flex flex-col items-center justify-center gap-4 bg-bg md:rounded-2xl md:border md:border-line px-6 text-center"
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-bg md:rounded-2xl px-6 text-center"
              style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
           {phase === "loading" && <p className="text-muted text-body">{COPY.studio.loadingModel}</p>}
           {phase === "ready" && (
