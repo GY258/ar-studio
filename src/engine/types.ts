@@ -72,92 +72,89 @@ export interface TemplateListing {
 
 export type TemplateType = "particle" | "overlay" | "facetrack";
 
-/** 叠加元素：SVG 贴纸或文字，固定在画面上 */
-export interface OverlayElement {
-  id: string;
-  type: "svg" | "text";
-  /** SVG asset key（引用 svg-assets.ts 里的 ID） */
-  svgAsset?: string;
-  /** 文字内容 */
-  text?: string;
-  /** 归一化坐标，原点左上，(0,0)~(1,1) */
-  nx: number;
-  ny: number;
-  /** 元素宽度，%W（0~1） */
-  sizeW: number;
-  /** 高宽比（高/宽），用于 SVG */
-  aspect?: number;
-  /** 旋转角度，度 */
-  rotation?: number;
-  /** 文字颜色 */
-  color?: string;
-  /** 文字字号 %W */
-  fontSizeW?: number;
-  /** 文字字重 */
-  fontWeight?: number;
-  /** CSS text-shadow */
-  shadow?: string;
-  /** 浮动动画（v1 兼容） */
-  float?: { amplitude: number; period: number };
-  /** 下落动画（v1 兼容） */
-  fall?: { period: number; phase: number };
-  /** v2 动画原语列表 */
-  animations?: import("./animations").AnimationV2[];
-}
+/* ------------------------------------------------------------
+ * ElementV2 —— overlay 与 facetrack 共用的唯一元素类型
+ *
+ * 三个维度彼此正交，不要互相耦合：
+ *   asset  画什么   （svg / 文字 / 渐变）
+ *   anchor 画在哪   （屏幕归一化坐标 / 人脸锚点）
+ *   size   画多大   （参照物 × 倍数）
+ *
+ * 「跟着脸平移但按屏幕定大小」= anchor.space:"face" + size.ref:"vw"，
+ * 是合法且常用的组合。不要因为 anchor 是 face 就假定 size 一定是 iod。
+ * ------------------------------------------------------------ */
 
-/** 人脸追踪配置 */
-export interface FaceTrackElement {
+export type AnchorSpace = "screen" | "face";
+
+/** 尺寸参照物。face_width / eye_width 由 landmark 实测，人退远会一起缩小；vw 不会。 */
+export type SizeRef = "vw" | "iod" | "eye_width" | "face_width";
+
+/**
+ * scale 到底在量什么。
+ *
+ * width —— 元素画出来有多宽，高度按素材比例推。svg / gradient 只有这一种含义。
+ * font  —— 字号有多大，宽度由内容长度决定。只对 text 有意义。
+ *
+ * 两种对文字都成立且都有人要：「这行字占屏幕 1/3 宽」和「这行字 28px 高」
+ * 是两个不同的诉求，猜哪个都会猜错，所以让 JSON 自己说。
+ */
+export type SizeFit = "width" | "font";
+
+export type ElementAsset =
+  /** 素材库贴纸，key 来自 svg-assets.ts */
+  | { kind: "svg-lib"; key: string }
+  /** LLM 现写的内联 SVG，注册时过 sanitize，拒收不清洗 */
+  | { kind: "svg-inline"; svg: string }
+  | { kind: "text"; text: string; fontWeight?: number; color?: string; shadow?: string }
+  /** 程序化径向渐变椭圆，腮红这类不值得做成素材的东西 */
+  | { kind: "gradient"; shape: "ellipse"; color: string; opacity?: number };
+
+export type ElementAnchor =
+  | { space: "screen"; nx: number; ny: number }
+  /** landmark 只写语义名。数字是 v1 兼容层的产物，新 JSON 会被校验拒收。 */
+  | {
+      space: "face";
+      landmark: string | number;
+      /** 相对锚点的偏移，单位是 IOD（不是像素，也不是 size.ref） */
+      offset?: [number, number];
+      /** 水平翻转，mirrorPair 展开右侧时自动带上 */
+      mirror?: boolean;
+    };
+
+export interface ElementV2 {
   id: string;
-  type: "tear-pool" | "trailing-tear" | "blush" | "text" | "sticker";
-  /** 锚定的 landmark：语义名（推荐）或数字索引（兼容旧 JSON） */
-  landmark?: string | number;
-  /** SVG asset key */
-  svgAsset?: string;
-  /** 大小相对 IOD 的比例 */
-  iodScale?: number;
-  /** 是否水平翻转（右眼） */
-  mirror?: boolean;
-  /** 文字内容 */
-  text?: string;
-  /** 固定屏幕位置（不跟踪人脸时） */
-  nx?: number;
-  ny?: number;
-  /** sticker 相对锚点的偏移，单位 IOD */
-  offsetX?: number;
-  offsetY?: number;
-  /** SVG 高宽比 */
-  aspect?: number;
-  /** 旋转角度 */
+  asset: ElementAsset;
+  anchor: ElementAnchor;
+  /** fit 缺省时：text 按 font，其余按 width */
+  size: { ref: SizeRef; scale: number; fit?: SizeFit };
+  /** 度。正数顺时针 */
   rotation?: number;
-  /** 透明度 0~1 */
+  /** 是否跟随头部 roll。face 空间默认 true，screen 空间恒 false */
+  followRoll?: boolean;
   opacity?: number;
-  /** 文字字号 %W */
-  fontSizeW?: number;
-  fontWeight?: number;
-  color?: string;
-  shadow?: string;
-  /** 浮动动画（v1 兼容） */
-  float?: { amplitude: number; period: number };
-  /** v2 动画原语列表 */
   animations?: import("./animations").AnimationV2[];
 }
 
-export interface FaceTrackAnimation {
-  breathe: { scaleRange: [number, number]; period: number };
-  tears: { count: number; distance: number; period: number; phaseShift: number };
-}
+/** 帧效果：蒙版来源 × 效果种类 × 作用区域。三者正交，一次引擎活换一批模板。 */
+export type MaskProvider = "person" | "face-ellipse" | "none";
 
-/** 帧效果：蒙版来源 × 效果种类 × 作用区域 */
 export interface SourceEffect {
   mask: {
-    provider: "person" | "none";
+    provider: MaskProvider;
+    /** face-ellipse 专用，本轮未实现 */
+    padding?: number;
+    /** 边缘羽化宽度，归一化 */
     feather?: number;
+    falloff?: number;
+    /** 丢失目标时的策略。clear = 全画面恢复原样 */
     onLost?: "clear" | "hold" | "full";
   };
   apply: "inside" | "outside";
   effect:
     | { kind: "pixelate"; blocks: number }
-    | { kind: "blur"; radius: number };
+    | { kind: "blur"; radius: number }
+    | { kind: "posterize"; levels: number }
+    | { kind: "pixel-art"; blocks: number; levels: number; palette?: string; dither?: "none" | "bayer4" };
 }
 
 /** 完整配置，只有服务端确认权益后才下发。 */
@@ -168,11 +165,11 @@ export interface TemplateConfig extends TemplateListing {
   emitter?: Emitter;
   substance?: Substance;
   controls: Control[];
-  /** overlay 类型的元素列表 */
-  overlayElements?: OverlayElement[];
-  /** facetrack 类型的元素列表 */
-  faceTrackElements?: FaceTrackElement[];
-  faceTrackAnimation?: FaceTrackAnimation;
+  /**
+   * overlay / facetrack 的元素列表。已由 loadTemplate 阶段完成
+   * v1→v2 转换和生成器展开，引擎拿到的永远是平铺的 ElementV2。
+   */
+  elements?: ElementV2[];
   /** 帧效果（背景马赛克等） */
   source?: SourceEffect;
 }

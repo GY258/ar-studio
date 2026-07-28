@@ -4,6 +4,7 @@
   "category": "fun",
   "sort_order": 90,
   "price_cents": 0,
+  "schema_version": 2,
   "template_type": "overlay",
   "perception": ["segmentation"],
   "preview": {},
@@ -12,23 +13,19 @@
     "apply": "outside",
     "effect": { "kind": "pixelate", "blocks": 56 }
   },
-  "overlay_elements": [
+  "elements": [
     {
       "id": "menu",
-      "type": "svg",
-      "svgAsset": "quality-menu",
-      "nx": 0.74,
-      "ny": 0.76,
-      "sizeW": 0.44
+      "asset": { "kind": "svg-lib", "key": "quality-menu" },
+      "anchor": { "space": "screen", "nx": 0.74, "ny": 0.76 },
+      "size": { "ref": "vw", "scale": 0.44 }
     },
     {
       "id": "cursor",
-      "type": "svg",
-      "svgAsset": "cursor-hand",
-      "nx": 0.86,
-      "ny": 0.735,
-      "sizeW": 0.075,
-      "float": { "amplitude": 0.004, "period": 3.0 }
+      "asset": { "kind": "svg-lib", "key": "cursor-hand" },
+      "anchor": { "space": "screen", "nx": 0.86, "ny": 0.735 },
+      "size": { "ref": "vw", "scale": 0.075 },
+      "animations": [{ "preset": "float", "amplitude": 0.004, "period": 3.0 }]
     }
   ]
 }

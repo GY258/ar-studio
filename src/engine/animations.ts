@@ -17,7 +17,13 @@ export type AnimationV2 =
       fadePortion?: number };
 
 export interface AnimState {
+  /** 相对锚点的 y 位移，px */
   positionY: number;
+  /**
+   * 绝对世界 y，px。非 null 时覆盖锚点算出来的位置。
+   * fall 用它：一滴雨从画面顶飞到画面底，走的是整屏高度，跟它锚在 ny 多少无关。
+   */
+  positionYAbsolute: number | null;
   scaleX: number;
   scaleY: number;
   opacity: number;
@@ -25,7 +31,15 @@ export interface AnimState {
   outwardX: number;
 }
 
-const DEFAULT: AnimState = { positionY: 0, scaleX: 1, scaleY: 1, opacity: 1, rotation: 0, outwardX: 0 };
+const DEFAULT: AnimState = {
+  positionY: 0,
+  positionYAbsolute: null,
+  scaleX: 1,
+  scaleY: 1,
+  opacity: 1,
+  rotation: 0,
+  outwardX: 0,
+};
 
 /** 计算动画在时间 t 的状态。多个动画叠加。 */
 export function evaluateAnimations(
@@ -50,7 +64,7 @@ export function evaluateAnimations(
         const progress = ((t / anim.period + phase) % 1);
         const topY = baseH / 2 + baseH * 0.15;
         const botY = -baseH / 2 - baseH * 0.15;
-        state.positionY = topY + (botY - topY) * progress;
+        state.positionYAbsolute = topY + (botY - topY) * progress;
         if (progress < 0.08) state.opacity = progress / 0.08;
         else if (progress > 0.88) state.opacity = (1 - progress) / 0.12;
         else state.opacity = 0.95;

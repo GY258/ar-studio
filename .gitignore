@@ -11,3 +11,8 @@ public/vendor
 .vercel
 .wrangler
 .env*
+
+# 离线验证的临时产物。fixture 和 golden 要提交，这三个不要
+.preview
+test/.artifacts
+test-results

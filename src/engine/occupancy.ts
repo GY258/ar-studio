@@ -41,7 +41,13 @@ export class OccupancyField {
         this.raw[y * GW + x] = data[sy * mw + (((x * mw) / GW) | 0)] !== bgVal ? 1 : 0;
       }
     }
-    this.seen = true;
+
+    // seen 的语义是「见过人」，不是「收到过一帧 mask」。
+    // 之前只要 ingest 被调用就置 true，于是空场景也算「见过人」——
+    // 帧效果的 onLost 兜底直接失效（人走出画面，背景仍然糊着）。
+    let occupied = 0;
+    for (let i = 0; i < this.raw.length; i++) occupied += this.raw[i];
+    this.seen = occupied > this.raw.length * 0.005;
 
     // 3x3 盒式模糊：让边缘有梯度
     for (let y = 0; y < GH; y++) {

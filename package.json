@@ -13,7 +13,11 @@
     "db:migrate": "psql \"$DATABASE_URL\" -f db/schema.sql",
     "db:seed": "node scripts/seed-templates.mjs",
     "db:check": "node scripts/db-check.mjs",
-    "validate:templates": "node scripts/validate-templates.mjs"
+    "validate:templates": "tsx scripts/validate-templates.ts",
+    "render:preview": "tsx scripts/render-preview.ts",
+    "test:render": "playwright test",
+    "record:fixture": "tsx scripts/record-fixture.ts",
+    "gen:skill-reference": "tsx scripts/gen-skill-reference.ts"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.14",
@@ -29,14 +33,18 @@
     "@playwright/test": "^1.62.0",
     "@types/node": "^20.14.0",
     "@types/pg": "^8.11.6",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/three": "^0.160.0",
     "autoprefixer": "^10.4.19",
-    "pixelmatch": "^7.2.0",
+    "esbuild": "^0.28.1",
+    "pixelmatch": "^5.3.0",
     "pngjs": "^7.0.0",
     "postcss": "^8.4.39",
     "tailwindcss": "^3.4.6",
+    "tsx": "^4.23.1",
     "typescript": "^5.5.3"
   }
 }

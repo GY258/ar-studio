@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { TemplateConfig, TemplateListing } from "@/engine/types";
 import { TemplateError, checkWiring, validateTemplate } from "./validate";
+import { migrateElements } from "./migrate";
 
 /**
  * 模板清单。
@@ -18,8 +19,18 @@ const DIR = path.join(process.cwd(), "src/content/templates");
 
 type Raw = Record<string, unknown>;
 
+/**
+ * 原始 JSON → 引擎配置。
+ *
+ * 元素在这里就完成 v1→v2 转换和生成器展开：引擎拿到的永远是平铺的 ElementV2，
+ * 运行时不认识生成器，也不认识 v1 字段名。
+ */
 function toConfig(r: Raw): TemplateConfig {
   const templateType = (r.template_type as TemplateConfig["templateType"]) ?? "particle";
+  const { elements, warnings } = migrateElements(r);
+  for (const w of warnings) {
+    console.warn(`[compat] ${r.slug as string}: ${w}`);
+  }
   return {
     slug: r.slug as string,
     name: r.name as TemplateConfig["name"],
@@ -32,9 +43,7 @@ function toConfig(r: Raw): TemplateConfig {
     emitter: r.emitter as unknown as TemplateConfig["emitter"],
     substance: r.substance as unknown as TemplateConfig["substance"],
     controls: (r.controls ?? []) as unknown as TemplateConfig["controls"],
-    overlayElements: r.overlay_elements as unknown as TemplateConfig["overlayElements"],
-    faceTrackElements: r.face_track_elements as unknown as TemplateConfig["faceTrackElements"],
-    faceTrackAnimation: r.face_track_animation as unknown as TemplateConfig["faceTrackAnimation"],
+    elements,
     source: r.source as unknown as TemplateConfig["source"],
   };
 }

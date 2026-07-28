@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { FACE_ANCHORS } from "@/engine/anchors";
 import { listSvgKeys } from "@/engine/svg-assets";
 import { validateTemplate } from "@/lib/validate";
+import { buildSystemPrompt } from "@/lib/template-prompt";
 
 export const dynamic = "force-dynamic";
 
@@ -12,46 +13,16 @@ export const dynamic = "force-dynamic";
  * 目前返回 system prompt + 可用锚点/素材/动画列表，
  * 供前端或外部 LLM 调用生成。
  *
- * 后续接入 Claude API 后可直接在服务端生成 + 校验 + 修复。
+ * system prompt 和 ar-template skill 的 reference 来自同一个
+ * src/lib/template-prompt.ts。以前这里是一大段手抄的字符串，
+ * 已经教着 v1 的字段名（overlay_elements / iodScale / type:"tear-pool"）——
+ * 照它生成出来的 JSON 现在一份都过不了校验。不要再把 schema 抄进这个文件。
+ *
+ * 注意能力差距：skill 那条路能跑校验、能渲染出图、能看图，是完整闭环；
+ * 这条路只能跑 validateTemplate 回喂，是半个闭环。要补齐得在服务端起
+ * headless chromium，那是另一笔基建。
  */
-
-const SYSTEM_PROMPT = `You are a template designer for AR Studio. Generate a valid template JSON.
-
-## Available Face Anchors (use these names, never raw numbers):
-${Object.keys(FACE_ANCHORS).join(", ")}
-
-## Available SVG Assets:
-${listSvgKeys().join(", ")}
-
-## Animation Presets:
-- float: { preset: "float", amplitude: number, period: number, phase?: number }
-- fall: { preset: "fall", period: number, phase?: number }
-- pulse: { preset: "pulse", scaleRange: [min, max], period: number }
-- spin: { preset: "spin", period: number }
-- emit-fall-fade: { preset: "emit-fall-fade", distance: number, period: number, phase?: number, outwardDrift?: 0.08, shrink?: 0.3 }
-
-## Template Types:
-- "overlay": static screen-space elements (overlay_elements array, each with nx/ny/sizeW)
-- "facetrack": face-anchored elements (face_track_elements array, each with landmark/iodScale)
-
-## Element Fields:
-- id: unique string
-- type: "svg" | "text" (overlay) or "tear-pool" | "trailing-tear" | "blush" | "sticker" | "text" (facetrack)
-- svgAsset: key from SVG assets list
-- text: string content (for text type)
-- landmark: anchor name from the list above (facetrack only)
-- offsetX/offsetY: offset in IOD units (facetrack sticker only)
-- iodScale: size relative to inter-iris distance
-- nx/ny: normalized screen position 0-1 (overlay only)
-- sizeW: width as fraction of screen width (overlay only)
-- animations: array of animation presets
-
-## Rules:
-1. Always use semantic anchor names, never numbers
-2. All SVG assets must exist in the available list
-3. iodScale should be 0.05-1.0 for most elements
-4. Template must have slug, name (zh+en), category, price_cents, template_type
-5. Return ONLY valid JSON, no markdown fences`;
+const SYSTEM_PROMPT = buildSystemPrompt();
 
 export async function POST(req: NextRequest) {
   let body: { description?: string; validate?: boolean };

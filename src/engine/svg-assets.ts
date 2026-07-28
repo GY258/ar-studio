@@ -13,14 +13,11 @@ import { sanitizeSvg, extractAspect } from "./svg-sanitize";
 /** 内置素材库。构建时作为字符串常量打包，不依赖文件系统。 */
 const SVG_LIB: Record<string, string> = {
 
-  "tear-streak-left": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 28" fill="none">
+  // 只留一份左向的。右眼用 mirrorPair 自动带的 mirror 翻过来，
+  // 分左右两个文件会逼着 mirrorPair 去猜后缀，那是把素材命名规则写进引擎。
+  "tear-streak": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 28" fill="none">
   <path d="M8 14H44" stroke="#62C3F2" stroke-width="24" stroke-linecap="round"/>
   <ellipse cx="12" cy="10" rx="5" ry="4" fill="#fff" fill-opacity=".55"/>
-</svg>`,
-
-  "tear-streak-right": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 28" fill="none">
-  <path d="M8 14H44" stroke="#62C3F2" stroke-width="24" stroke-linecap="round"/>
-  <ellipse cx="40" cy="10" rx="5" ry="4" fill="#fff" fill-opacity=".55"/>
 </svg>`,
 
   "tear-drop": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 34" fill="none">

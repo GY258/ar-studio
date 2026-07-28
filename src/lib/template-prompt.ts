@@ -1,0 +1,283 @@
+/**
+ * 模板知识的**唯一**来源。
+ *
+ * 有两个地方消费同一份知识：
+ *   - 开发期在仓库里写模板  → .claude/skills/ar-template/reference/（由 gen-skill-reference 生成）
+ *   - 运行期用户描述生成    → /api/generate 的 system prompt
+ *
+ * 两边必须共用这一个文件，否则半年后就是两套互相矛盾的说明书。
+ * 这里的内容全部从 anchors.ts / svg-assets.ts / 模板目录读出来，不手写常量——
+ * 手写的那一刻就开始漂移了。
+ */
+
+import { FACE_ANCHORS, ANCHOR_PAIRS } from "@/engine/anchors";
+import { listSvgKeys, getSvg } from "@/engine/svg-assets";
+import { extractAspect } from "@/engine/svg-sanitize";
+
+/** ElementV2 / AnimationV2 / GeneratorV2 / SourceEffect 的类型说明。 */
+export function buildSchemaReference(): string {
+  const anchorNames = Object.keys(FACE_ANCHORS);
+
+  return `## 模板骨架
+
+\`\`\`jsonc
+{
+  "slug": "kebab-case",                 // 小写字母 / 数字 / 连字符
+  "name": { "zh": "中文名", "en": "English" },
+  "category": "face | sticker | fun | ...",
+  "sort_order": 60,                     // 列表排序，小的在前
+  "price_cents": 0,
+  "schema_version": 2,
+  "template_type": "facetrack | overlay",
+  "perception": ["face"],               // 用到什么感知能力就写什么
+  "preview": {},
+  "elements": [ /* ElementV2 或生成器 */ ],
+  "source": { /* 可选，帧效果 */ }
+}
+\`\`\`
+
+\`template_type\` 只影响默认的 perception，元素本身不分类型——
+一个模板里同时有跟脸的元素和固定在屏幕上的元素是合法的。
+
+## ElementV2
+
+三个维度彼此正交，不要互相耦合：
+
+\`\`\`ts
+interface ElementV2 {
+  id: string;                 // 模板内唯一
+  asset: ElementAsset;        // 画什么
+  anchor: ElementAnchor;      // 画在哪
+  size: { ref: SizeRef; scale: number; fit?: SizeFit };  // 画多大，scale ∈ (0, 3]
+  rotation?: number;          // 度
+  followRoll?: boolean;       // 是否跟头部滚转。face 空间默认 true
+  opacity?: number;           // [0, 1]
+  animations?: AnimationV2[];
+}
+
+type ElementAsset =
+  | { kind: "svg-lib";    key: string }        // 素材库贴纸，key 见素材清单
+  | { kind: "svg-inline"; svg: string }        // 现写的 SVG，必须带 viewBox
+  | { kind: "text";       text: string; color?: string; fontWeight?: number; shadow?: string }
+  | { kind: "gradient";   shape: "ellipse"; color: string; opacity?: number }
+
+type ElementAnchor =
+  | { space: "screen"; nx: number; ny: number }   // 归一化屏幕坐标，[-0.2, 1.2]
+  | { space: "face";   landmark: FaceAnchorName;  // 只写语义名，绝不写数字
+      offset?: [number, number];                  // 单位 IOD（瞳距），y 正数向下
+      mirror?: boolean }                          // 水平翻转
+
+type SizeRef = "vw" | "iod" | "eye_width" | "face_width"
+type SizeFit = "width" | "font"
+\`\`\`
+
+**\`size.ref\` 与 \`anchor.space\` 正交。** \`space: "face"\` + \`ref: "vw"\` 是合法且常用的
+组合，含义是「跟着脸平移，但按屏幕定大小」，人退远时不会跟着缩小。反过来
+\`space: "screen"\` + \`ref: "iod"\` 也合法。别因为锚在脸上就默认尺寸得用 iod。
+
+**\`size.fit\` 决定 scale 在量什么。** \`width\` = 元素画出来有多宽，高度按素材比例推；
+\`font\` = 字号有多大，宽度由内容长度决定。缺省时 text 走 \`font\`，其余走 \`width\`。
+「这行字占屏幕 1/3 宽」和「这行字 28px 高」是两个诉求，猜哪个都会猜错，所以显式写。
+svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处理。
+
+高度一律按 viewBox 的高宽比自动算——不要手填 aspect，这个字段已经没有了。
+
+## AnimationV2
+
+多条动画叠加。\`period\` 单位秒，\`phase\` 归一化到一个周期（0~1）。
+
+\`\`\`ts
+| { preset: "float";  amplitude: number; period: number; phase?: number }
+  // 上下浮动。amplitude 是画面高度的比例，0.01 = 1%H
+| { preset: "fall";   period: number; phase?: number }
+  // 从画面顶飞到画面底并循环。走整屏高度，与锚点的 ny 无关
+| { preset: "pulse";  scaleRange: [number, number]; period: number; phase?: number }
+| { preset: "spin";   period: number; phase?: number }
+| { preset: "emit-fall-fade";
+    distance: number;        // 位移距离，单位 IOD
+    period: number;
+    phase?: number;
+    outwardDrift?: number;   // 默认 0.08，越往下越往外撇
+    shrink?: number;         // 默认 0.3
+    emitPortion?: number;    // 默认 0.15，冒出来占周期的比例
+    fadePortion?: number }   // 默认 0.15
+\`\`\`
+
+## 生成器
+
+和平铺元素完全等价，写在 \`elements\` 里，loadTemplate 阶段展开。
+生成器覆盖不了的排列（比如摆成心形）直接写平铺列表就行，两者没有优劣。
+
+\`\`\`ts
+| { generate: "mirrorPair"; anchor: PairName; offset?: [number, number];
+    item: Item; children?: Generator[] }
+  // 左右各一个。右侧自动带 mirror: true 并翻转 x 偏移
+| { generate: "trail"; count: number; step: number; decay?: number;
+    direction?: "down" | "down-out"; phaseShift?: number; item: Item }
+  // 一串。step 是 y 间距（IOD），phaseShift 是相邻两个的起始时间差（秒）
+| { generate: "columns"; rows: number; sides: "both" | "left" | "right";
+    startOffset: [number, number]; stepY: number; driftX?: number;
+    labels?: string[]; item: Item }
+  // 注意字段名是 startOffset，不是 start
+| { generate: "scatter"; count: number; seed: number;
+    sizeRange?: [number, number]; edgeBias?: number; item: Item }
+  // 屏幕空间满屏撒。count 是标量不是区间。seed 必填
+| { generate: "ring"; count: number; radius: number;
+    arc?: [number, number]; tangentRotate?: boolean; item: Item }
+| { generate: "spread"; count: number; width: number; item: Item }
+\`\`\`
+
+\`item\` 是「去掉 id 和 anchor 的 ElementV2」——这两个字段由生成器负责填，写了会被拒收。
+
+## 成对锚点（mirrorPair 的 anchor）
+
+${Object.entries(ANCHOR_PAIRS)
+  .map(([k, v]) => `- \`${k}\` → ${v[0]} / ${v[1]}`)
+  .join("\n")}
+
+写 \`lower_eyelid\`，不是 \`lower_eyelid_left\`。
+
+## 帧效果 source
+
+和 \`elements\` 平级。元素是「画在上面的东西」，source 是「源视频怎么被画出来」，两回事。
+
+\`\`\`ts
+{
+  mask: { provider: "person" | "none";     // face-ellipse 留了枚举没实现
+          feather?: number;                // [0, 0.1]
+          onLost?: "clear" | "hold" | "full" },
+  apply: "inside" | "outside",             // 效果作用在人身上 / 背景上
+  effect: { kind: "pixelate"; blocks: number }   // blocks ∈ [4, 200]，短边格数
+        | { kind: "blur"; radius: number }       // 尚未实现
+}
+\`\`\`
+
+\`provider: "person"\` 时 \`perception\` 必须包含 \`"segmentation"\`，否则分割模型不会被加载。
+\`blocks\` 是真实参数，和菜单文案上写的「240p」没有换算关系。
+
+## 硬约束
+
+1. 锚点只写语义名。数字编号是引擎内部实现，写进 JSON 会被校验拒收。
+2. \`scatter\` 必须带 \`seed\`。没有 seed 展开不确定，渲染回归的 golden 对比不成立。
+3. \`svg-inline\` 里出现 \`script\` / \`foreignObject\` / \`on*\` 事件属性 / 外链 \`href\` /
+   \`style\` 里的 \`url(\` 外链，校验会**拒收**而不是清洗。修掉它，不要绕过。
+4. 单模板展开后 ≤ 120 个元素。
+5. 引擎里不允许出现 \`if (slug === "...")\`。需要新维度就扩 schema，不要开特例分支。
+
+## 可用锚点（${anchorNames.length} 个）
+
+${anchorNames.join(", ")}
+`;
+}
+
+/** 素材清单：key + viewBox 高宽比。 */
+export function buildAssetIndex(): string {
+  const rows = listSvgKeys()
+    .sort()
+    .map((key) => {
+      const svg = getSvg(key) ?? "";
+      const vb = svg.match(/viewBox\s*=\s*["']([^"']+)["']/)?.[1] ?? "—";
+      return `| \`${key}\` | ${vb} | ${extractAspect(svg).toFixed(3)} |`;
+    });
+
+  return `素材放在 \`src/content/assets/\`，构建时打包成字符串常量。
+高宽比（高/宽）从 viewBox 自动解析，**不要在 JSON 里手填 aspect**——这个字段已经删了。
+
+| key | viewBox | 高/宽 |
+|---|---|---|
+${rows.join("\n")}
+
+用法：\`"asset": { "kind": "svg-lib", "key": "tear-drop" }\`
+
+清单里没有想要的东西时，按这个顺序找：
+1. 换个近似的 key 凑合（大部分「换个形状」的需求其实是换颜色）
+2. 写 \`{ "kind": "svg-inline", "svg": "<svg viewBox=...>...</svg>" }\`，必须带 viewBox
+3. 都不行才新增文件到 \`src/content/assets/<key>.svg\`，然后重新跑 \`npm run gen:skill-reference\`，
+   否则清单里没有你的新 key，后续会话找不到它
+`;
+}
+
+/** 锚点表。 */
+export function buildAnchorReference(): string {
+  const groups: [string, string[]][] = [
+    ["眼部", ["lower_eyelid", "upper_eyelid", "eye_outer", "iris"]],
+    ["中轴", ["nose_bridge", "nose_tip", "forehead", "head_top", "chin", "mouth_center", "upper_lip", "lower_lip"]],
+    ["两侧", ["cheek", "temple", "jaw", "ear"]],
+  ];
+  const all = Object.entries(FACE_ANCHORS) as [string, number][];
+  const used = new Set<string>();
+
+  const section = (names: string[]) => {
+    const rows: string[] = [];
+    for (const prefix of names) {
+      const matches = all.filter(([n]) => n === prefix || n === `${prefix}_left` || n === `${prefix}_right`);
+      for (const [n, i] of matches) {
+        used.add(n);
+        rows.push(`| \`${n}\` | ${i} |`);
+      }
+    }
+    return rows.join("\n");
+  };
+
+  const body = groups
+    .map(([title, names]) => `### ${title}\n\n| 语义名 | mesh 编号（引擎内部，JSON 里不要写） |\n|---|---|\n${section(names)}`)
+    .join("\n\n");
+
+  const leftover = all.filter(([n]) => !used.has(n));
+
+  return `JSON 里**只准写左列的语义名**。右列的编号是引擎内部实现，
+在 478 个编号里挑数字是幻觉重灾区，语义名就是为了消除这个问题——写数字会被校验拒收。
+
+${body}
+${leftover.length ? `\n### 其他\n\n${leftover.map(([n, i]) => `| \`${n}\` | ${i} |`).join("\n")}\n` : ""}
+## 成对锚点
+
+\`mirrorPair\` 的 \`anchor\` 写这一列，不是上面的单侧名：
+
+| 成对名 | 展开成 |
+|---|---|
+${Object.entries(ANCHOR_PAIRS)
+  .map(([k, v]) => `| \`${k}\` | ${v[0]} + ${v[1]}（右侧自动 mirror） |`)
+  .join("\n")}
+
+## 偏移的单位
+
+\`anchor.offset\` 是 \`[x, y]\`，单位是 **IOD（瞳距）**，不是像素也不是 size 的参照物。
+y 为正表示向下。偏移会跟着头部滚转一起旋转。
+`;
+}
+
+/** 现有模板作 few-shot。 */
+export function buildExamples(templates: { slug: string; json: string }[]): string {
+  return `这些是仓库里真实跑着的模板，照着改比从零写快。
+
+${templates
+  .map(
+    (t) => `## ${t.slug}
+
+\`\`\`json
+${t.json.trim()}
+\`\`\`
+`,
+  )
+  .join("\n")}`;
+}
+
+/** /api/generate 用的 system prompt。 */
+export function buildSystemPrompt(): string {
+  return `你是 AR Studio 的模板设计师。用户描述一个相机特效，你输出一份模板 JSON。
+
+只输出 JSON 本身，不要 markdown 代码围栏，不要任何解释文字。
+
+${buildSchemaReference()}
+
+# 可用素材
+
+${buildAssetIndex()}
+
+# 判断标准
+
+想法能否表达为「平铺元素 + 已有动画原语」？能就写 JSON。
+表达不了时不要编造字段——返回一个尽量接近的版本，schema 里没有的维度就放弃掉。
+`;
+}

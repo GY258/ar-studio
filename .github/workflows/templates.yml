@@ -1,0 +1,50 @@
+name: templates
+
+# 模板校验 + 渲染回归。
+# 全程离线：fixture 和 golden 都在仓库里，不下载 MediaPipe 模型、不需要 GPU。
+# 如果 test:render 开始需要访问 @mediapipe 的 WASM 或模型文件，
+# 说明 provider 抽得不干净，回去检查 face-tracker.ts / segmentation.ts。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  templates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      # L0，秒级，无浏览器
+      - name: 模板 schema 校验
+        run: npm run validate:templates
+
+      # reference 必须与源码一致。这条检查比一个漂移的文档便宜得多。
+      - name: skill reference 未漂移
+        run: |
+          npm run gen:skill-reference
+          git diff --exit-code .claude/skills/ar-template/reference \
+            || { echo "::error::reference 与源码不一致，本地跑 npm run gen:skill-reference 并提交"; exit 1; }
+
+      - run: npx playwright install --with-deps chromium
+
+      # L2，golden 与 fixture 都在仓库里，无外网依赖
+      - name: 渲染回归
+        run: npm run test:render
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: render-diffs
+          path: test/.artifacts/
+          if-no-files-found: ignore

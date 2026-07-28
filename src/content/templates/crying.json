@@ -4,24 +4,46 @@
   "category": "face",
   "sort_order": 60,
   "price_cents": 0,
+  "schema_version": 2,
   "template_type": "facetrack",
+  "perception": ["face"],
   "preview": {},
-  "face_track_elements": [
-    { "id": "tear-l", "type": "tear-pool", "svgAsset": "tear-streak-left",  "landmark": "lower_eyelid_left",  "iodScale": 0.28 },
-    { "id": "tear-r", "type": "tear-pool", "svgAsset": "tear-streak-right", "landmark": "lower_eyelid_right", "iodScale": 0.28 },
-
-    { "id": "drop-l0", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": "lower_eyelid_left",  "iodScale": 0.16 },
-    { "id": "drop-l1", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": "lower_eyelid_left",  "iodScale": 0.16 },
-    { "id": "drop-l2", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": "lower_eyelid_left",  "iodScale": 0.16 },
-
-    { "id": "drop-r0", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": "lower_eyelid_right", "iodScale": 0.16, "mirror": true },
-    { "id": "drop-r1", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": "lower_eyelid_right", "iodScale": 0.16, "mirror": true },
-    { "id": "drop-r2", "type": "trailing-tear", "svgAsset": "tear-drop", "landmark": "lower_eyelid_right", "iodScale": 0.16, "mirror": true },
-
-    { "id": "tt-text", "type": "text", "text": "(T_T)", "nx": 0.5, "ny": 0.92, "fontSizeW": 0.07, "color": "#FFFFFF", "shadow": "0 2 5 rgba(0,0,0,.35)" }
-  ],
-  "face_track_animation": {
-    "breathe": { "scaleRange": [0.97, 1.03], "period": 2.0 },
-    "tears": { "count": 3, "distance": 1.2, "period": 2.8, "phaseShift": 0.9 }
-  }
+  "elements": [
+    {
+      "generate": "mirrorPair",
+      "anchor": "lower_eyelid",
+      "offset": [0, 0.0754],
+      "item": {
+        "asset": { "kind": "svg-lib", "key": "tear-streak" },
+        "size": { "ref": "iod", "scale": 0.28 },
+        "animations": [{ "preset": "pulse", "scaleRange": [0.97, 1.03], "period": 2.0 }]
+      },
+      "children": [
+        {
+          "generate": "trail",
+          "count": 3,
+          "step": 0,
+          "decay": 1,
+          "phaseShift": 0.9,
+          "item": {
+            "asset": { "kind": "svg-lib", "key": "tear-drop" },
+            "size": { "ref": "iod", "scale": 0.16 },
+            "animations": [{ "preset": "emit-fall-fade", "distance": 1.2, "period": 2.8 }]
+          }
+        }
+      ]
+    },
+    {
+      "id": "tt-text",
+      "asset": {
+        "kind": "text",
+        "text": "(T_T)",
+        "color": "#FFFFFF",
+        "fontWeight": 700,
+        "shadow": "0 2 5 rgba(0,0,0,.35)"
+      },
+      "anchor": { "space": "screen", "nx": 0.5, "ny": 0.92 },
+      "size": { "ref": "vw", "scale": 0.07 }
+    }
+  ]
 }

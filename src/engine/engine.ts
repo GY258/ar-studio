@@ -1,12 +1,14 @@
 import * as THREE from "three";
-import { FilesetResolver, ImageSegmenter, type ImageSegmenterResult } from "@mediapipe/tasks-vision";
 import { OccupancyField } from "./occupancy";
+import {
+  MediaPipeSegmentationProvider,
+  type SegmentationProvider,
+} from "./segmentation";
 import { ParticleSystem } from "./particles";
-import { OverlayRenderer } from "./overlay-renderer";
-import { FaceRenderer } from "./face-renderer";
+import { ElementRenderer } from "./element-renderer";
+import { FaceTracker, MediaPipeLandmarkProvider, type FrameSource, type LandmarkProvider } from "./face-tracker";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
-import { SEG_MODEL, WASM_BASE } from "@/lib/assets";
 import type { ControlValues, TemplateConfig, TemplateType } from "./types";
 
 export interface EngineStats {
@@ -17,7 +19,8 @@ export interface EngineStats {
 
 export interface EngineOptions {
   canvas: HTMLCanvasElement;
-  video: HTMLVideoElement;
+  /** 线上是摄像头 video。离线 harness 传静态图，走 setSource() */
+  video?: HTMLVideoElement;
   onStats?: (s: EngineStats) => void;
   onError?: (e: Error) => void;
 }
@@ -30,12 +33,14 @@ export interface EngineOptions {
  * 检测和渲染解耦：分割只在有新视频帧时跑（靠 currentTime 变化判断），渲染仍然满帧。
  */
 export class ArEngine {
-  private readonly video: HTMLVideoElement;
+  private readonly video: HTMLVideoElement | null;
+  /** 当前画面源。摄像头 video 或离线 harness 的静态图 / canvas。 */
+  private source: FrameSource;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-640, 640, 360, -360, -100, 100);
   private readonly bg: THREE.Mesh;
-  private readonly videoTex: THREE.VideoTexture;
+  private sourceTex: THREE.Texture;
   private bgMat: THREE.Material;
   private maskTex: THREE.DataTexture | null = null;
   private readonly prop: THREE.Mesh;
@@ -50,11 +55,16 @@ export class ArEngine {
   private controls: ControlValues = {};
   /** 归一化屏幕坐标，(0,0) 是中心，y 向上为正。 */
   private emitPos = { x: 0, y: 0.34 };
-  private readonly overlays: OverlayRenderer;
-  private readonly faceRenderer: FaceRenderer;
+  private readonly elements: ElementRenderer;
+  private readonly faceTracker = new FaceTracker();
   private templateType: TemplateType = "particle";
   private perception: string[] = ["segmentation"];
-  private segmenter: ImageSegmenter | null = null;
+  private segProvider: SegmentationProvider | null = null;
+  /** 丢人兜底策略，来自 source.mask.onLost */
+  private onLost: "clear" | "hold" | "full" = "clear";
+  private applyOutside = true;
+  /** source.effect.blocks，短边格数。resize 时要按新比例重算长边格数 */
+  private blocks = 0;
   private raf = 0;
   private lastT = 0;
   private lastVideoTime = -1;
@@ -69,16 +79,17 @@ export class ArEngine {
   private readonly onError?: (e: Error) => void;
 
   constructor(opts: EngineOptions) {
-    this.video = opts.video;
+    this.video = opts.video ?? null;
+    this.source = opts.video ?? document.createElement("canvas");
     this.onStats = opts.onStats;
     this.onError = opts.onError;
 
-    this.renderer = new THREE.WebGLRenderer({ canvas: opts.canvas, antialias: true, preserveDrawingBuffer: false });
+    // preserveDrawingBuffer：离线 harness 要在 render 之后截图，不保留会拿到空白帧
+    this.renderer = new THREE.WebGLRenderer({ canvas: opts.canvas, antialias: true, preserveDrawingBuffer: true });
     this.renderer.setClearColor(0x000000, 1);
 
-    this.videoTex = new THREE.VideoTexture(this.video);
-    this.videoTex.colorSpace = THREE.SRGBColorSpace;
-    this.bgMat = new THREE.MeshBasicMaterial({ map: this.videoTex });
+    this.sourceTex = makeSourceTexture(this.source);
+    this.bgMat = new THREE.MeshBasicMaterial({ map: this.sourceTex });
     this.bg = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.bgMat);
     this.bg.position.z = -1;
     this.bg.renderOrder = 0;
@@ -92,32 +103,64 @@ export class ArEngine {
     this.prop.renderOrder = 3; // 必须压在粒子之上，雪才是从云里出来的
     this.scene.add(this.prop);
 
-    this.overlays = new OverlayRenderer(this.scene);
-    this.faceRenderer = new FaceRenderer(this.scene);
+    this.elements = new ElementRenderer(this.scene);
 
     this.attachDrag(opts.canvas);
     this.resize();
   }
 
+  /**
+   * 换画面源。离线验证靠这个把摄像头换成一张静态图 —— 不换的话，
+   * 没有摄像头就一帧都渲染不出来，LLM 写完模板拿不到任何反馈。
+   */
+  setSource(el: FrameSource) {
+    this.source = el;
+    this.sourceTex.dispose();
+    this.sourceTex = makeSourceTexture(el);
+    const mat = this.bgMat as THREE.MeshBasicMaterial & { uniforms?: Record<string, { value: unknown }> };
+    if (mat.uniforms?.videoTex) mat.uniforms.videoTex.value = this.sourceTex;
+    else if (mat.map !== undefined) {
+      mat.map = this.sourceTex;
+      mat.needsUpdate = true;
+    }
+    this.resize();
+  }
+
+  /** 注入 landmark 来源。不调用则用 MediaPipe，测试里注入 fixture 回放。 */
+  setLandmarkProvider(p: LandmarkProvider) {
+    this.faceTracker.setProvider(p);
+  }
+
+  /** 元素纹理全部就绪。截图前必须等它，否则会拍到一张空白帧。 */
+  whenReady(): Promise<void> {
+    return this.elements.ready();
+  }
+
+  /** 注入分割来源。不调用则用 MediaPipe，测试里注入 fixture 回放。 */
+  setSegmentationProvider(p: SegmentationProvider) {
+    this.segProvider?.close?.();
+    this.segProvider = p;
+  }
+
   /* ---------------- 生命周期 ---------------- */
 
   async loadPerception(): Promise<void> {
-    if (this.segmenter) return;
-    const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
-    this.segmenter = await ImageSegmenter.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: SEG_MODEL, delegate: "GPU" },
-      runningMode: "VIDEO",
-      outputCategoryMask: true,
-      outputConfidenceMasks: false,
-    });
+    if (this.segProvider) return; // 已注入 fixture provider 就别再拉模型
+    const provider = new MediaPipeSegmentationProvider();
+    await provider.load();
+    this.segProvider = provider;
   }
 
   async loadFace(): Promise<void> {
-    await this.faceRenderer.loadFaceMesh();
+    if (this.faceTracker.hasProvider()) return; // 已注入 fixture provider 就别再拉模型
+    const provider = new MediaPipeLandmarkProvider();
+    await provider.load();
+    this.faceTracker.setProvider(provider);
   }
 
   /** 不强制比例，让摄像头用原生分辨率，cover 模式负责显示裁剪。 */
   async startCamera(deviceId?: string): Promise<void> {
+    if (!this.video) throw new Error("startCamera 需要一个 video 元素；离线模式请用 setSource()");
     this.degraded = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
@@ -149,13 +192,16 @@ export class ArEngine {
 
   dispose() {
     this.stop();
-    const stream = this.video.srcObject as MediaStream | null;
-    stream?.getTracks().forEach((t) => t.stop());
-    this.video.srcObject = null;
-    this.segmenter?.close();
+    if (this.video) {
+      const stream = this.video.srcObject as MediaStream | null;
+      stream?.getTracks().forEach((t) => t.stop());
+      this.video.srcObject = null;
+    }
+    this.segProvider?.close?.();
     this.particles.dispose();
-    this.overlays.dispose();
-    this.faceRenderer.dispose();
+    this.elements.dispose();
+    this.faceTracker.dispose();
+    this.sourceTex.dispose();
     this.propTextures.forEach((t) => t.dispose());
     this.renderer.dispose();
   }
@@ -165,11 +211,26 @@ export class ArEngine {
   setTemplate(cfg: TemplateConfig) {
     this.cfg = cfg;
     this.templateType = cfg.templateType ?? "particle";
-    this.perception = cfg.perception ?? (this.templateType === "particle" ? ["segmentation"] : []);
+    // facetrack 模板即使 JSON 没写 perception 也需要人脸，这里补上，
+    // 否则 perception 驱动的分发不会去检测 landmark。
+    this.perception = cfg.perception?.length
+      ? [...cfg.perception]
+      : this.templateType === "particle"
+        ? ["segmentation"]
+        : this.templateType === "facetrack"
+          ? ["face"]
+          : [];
+    if (this.templateType === "facetrack" && !this.perception.includes("face")) {
+      this.perception.push("face");
+    }
+    // 有 face 空间元素的 overlay 模板同样需要人脸
+    if (cfg.elements?.some((e) => e.anchor.space === "face") && !this.perception.includes("face")) {
+      this.perception.push("face");
+    }
 
     // 清理其他类型的渲染状态
-    this.overlays.clear();
-    this.faceRenderer.clear();
+    this.elements.clear();
+    this.faceTracker.reset();
     this.particles.clear();
     this.particles.hide();
     this.prop.visible = false;
@@ -182,20 +243,21 @@ export class ArEngine {
       this.propMat.needsUpdate = true;
       this.prop.visible = true;
       this.layoutProp();
-    } else if (this.templateType === "overlay" && cfg.overlayElements) {
-      this.overlays.setViewport(this.W, this.H);
-      this.overlays.setElements(cfg.overlayElements).catch((e) => this.onError?.(e as Error));
-    } else if (this.templateType === "facetrack" && cfg.faceTrackElements) {
-      this.faceRenderer.setViewport(this.W, this.H);
-      this.faceRenderer.setElements(cfg.faceTrackElements, cfg.faceTrackAnimation).catch((e) => this.onError?.(e as Error));
-      this.loadFace().catch((e) => this.onError?.(e as Error));
+    }
+
+    // 元素不再按 templateType 分流：overlay 和 facetrack 走同一个渲染器，
+    // 差别只在每个元素自己的 anchor.space。
+    if (cfg.elements?.length) {
+      this.elements.setViewport(this.W, this.H);
+      this.elements.setElements(cfg.elements).catch((e) => this.onError?.(e as Error));
     }
 
     // 帧效果（背景马赛克等）
     this.setupSourceEffect(cfg.source);
 
-    // 按 perception 按需加载模型
-    if (this.perception.includes("segmentation") && !this.segmenter) {
+    // 按 perception 按需加载模型。多一个模型就是多一份内存和每帧开销，
+    // 所以只加载 JSON 声明要用的。
+    if (this.perception.includes("segmentation") && !this.segProvider) {
       this.loadPerception().catch((e) => this.onError?.(e as Error));
     }
     if (this.perception.includes("face")) {
@@ -206,12 +268,13 @@ export class ArEngine {
   private setupSourceEffect(source?: import("./types").SourceEffect) {
     if (!source || source.effect.kind !== "pixelate") {
       // 恢复普通视频材质
-      this.bgMat = new THREE.MeshBasicMaterial({ map: this.videoTex });
+      this.bgMat = new THREE.MeshBasicMaterial({ map: this.sourceTex });
       this.bg.material = this.bgMat;
       this.maskTex?.dispose();
       this.maskTex = null;
       return;
     }
+    this.onLost = source.mask.onLost ?? "clear";
 
     // 创建蒙版纹理（112x63，与 OccupancyField 同尺寸）
     const GW = 112, GH = 63;
@@ -222,12 +285,16 @@ export class ArEngine {
 
     const blocks = source.effect.blocks;
     const applyOutside = source.apply === "outside";
+    this.applyOutside = applyOutside;
+    this.blocks = blocks;
 
     this.bgMat = new THREE.ShaderMaterial({
       uniforms: {
-        videoTex: { value: this.videoTex },
+        videoTex: { value: this.sourceTex },
         maskTex: { value: this.maskTex },
-        blocks: { value: blocks },
+        // blocks 的定义是「短边分几格」，长边按比例给更多格，块才是正方形的。
+        // 两个轴都用同一个数会得到被拉长的矩形块，一眼假。resize 时同步更新。
+        blocks: { value: this.blockGrid(blocks) },
         applyOutside: { value: applyOutside ? 1.0 : 0.0 },
       },
       vertexShader: `
@@ -240,7 +307,7 @@ export class ArEngine {
       fragmentShader: `
         uniform sampler2D videoTex;
         uniform sampler2D maskTex;
-        uniform float blocks;
+        uniform vec2 blocks;
         uniform float applyOutside;
         varying vec2 vUv;
         void main() {
@@ -289,6 +356,12 @@ export class ArEngine {
 
   /* ---------------- 内部 ---------------- */
 
+  /** 短边分 n 格，长边按比例给更多格，保证每块是正方形。 */
+  private blockGrid(n: number): THREE.Vector2 {
+    const aspect = this.W / this.H;
+    return aspect >= 1 ? new THREE.Vector2(Math.round(n * aspect), n) : new THREE.Vector2(n, Math.round(n / aspect));
+  }
+
   private propTexture(cfg: TemplateConfig): THREE.Texture | null {
     if (!cfg.emitter) return null;
     const cached = this.propTextures.get(cfg.slug);
@@ -327,8 +400,7 @@ export class ArEngine {
     this.camera.bottom = -this.H / 2;
     this.camera.updateProjectionMatrix();
     // bg 用 cover 模式：保持视频原始比例，裁掉多余部分，不拉伸
-    const vw = this.video.videoWidth || this.W;
-    const vh = this.video.videoHeight || this.H;
+    const { w: vw, h: vh } = sourceSize(this.source, this.W, this.H);
     const viewAspect = this.W / this.H;
     const vidAspect = vw / vh;
     let bgW: number, bgH: number;
@@ -347,9 +419,14 @@ export class ArEngine {
     // 分割遮罩覆盖整个视频帧，视频通过 cover 显示在 bgW×bgH 的区域内，
     // 粒子碰撞要对齐这个实际显示区域。
     this.field.setViewport(bgW, bgH);
+    // 视口比例变了，马赛克的长边格数要跟着变，否则块会被拉长
+    const shader = this.bgMat as THREE.ShaderMaterial;
+    if (this.blocks && shader.uniforms?.blocks) {
+      shader.uniforms.blocks.value = this.blockGrid(this.blocks);
+    }
     this.particles.setPixelRatio(dpr);
-    this.overlays.setViewport(this.W, this.H);
-    this.faceRenderer.setViewport(this.W, this.H);
+    this.elements.setViewport(this.W, this.H);
+    this.faceTracker.setViewport(this.W, this.H);
     this.layoutProp();
   }
 
@@ -378,20 +455,64 @@ export class ArEngine {
   }
 
   private runSegmentation(nowMs: number) {
-    if (!this.segmenter) return;
-    const consume = (r: ImageSegmenterResult) => {
-      const m = r.categoryMask;
-      if (m) {
-        this.field.ingest(m.getAsUint8Array(), m.width, m.height);
-        m.close();
-      }
-      r.close?.();
-    };
     try {
-      this.segmenter.segmentForVideo(this.video, nowMs, consume);
+      this.segProvider?.segment(this.source, nowMs, (d, w, h) => this.field.ingest(d, w, h));
     } catch (e) {
       this.onError?.(e as Error);
     }
+  }
+
+  /**
+   * 手动步进一帧。离线 harness 用它按固定时刻渲染，不依赖 rAF 也不依赖挂钟。
+   * t 是秒，nowMs 是毫秒——两者独立传，因为丢脸容忍用的是 ms 时间轴。
+   */
+  renderAt(t: number, nowMs = t * 1000) {
+    this.perceive(nowMs);
+    this.updateMask();
+    this.elements.update(t, this.faceTracker, this.faceTracker.frame(nowMs));
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * 「追踪上了没」要问当前真正在跑的那个感知，不能一律问分割。
+   * facetrack 模板根本不跑分割，field.seen 恒为 false，
+   * 于是脸明明已经追上了，状态栏还写着「Looking for a person…」。
+   */
+  private isTracking(nowMs: number): boolean {
+    const face = this.perception.includes("face");
+    const seg = this.perception.includes("segmentation");
+    if (face && seg) return this.faceTracker.frame(nowMs) !== null || this.field.seen;
+    if (face) return this.faceTracker.frame(nowMs) !== null;
+    if (seg) return this.field.seen;
+    return false;
+  }
+
+  private perceive(nowMs: number) {
+    if (this.perception.includes("face")) this.faceTracker.detect(this.source, nowMs);
+    if (this.perception.includes("segmentation")) this.runSegmentation(nowMs);
+  }
+
+  /**
+   * 把占据场传成纹理。7KB 的 Float32Array 每帧转 R8 上传，开销可忽略，
+   * 不要在 GPU 侧重做平滑——ingest() 里已经做过一次了。
+   */
+  private updateMask() {
+    if (!this.maskTex) return;
+    const data = this.maskTex.image.data as unknown as Uint8Array;
+    if (this.field.seen) {
+      for (let i = 0; i < this.field.grid.length; i++) {
+        data[i] = (this.field.grid[i] * 255) | 0;
+      }
+    } else if (this.onLost === "hold") {
+      return; // 保持上一帧蒙版，适合短暂遮挡
+    } else {
+      // clear = 效果哪里都不作用（人走出画面时整屏突然糊掉观感很糟）
+      // full  = 效果铺满全屏
+      // 蒙版值本身的含义随 apply 反转：outside 时 m=1 是「不作用」，inside 时 m=1 是「作用」
+      const noEffect = this.applyOutside ? 255 : 0;
+      data.fill(this.onLost === "clear" ? noEffect : 255 - noEffect);
+    }
+    this.maskTex.needsUpdate = true;
   }
 
   private loop = (now: number) => {
@@ -403,31 +524,22 @@ export class ArEngine {
     this.lastT = t;
     if (dt <= 0) return;
 
-    // 按 perception 驱动感知，不再按 templateType 锁死
-    if (this.video.currentTime !== this.lastVideoTime) {
-      this.lastVideoTime = this.video.currentTime;
-      if (this.perception.includes("face")) {
-        this.faceRenderer.detectFace(this.video, now);
-      }
-      if (this.perception.includes("segmentation")) {
-        this.runSegmentation(now);
-      }
+    // 检测和渲染解耦：感知只在有新视频帧时跑，渲染仍然满帧。
+    // 按 perception 驱动，不再按 templateType 锁死 —— 一个模板同时要人脸和分割
+    // 在旧写法里根本表达不出来。
+    const frameTime = this.video ? this.video.currentTime : t;
+    if (frameTime !== this.lastVideoTime) {
+      this.lastVideoTime = frameTime;
+      this.perceive(now);
     }
 
-    // 更新蒙版纹理（帧效果用）
-    if (this.maskTex && this.field.seen) {
-      const data = this.maskTex.image.data as unknown as Uint8Array;
-      for (let i = 0; i < this.field.grid.length; i++) {
-        data[i] = (this.field.grid[i] * 255) | 0;
-      }
-      this.maskTex.needsUpdate = true;
+    this.updateMask();
+
+    if (this.cfg?.elements?.length) {
+      this.elements.update(t, this.faceTracker, this.faceTracker.frame(now));
     }
 
-    if (this.templateType === "overlay") {
-      this.overlays.update(t);
-    } else if (this.templateType === "facetrack") {
-      this.faceRenderer.update(t);
-    } else if (this.cfg && this.cfg.emitter && this.cfg.substance) {
+    if (this.templateType === "particle" && this.cfg && this.cfg.emitter && this.cfg.substance) {
       const e = this.cfg.emitter;
       const pw = this.prop.scale.x;
       const ph = this.prop.scale.y;
@@ -454,7 +566,27 @@ export class ArEngine {
       this.fps = Math.round(this.fpsAcc / this.fpsN);
       this.fpsAcc = 0;
       this.fpsN = 0;
-      this.onStats?.({ fps: this.fps, tracking: this.field.seen, degraded: this.degraded });
+      this.onStats?.({ fps: this.fps, tracking: this.isTracking(now), degraded: this.degraded });
     }
   };
+}
+
+/** video 要 VideoTexture（每帧自动上传），静态图/canvas 用普通 Texture 上传一次。 */
+function makeSourceTexture(el: FrameSource): THREE.Texture {
+  const tex =
+    el instanceof HTMLVideoElement ? new THREE.VideoTexture(el) : new THREE.Texture(el);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** 画面源的原始像素尺寸。cover 布局要用它算比例，拿不到就退回视口尺寸。 */
+function sourceSize(el: FrameSource, fallbackW: number, fallbackH: number) {
+  if (el instanceof HTMLVideoElement) {
+    return { w: el.videoWidth || fallbackW, h: el.videoHeight || fallbackH };
+  }
+  if (el instanceof HTMLImageElement) {
+    return { w: el.naturalWidth || fallbackW, h: el.naturalHeight || fallbackH };
+  }
+  return { w: el.width || fallbackW, h: el.height || fallbackH };
 }
