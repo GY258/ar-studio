@@ -178,6 +178,7 @@ declare global {
       loadTemplate(raw: unknown): Promise<number>;
       render(t: number): void;
       snapshot(): string;
+      bgMaterialType(): string;
     };
   }
 }

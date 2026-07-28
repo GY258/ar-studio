@@ -46,12 +46,19 @@ svg 和 gradient 的 `size.scale` 才是宽度。
 
 > 症状：人走出画面后背景还糊着，或者反过来，有人时却按丢失处理了。
 
-**自定义 shader 必须自己补 `#include <colorspace_fragment>`。**
-纹理标了 `SRGBColorSpace`，采样时硬件已经把 sRGB 转成线性；内置材质会在输出端转回来，
-裸 `ShaderMaterial` 不会。少这一行，只要帧效果一开整幅画面就整体压暗（实测 232 → 206）。
+**帧效果不要用裸 `ShaderMaterial`，用 `onBeforeCompile` 往内置材质里注入。**
 
-> 症状：切到带 `source` 的模板画面就发暗发闷，切回去就正常。
-> 因为是全画面均匀变暗，不像 bug 更像「滤镜风格」，很容易被当成设计意图放过去。
+three 对**视频**纹理的 sRGB→线性 是在着色器里补的（`DECODE_VIDEO_TEXTURE` 宏），
+因为视频纹理拿不到硬件 sRGB 解码；**图片**纹理走的是硬件解码。裸 shader 两个都吃不到，
+于是同一份代码在图片源上颜色正确、在摄像头源上偏亮一次 sRGB 编码。
+自己补 `#include <colorspace_fragment>` 只修好图片那一半，摄像头那一半反而更亮。
+
+> 症状：切到带 `source` 的模板，画面发白发灰、对比度像被冲掉；切回别的模板就正常。
+> 全画面均匀偏色，不像 bug 更像「滤镜风格」，很容易被当成设计意图放过去。
+
+> **离线 harness 抓不到这个。** 它用的是 `HTMLImageElement`，走硬件解码那条路，
+> 逐像素断言全都照过，只有真机摄像头才暴露。所以测试里改成钉住
+> 「背景材质必须是 MeshBasicMaterial」这个选择本身。
 
 **蒙版分辨率别复用占据场。** `OccupancyField` 是 112×63，为粒子碰撞设计（粗且重平滑）。
 MediaPipe 实际输出的 categoryMask 和输入同分辨率（实测 960×540），

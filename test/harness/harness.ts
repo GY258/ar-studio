@@ -109,6 +109,12 @@ class Harness {
     this.engine.renderAt(t);
   }
 
+  /** 背景材质类型名，测试用来钉住「帧效果不能用裸 ShaderMaterial」这个决定。 */
+  bgMaterialType(): string {
+    if (!this.engine) throw new Error("先调 setup()");
+    return this.engine.debugBgMaterialType();
+  }
+
   /** 把当前帧读成 PNG dataURL。canvas.toDataURL 依赖 preserveDrawingBuffer。 */
   snapshot(): string {
     if (!this.canvas) throw new Error("先调 setup()");

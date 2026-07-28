@@ -335,6 +335,16 @@ test("interactive：没声明 interactive 的元素不该被拖动", async () =>
   expect(diffRatio(before, after, 0.05), "非交互元素不该被拖走").toBeLessThanOrEqual(0.0005);
 });
 
+test("帧效果必须挂在内置材质上，不能退回裸 ShaderMaterial", async () => {
+  // 这条钉的是架构决定，不是像素。裸 ShaderMaterial 吃不到 three 的
+  // DECODE_VIDEO_TEXTURE 宏 —— 视频纹理拿不到硬件 sRGB 解码，three 是在
+  // 内置着色器里补的。用裸 shader 时，图片源颜色正确、摄像头源整体偏亮一次
+  // sRGB 编码，而这个 harness 用的正是图片源，逐像素断言全都照过。
+  // 也就是说这个 bug 只能靠真机发现 —— 所以在这里把选择本身钉死。
+  await loadTemplate(harness.page, path.join(TEMPLATES, "lowres-life.json"), "front");
+  expect(await harness.page.evaluate(() => window.harness.bgMaterialType())).toBe("MeshBasicMaterial");
+});
+
 test("生成器 id 确定：同一模板重复展开产出同一串 id", async () => {
   const raw = JSON.parse(fs.readFileSync(path.join(TEMPLATES, "crying.json"), "utf8"));
   const a = expandGenerators(raw.elements).map((e) => e.id);

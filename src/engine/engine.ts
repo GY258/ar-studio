@@ -68,6 +68,8 @@ export class ArEngine {
   private applyOutside = true;
   /** source.effect.blocks，短边格数。resize 时要按新比例重算长边格数 */
   private blocks = 0;
+  /** 注入进背景材质的 uniform 引用，onBeforeCompile 时拿到 */
+  private bgUniforms: Record<string, { value: unknown }> | null = null;
   private raf = 0;
   private lastT = 0;
   private lastVideoTime = -1;
@@ -120,12 +122,10 @@ export class ArEngine {
     this.source = el;
     this.sourceTex.dispose();
     this.sourceTex = makeSourceTexture(el);
-    const mat = this.bgMat as THREE.MeshBasicMaterial & { uniforms?: Record<string, { value: unknown }> };
-    if (mat.uniforms?.videoTex) mat.uniforms.videoTex.value = this.sourceTex;
-    else if (mat.map !== undefined) {
-      mat.map = this.sourceTex;
-      mat.needsUpdate = true;
-    }
+    // 有没有帧效果，背景材质都是 MeshBasicMaterial，贴图都挂在 map 上
+    const mat = this.bgMat as THREE.MeshBasicMaterial;
+    mat.map = this.sourceTex;
+    mat.needsUpdate = true;
     this.resize();
   }
 
@@ -273,6 +273,8 @@ export class ArEngine {
       // 恢复普通视频材质
       this.bgMat = new THREE.MeshBasicMaterial({ map: this.sourceTex });
       this.bg.material = this.bgMat;
+      this.bgUniforms = null;
+      this.blocks = 0;
       this.maskTex?.dispose();
       this.maskTex = null;
       return;
@@ -289,51 +291,59 @@ export class ArEngine {
     this.applyOutside = applyOutside;
     this.blocks = blocks;
 
-    this.bgMat = new THREE.ShaderMaterial({
-      uniforms: {
-        videoTex: { value: this.sourceTex },
-        maskTex: { value: this.maskTex },
-        // blocks 的定义是「短边分几格」，长边按比例给更多格，块才是正方形的。
-        // 两个轴都用同一个数会得到被拉长的矩形块，一眼假。resize 时同步更新。
-        blocks: { value: this.blockGrid(blocks) },
-        applyOutside: { value: applyOutside ? 1.0 : 0.0 },
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D videoTex;
-        uniform sampler2D maskTex;
-        uniform vec2 blocks;
-        uniform float applyOutside;
-        varying vec2 vUv;
-        void main() {
-          vec2 grid = (floor(vUv * blocks) + 0.5) / blocks;
+    /*
+     * 往内置 MeshBasicMaterial 里注入，而不是自己写一个裸 ShaderMaterial。
+     *
+     * 裸 shader 在色彩管理上会踩坑：three 给视频纹理做 sRGB→线性 是在**着色器里**
+     * 补的（内置材质带 DECODE_VIDEO_TEXTURE 这个宏），因为视频纹理拿不到硬件 sRGB 解码；
+     * 而图片纹理走的是硬件解码。裸 shader 两个宏都吃不到，于是同一份代码
+     * 在图片源上颜色正确、在摄像头源上整体偏亮一次 sRGB 编码。
+     *
+     * 挂到内置材质上，采样和输出两端的色彩转换都交给 three，
+     * 有效果和没效果两条路的颜色就永远一致。
+     */
+    const mat = new THREE.MeshBasicMaterial({ map: this.sourceTex });
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.maskTex = { value: this.maskTex };
+      // blocks 的定义是「短边分几格」，长边按比例给更多格，块才是正方形的。
+      // 两个轴都用同一个数会得到被拉长的矩形块，一眼假。resize 时同步更新。
+      shader.uniforms.blocks = { value: this.blockGrid(blocks) };
+      shader.uniforms.applyOutside = { value: applyOutside ? 1.0 : 0.0 };
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "#include <common>",
+          `#include <common>
+          uniform sampler2D maskTex;
+          uniform vec2 blocks;
+          uniform float applyOutside;`,
+        )
+        .replace(
+          "#include <map_fragment>",
+          `
+          vec2 gridUv = (floor(vMapUv * blocks) + 0.5) / blocks;
+          vec4 sharpTexel = texture2D( map, vMapUv );
+          vec4 blockTexel = texture2D( map, gridUv );
+          #ifdef DECODE_VIDEO_TEXTURE
+            sharpTexel = vec4( mix( pow( sharpTexel.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), sharpTexel.rgb * 0.0773993808, vec3( lessThanEqual( sharpTexel.rgb, vec3( 0.04045 ) ) ) ), sharpTexel.w );
+            blockTexel = vec4( mix( pow( blockTexel.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), blockTexel.rgb * 0.0773993808, vec3( lessThanEqual( blockTexel.rgb, vec3( 0.04045 ) ) ) ), blockTexel.w );
+          #endif
           // 蒙版和视频同在「视频空间」，用同一套 uv 取样。
           // 这里**不要**再补一次镜像：背景平面的 scale.x = -1 已经把两者一起翻了，
           // shader 里再翻蒙版就翻反了 —— 人在画面偏左时，清晰区会跑到右边去。
           // OccupancyField.at() 里那个 u = 0.5 - wx/w 是「世界坐标 → 场」的映射，
           // 和这里的「uv → 纹理」是两回事，别把两条规则混在一起。
-          float m = smoothstep(0.42, 0.58, texture2D(maskTex, vUv).r);
-          vec3 pixelated = texture2D(videoTex, grid).rgb;
-          vec3 sharp = texture2D(videoTex, vUv).rgb;
+          float m = smoothstep(0.42, 0.58, texture2D(maskTex, vMapUv).r);
           // outside: 人清晰背景糊；inside: 人糊背景清晰
-          vec3 color = applyOutside > 0.5
-            ? mix(pixelated, sharp, m)
-            : mix(sharp, pixelated, m);
-          gl_FragColor = vec4(color, 1.0);
+          diffuseColor *= applyOutside > 0.5 ? mix(blockTexel, sharpTexel, m) : mix(sharpTexel, blockTexel, m);
+          `,
+        );
 
-          // 必须补这一行。纹理标了 SRGBColorSpace，采样时硬件已经把 sRGB 转成线性；
-          // 内置材质会在输出端转回来，裸 ShaderMaterial 不会 —— 少了这一步，
-          // 只要帧效果一开，整幅画面就整体压暗（实测 232 → 206、194 → 138）。
-          #include <colorspace_fragment>
-        }
-      `,
-    });
+      // 留着引用，resize 要改 blocks，蒙版换尺寸要改 maskTex
+      this.bgUniforms = shader.uniforms as Record<string, { value: unknown }>;
+    };
+
+    this.bgMat = mat;
     this.bg.material = this.bgMat;
   }
 
@@ -361,6 +371,16 @@ export class ArEngine {
 
   debugField(ctx: CanvasRenderingContext2D) {
     this.field.debugDraw(ctx);
+  }
+
+  /**
+   * 背景材质的类型名。测试用它钉住一个架构决定：
+   * 帧效果必须挂在内置材质上（onBeforeCompile 注入），不能换回裸 ShaderMaterial。
+   * 裸 shader 吃不到 three 的 DECODE_VIDEO_TEXTURE，摄像头源上颜色会整体偏亮，
+   * 而离线 harness 用的是图片源，这个 bug 在测试里根本复现不出来。
+   */
+  debugBgMaterialType(): string {
+    return this.bgMat.type;
   }
 
   /* ---------------- 内部 ---------------- */
@@ -429,9 +449,8 @@ export class ArEngine {
     // 粒子碰撞要对齐这个实际显示区域。
     this.field.setViewport(bgW, bgH);
     // 视口比例变了，马赛克的长边格数要跟着变，否则块会被拉长
-    const shader = this.bgMat as THREE.ShaderMaterial;
-    if (this.blocks && shader.uniforms?.blocks) {
-      shader.uniforms.blocks.value = this.blockGrid(this.blocks);
+    if (this.blocks && this.bgUniforms?.blocks) {
+      this.bgUniforms.blocks.value = this.blockGrid(this.blocks);
     }
     this.particles.setPixelRatio(dpr);
     this.elements.setViewport(this.W, this.H);
@@ -604,8 +623,7 @@ export class ArEngine {
     if (mw > 0 && (this.maskTex.image.width !== mw || this.maskTex.image.height !== mh)) {
       this.maskTex.dispose();
       this.maskTex = makeMaskTexture(mw, mh);
-      const shader = this.bgMat as THREE.ShaderMaterial;
-      if (shader.uniforms?.maskTex) shader.uniforms.maskTex.value = this.maskTex;
+      if (this.bgUniforms?.maskTex) this.bgUniforms.maskTex.value = this.maskTex;
     }
 
     const data = this.maskTex.image.data as unknown as Uint8Array;
