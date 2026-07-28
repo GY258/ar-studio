@@ -97,10 +97,12 @@ export interface OverlayElement {
   fontWeight?: number;
   /** CSS text-shadow */
   shadow?: string;
-  /** 浮动动画 */
+  /** 浮动动画（v1 兼容） */
   float?: { amplitude: number; period: number };
-  /** 下落动画：period 秒从顶到底循环，phase 0~1 错开起始位置 */
+  /** 下落动画（v1 兼容） */
   fall?: { period: number; phase: number };
+  /** v2 动画原语列表 */
+  animations?: import("./animations").AnimationV2[];
 }
 
 /** 人脸追踪配置 */
@@ -132,8 +134,10 @@ export interface FaceTrackElement {
   fontWeight?: number;
   color?: string;
   shadow?: string;
-  /** 浮动动画 */
+  /** 浮动动画（v1 兼容） */
   float?: { amplitude: number; period: number };
+  /** v2 动画原语列表 */
+  animations?: import("./animations").AnimationV2[];
 }
 
 export interface FaceTrackAnimation {
