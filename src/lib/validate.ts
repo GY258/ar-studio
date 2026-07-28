@@ -1,5 +1,7 @@
 import type { Control, TemplateConfig } from "@/engine/types";
 import { resolveControls } from "@/engine/resolve";
+import { FACE_ANCHORS } from "@/engine/anchors";
+import { getSvg } from "@/engine/svg-assets";
 
 const SHAPES = ["cloud", "shower", "glass", "cup"];
 const PERCEPTIONS = ["segmentation", "face", "hands"];
@@ -45,15 +47,25 @@ export function validateTemplate(raw: Raw): string[] {
 
   // overlay 和 facetrack 不需要 perception/emitter/substance/controls
   if (templateType === "overlay") {
-    if (!Array.isArray(raw.overlay_elements) || raw.overlay_elements.length === 0) {
+    const elems = raw.overlay_elements;
+    if (!Array.isArray(elems) || elems.length === 0) {
       p.push("overlay 类型需要 overlay_elements 数组");
+    } else if (elems.length > 120) {
+      p.push(`overlay_elements 有 ${elems.length} 个，上限 120`);
+    } else {
+      validateOverlayElements(elems as Raw[], p);
     }
     return p;
   }
 
   if (templateType === "facetrack") {
-    if (!Array.isArray(raw.face_track_elements) || raw.face_track_elements.length === 0) {
+    const elems = raw.face_track_elements;
+    if (!Array.isArray(elems) || elems.length === 0) {
       p.push("facetrack 类型需要 face_track_elements 数组");
+    } else if (elems.length > 120) {
+      p.push(`face_track_elements 有 ${elems.length} 个，上限 120`);
+    } else {
+      validateFaceTrackElements(elems as Raw[], p);
     }
     return p;
   }
@@ -145,4 +157,64 @@ export function checkWiring(cfg: TemplateConfig): string[] {
   const values = Object.fromEntries(cfg.controls.map((c: Control) => [c.key, c.default]));
   const { orphans } = resolveControls(cfg.substance, cfg.controls, values);
   return orphans.map((k) => `滑块 "${k}" 没有绑定任何参数`);
+}
+
+/* ---- overlay / facetrack 元素验证 ---- */
+
+const ANCHOR_NAMES = Object.keys(FACE_ANCHORS);
+const ANIM_PRESETS = ["float", "fall", "pulse", "spin", "emit-fall-fade"];
+
+function validateLandmark(v: unknown, at: string, p: string[]) {
+  if (typeof v === "string") {
+    if (!ANCHOR_NAMES.includes(v)) p.push(`${at}.landmark "${v}" 不在锚点表里。可选：${ANCHOR_NAMES.slice(0, 8).join(", ")}…`);
+  } else if (typeof v === "number") {
+    if (v < 0 || v > 477) p.push(`${at}.landmark ${v} 超出 0~477 范围`);
+  }
+}
+
+function validateAnimations(anims: unknown[], at: string, p: string[]) {
+  for (const [i, a] of anims.entries()) {
+    const aa = a as Raw;
+    if (!aa.preset || !ANIM_PRESETS.includes(aa.preset as string)) {
+      p.push(`${at}.animations[${i}].preset 无效，可选：${ANIM_PRESETS.join(", ")}`);
+    }
+    if (aa.period !== undefined && (!num(aa.period) || (aa.period as number) <= 0)) {
+      p.push(`${at}.animations[${i}].period 必须是正数`);
+    }
+  }
+}
+
+function validateOverlayElements(elems: Raw[], p: string[]) {
+  const ids = new Set<string>();
+  for (const [i, e] of elems.entries()) {
+    const at = `overlay_elements[${i}]`;
+    if (typeof e.id !== "string") { p.push(`${at}.id 必填`); continue; }
+    if (ids.has(e.id)) p.push(`${at}.id "${e.id}" 重复`);
+    ids.add(e.id);
+    if (!num(e.nx) || (e.nx as number) < -0.2 || (e.nx as number) > 1.2) p.push(`${at}.nx 应在 -0.2~1.2`);
+    if (e.ny !== undefined && !num(e.ny)) p.push(`${at}.ny 必须是数字`);
+    if (!num(e.sizeW) || (e.sizeW as number) <= 0 || (e.sizeW as number) > 1) p.push(`${at}.sizeW 应在 0~1`);
+    if (e.svgAsset && typeof e.svgAsset === "string") {
+      try { if (!getSvg(e.svgAsset as string)) p.push(`${at}.svgAsset "${e.svgAsset}" 在素材库里找不到`); } catch { /* server side */ }
+    }
+    if (Array.isArray(e.animations)) validateAnimations(e.animations as unknown[], at, p);
+  }
+}
+
+function validateFaceTrackElements(elems: Raw[], p: string[]) {
+  const ids = new Set<string>();
+  for (const [i, e] of elems.entries()) {
+    const at = `face_track_elements[${i}]`;
+    if (typeof e.id !== "string") { p.push(`${at}.id 必填`); continue; }
+    if (ids.has(e.id)) p.push(`${at}.id "${e.id}" 重复`);
+    ids.add(e.id);
+    if (e.landmark !== undefined) validateLandmark(e.landmark, at, p);
+    if (e.iodScale !== undefined && (!num(e.iodScale) || (e.iodScale as number) <= 0 || (e.iodScale as number) > 3)) {
+      p.push(`${at}.iodScale 应在 (0, 3]`);
+    }
+    if (e.svgAsset && typeof e.svgAsset === "string") {
+      try { if (!getSvg(e.svgAsset as string)) p.push(`${at}.svgAsset "${e.svgAsset}" 在素材库里找不到`); } catch { /* server side */ }
+    }
+    if (Array.isArray(e.animations)) validateAnimations(e.animations as unknown[], at, p);
+  }
 }
