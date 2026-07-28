@@ -94,6 +94,9 @@ const SVG_LIB: Record<string, string> = {
   <text x="28" y="198" font-family="system-ui,sans-serif" font-size="26" font-weight="600" fill="#333">1080p</text>
   <text x="28" y="248" font-family="system-ui,sans-serif" font-size="26" font-weight="600" fill="#333">4K</text>
   <text x="170" y="284" font-family="system-ui,sans-serif" font-size="14" fill="#999" text-anchor="middle">Quality</text>
+  <g transform="translate(244 76) scale(2)">
+    <path d="M10 8V22l4-4 2.5 6 3-1.2-2.5-6H22L10 8Z" fill="#FFF" stroke="#333" stroke-width="1.5" stroke-linejoin="round"/>
+  </g>
 </svg>`,
 
   "cursor-hand": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">

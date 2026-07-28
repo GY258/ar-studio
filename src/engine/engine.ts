@@ -430,28 +430,113 @@ export class ArEngine {
     this.layoutProp();
   }
 
+  /**
+   * 指针交互。两类目标共用一套手势：
+   *   - 声明了 interactive 的元素（画质菜单这种，用户自己摆位置和大小）
+   *   - particle 模板的发射器道具
+   * 元素优先——它画在最上面，点它的时候不该穿透到底下的道具。
+   */
   private attachDrag(canvas: HTMLCanvasElement) {
     const toNorm = (ev: PointerEvent) => {
       const r = canvas.getBoundingClientRect();
       return { x: (ev.clientX - r.left) / r.width - 0.5, y: 0.5 - (ev.clientY - r.top) / r.height };
     };
+    // 世界坐标和元素的 mesh.position 同一套：原点在中心，y 向上
+    const toWorld = (ev: PointerEvent | WheelEvent) => {
+      const r = canvas.getBoundingClientRect();
+      return {
+        x: ((ev.clientX - r.left) / r.width - 0.5) * this.W,
+        y: (0.5 - (ev.clientY - r.top) / r.height) * this.H,
+      };
+    };
+
+    let grabbed: ReturnType<ElementRenderer["hitTest"]> = null;
+    let lastPointer = { x: 0, y: 0 };
+
     canvas.addEventListener("pointerdown", (ev) => {
+      const w = toWorld(ev);
+      grabbed = this.elements.hitTest(w.x, w.y);
+      if (grabbed?.elem.interactive?.drag) {
+        canvas.setPointerCapture(ev.pointerId);
+        lastPointer = w;
+        return;
+      }
+      grabbed = null;
+
       if (!this.cfg?.emitter?.draggable) return;
       const p = toNorm(ev);
       this.dragging = true;
       canvas.setPointerCapture(ev.pointerId);
       this.grab = { x: p.x - this.emitPos.x, y: p.y - this.emitPos.y };
     });
+
     canvas.addEventListener("pointermove", (ev) => {
+      if (grabbed) {
+        const w = toWorld(ev);
+        this.elements.moveBy(grabbed, w.x - lastPointer.x, w.y - lastPointer.y);
+        lastPointer = w;
+        return;
+      }
       if (!this.dragging) return;
       const p = toNorm(ev);
       this.setEmitterPos(p.x - this.grab.x, p.y - this.grab.y);
     });
+
     for (const t of ["pointerup", "pointercancel"] as const) {
       canvas.addEventListener(t, () => {
         this.dragging = false;
+        grabbed = null;
       });
     }
+
+    canvas.addEventListener(
+      "wheel",
+      (ev) => {
+        const w = toWorld(ev);
+        const hit = this.elements.hitTest(w.x, w.y);
+        if (!hit?.elem.interactive?.resize) return;
+        // 只有真的命中了可缩放元素才吃掉滚轮，否则页面就滚不动了
+        ev.preventDefault();
+        // 按滚动量成比例，不是每个事件走固定一档：鼠标滚轮一格 deltaY ≈ 100，
+        // 触控板一次滑动可能只发一个 deltaY 很大的事件，固定档位会让它几乎没反应。
+        // 单次夹在 0.5~2 倍，防止触控板猛甩一下直接缩没。
+        const factor = Math.min(2, Math.max(0.5, Math.exp(-ev.deltaY * 0.0015)));
+        this.elements.zoomBy(hit, factor);
+      },
+      { passive: false },
+    );
+
+    // 触屏双指捏合
+    let pinchStart = 0;
+    let pinchTarget: ReturnType<ElementRenderer["hitTest"]> = null;
+    const touchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    canvas.addEventListener("touchstart", (ev) => {
+      if (ev.touches.length !== 2) return;
+      const r = canvas.getBoundingClientRect();
+      const mx = (ev.touches[0].clientX + ev.touches[1].clientX) / 2;
+      const my = (ev.touches[0].clientY + ev.touches[1].clientY) / 2;
+      pinchTarget = this.elements.hitTest(
+        ((mx - r.left) / r.width - 0.5) * this.W,
+        (0.5 - (my - r.top) / r.height) * this.H,
+      );
+      if (pinchTarget?.elem.interactive?.resize) pinchStart = touchDist(ev.touches);
+      else pinchTarget = null;
+    });
+    canvas.addEventListener(
+      "touchmove",
+      (ev) => {
+        if (!pinchTarget || ev.touches.length !== 2 || pinchStart === 0) return;
+        ev.preventDefault();
+        const d = touchDist(ev.touches);
+        this.elements.zoomBy(pinchTarget, d / pinchStart);
+        pinchStart = d;
+      },
+      { passive: false },
+    );
+    canvas.addEventListener("touchend", () => {
+      pinchTarget = null;
+      pinchStart = 0;
+    });
   }
 
   private runSegmentation(nowMs: number) {

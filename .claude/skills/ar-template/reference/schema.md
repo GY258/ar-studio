@@ -37,6 +37,7 @@ interface ElementV2 {
   followRoll?: boolean;       // 是否跟头部滚转。face 空间默认 true
   opacity?: number;           // [0, 1]
   animations?: AnimationV2[];
+  interactive?: { drag?: boolean; resize?: boolean };  // 让用户自己拖/缩，仅 screen 空间
 }
 
 type ElementAsset =
@@ -65,6 +66,11 @@ type SizeFit = "width" | "font"
 svg 和 gradient 只有宽度一种含义，写 `fit: "font"` 也按宽度处理。
 
 高度一律按 viewBox 的高宽比自动算——不要手填 aspect，这个字段已经没有了。
+
+**`interactive`** 让用户在画面上直接拖动元素、滚轮或双指缩放它。
+只对 `space: "screen"` 有意义——face 空间的位置由 landmark 决定，拖了下一帧就被拉回去。
+调整量只存在渲染器里，不写回 JSON，切模板即重置。假 UI 面板、水印这类
+「作者给个初始摆位，用户自己挪」的元素适合开这个。
 
 ## AnimationV2
 

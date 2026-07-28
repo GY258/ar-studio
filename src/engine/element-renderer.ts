@@ -25,6 +25,14 @@ interface Item {
   aspect: number;
   /** 文字：mesh 宽度 = 纹理像素宽 × (字号 / TEXT_RASTER_PX) */
   textPxWidth: number;
+  /** 用户拖出来的位移，px。只对 interactive.drag 的元素有效 */
+  userDx: number;
+  userDy: number;
+  /** 用户滚轮缩放的倍率 */
+  userScale: number;
+  /** 上一帧算出来的屏幕尺寸，命中测试用 */
+  lastW: number;
+  lastH: number;
 }
 
 export class ElementRenderer {
@@ -77,7 +85,17 @@ export class ElementRenderer {
 
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
       mesh.renderOrder = 5;
-      this.items.push({ mesh, elem, aspect: built.aspect, textPxWidth: built.textPxWidth });
+      this.items.push({
+        mesh,
+        elem,
+        aspect: built.aspect,
+        textPxWidth: built.textPxWidth,
+        userDx: 0,
+        userDy: 0,
+        userScale: 1,
+        lastW: 0,
+        lastH: 0,
+      });
       this.group.add(mesh);
     }
   }
@@ -142,7 +160,8 @@ export class ElementRenderer {
   }
 
   update(t: number, tracker: FaceTracker, face: FaceFrame | null) {
-    for (const { mesh, elem, aspect, textPxWidth } of this.items) {
+    for (const item of this.items) {
+      const { mesh, elem, aspect, textPxWidth } = item;
       const mat = mesh.material as THREE.MeshBasicMaterial;
       const isFace = elem.anchor.space === "face";
 
@@ -160,7 +179,7 @@ export class ElementRenderer {
       }
       mesh.visible = true;
 
-      const base = basePx * elem.size.scale;
+      const base = basePx * elem.size.scale * item.userScale;
       // emit-fall-fade 的 distance 以 IOD 计（face）或屏幕宽度计（screen）
       const unit = isFace && face ? face.iod : this.W;
       const anim = evaluateAnimations(elem.animations, t, this.H, unit);
@@ -198,6 +217,8 @@ export class ElementRenderer {
       if (elem.anchor.space === "screen") {
         cy += anim.positionY;
         cx += anim.outwardX;
+        cx += item.userDx;
+        cy += item.userDy;
       }
       // fall 走整屏高度，覆盖锚点算出来的 y
       if (anim.positionYAbsolute !== null) cy = anim.positionYAbsolute;
@@ -211,6 +232,8 @@ export class ElementRenderer {
       const h = w * aspect;
       const mir = elem.anchor.space === "face" && elem.anchor.mirror ? -1 : 1;
 
+      item.lastW = Math.abs(w * anim.scaleX);
+      item.lastH = Math.abs(h * anim.scaleY);
       mesh.scale.set(w * anim.scaleX * mir, h * anim.scaleY, 1);
       mesh.position.set(cx, cy, 3);
       mat.opacity = anim.opacity * (elem.opacity ?? 1);
@@ -220,6 +243,33 @@ export class ElementRenderer {
       const followRoll = elem.followRoll ?? elem.anchor.space === "face";
       mesh.rotation.z = selfRot + anim.rotation - (followRoll ? roll : 0);
     }
+  }
+
+  /**
+   * 世界坐标命中测试，只认 interactive 的元素。倒序遍历——
+   * 后加的元素画在上面，理应先被点到。
+   */
+  hitTest(wx: number, wy: number): Item | null {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const it = this.items[i];
+      if (!it.mesh.visible || !it.elem.interactive) continue;
+      const { x, y } = it.mesh.position;
+      if (Math.abs(wx - x) <= it.lastW / 2 && Math.abs(wy - y) <= it.lastH / 2) return it;
+    }
+    return null;
+  }
+
+  /** 拖动。非 drag 的元素直接忽略，调用方不用判断。 */
+  moveBy(item: Item, dx: number, dy: number) {
+    if (!item.elem.interactive?.drag) return;
+    item.userDx += dx;
+    item.userDy += dy;
+  }
+
+  /** 滚轮缩放。夹在 0.25~4 倍，免得滚过头缩没了或者铺满屏幕找不回来。 */
+  zoomBy(item: Item, factor: number) {
+    if (!item.elem.interactive?.resize) return;
+    item.userScale = Math.min(4, Math.max(0.25, item.userScale * factor));
   }
 
   clear() {

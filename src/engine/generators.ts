@@ -27,6 +27,12 @@ export type GeneratorV2 =
   | {
       generate: "trail";
       count: number;
+      /**
+       * 整串的起点偏移 [x, y]，单位 IOD。
+       * 不给的话第一个元素正好压在锚点上——眼泪这种「从泪痕下沿冒出来」的效果
+       * 就会变成「从眼睑里穿出来」，水滴顶端戳到横条上面去。
+       */
+      offset?: [number, number];
       /** 相邻两个之间的 y 间距，单位 IOD */
       step: number;
       /** 逐个缩小的倍率，size.scale 累乘 */
@@ -176,6 +182,7 @@ function expand(
     case "trail": {
       const lm = parentLandmark ?? "nose_bridge";
       const phaseShift = gen.phaseShift ?? 0;
+      const [baseX, baseY] = gen.offset ?? [0, 0];
       for (let i = 0; i < gen.count; i++) {
         const item = cloneItem(gen.item);
         const decay = Math.pow(gen.decay ?? 0.9, i);
@@ -184,7 +191,7 @@ function expand(
         result.push({
           ...item,
           id: nextId("trail"),
-          anchor: faceAnchor(lm, [outward, i * gen.step]),
+          anchor: faceAnchor(lm, [baseX + outward, baseY + i * gen.step]),
           size: scaled(item.size, decay),
           animations: shiftPhase(item.animations, i, phaseShift),
         } as ElementV2);

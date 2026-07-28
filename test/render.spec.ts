@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { expandGenerators } from "../src/engine/generators";
+import { migrateElements } from "../src/lib/migrate";
 import {
   launchHarness,
   loadTemplate,
@@ -34,6 +35,7 @@ import {
   meanColor,
   deltaE00,
   localVariance,
+  panelArea,
 } from "./image-metrics";
 
 const ROOT = process.cwd();
@@ -56,6 +58,12 @@ const CLOSURE_MAX = 0.002;
  * 一个 50px 宽的贴纸挪两像素也就百来个像素变色。
  */
 const MOTION_MIN = 0.0001;
+
+/** 展开后有没有动画。静态模板不该被「动画在动」那条断言卡住。 */
+function hasAnimations(templatePath: string): boolean {
+  const raw = JSON.parse(fs.readFileSync(templatePath, "utf8"));
+  return migrateElements(raw).elements.some((e) => (e.animations?.length ?? 0) > 0);
+}
 
 /** 有元素的模板才需要渲染回归；particle 模板走的是另一条线，本轮不碰。 */
 function templatesWithElements(): string[] {
@@ -153,7 +161,17 @@ for (const file of templatesWithElements()) {
     expect(coverage(t0, base), "元素覆盖的像素比例").toBeGreaterThan(0.001);
 
     // --- 动画确实在动 ---
-    expect(diffRatio(t0, tQuarter, 0.05), `t=0 与 t=P/4（P=${P}s）应该有差异`).toBeGreaterThan(MOTION_MIN);
+    // 没有任何动画的模板是合法的（lowres-life 就是一块静态假 UI），
+    // 对它断言「必须有差异」永远会红。显式跳过并记一笔，不要默默放过。
+    if (hasAnimations(templatePath)) {
+      expect(diffRatio(t0, tQuarter, 0.05), `t=0 与 t=P/4（P=${P}s）应该有差异`).toBeGreaterThan(MOTION_MIN);
+    } else {
+      test.info().annotations.push({
+        type: "skipped-assertion",
+        description: `${slug}: 模板没有声明任何动画，跳过「动画在动」和「周期闭合」两条断言`,
+      });
+      return;
+    }
 
     // --- 周期闭合：相位算对了才闭得上 ---
     if (closes) {
@@ -214,6 +232,54 @@ test("noface 下 onLost:clear 生效：背景恢复清晰，不崩溃", async ()
   const varNow = localVariance(frame, (W * 0.06) | 0, (H * 0.1) | 0, 120, 120);
   // clear：蒙版失效时全画面恢复原样，方差不该掉
   expect(varNow, "onLost:clear 时背景不应被马赛克").toBeGreaterThan(varBase * 0.75);
+});
+
+test("interactive：菜单能拖动、能滚轮缩放，且不影响非交互元素", async () => {
+  const tpl = path.join(TEMPLATES, "lowres-life.json");
+  await loadTemplate(harness.page, tpl, "front");
+  const before = decode(await capture(harness.page, 0));
+
+  // 从菜单中心往左上拖 120px
+  const box = (await harness.page.locator("canvas").first().boundingBox())!;
+  const cx = box.x + box.width * 0.78;
+  const cy = box.y + box.height * 0.68;
+  await harness.page.mouse.move(cx, cy);
+  await harness.page.mouse.down();
+  await harness.page.mouse.move(cx - 120, cy - 80, { steps: 6 });
+  await harness.page.mouse.up();
+
+  const dragged = decode(await capture(harness.page, 0));
+  expect(diffRatio(before, dragged, 0.05), "拖过之后画面应该变了").toBeGreaterThan(0.005);
+
+  // 滚轮放大，菜单面板本身的面积要变大
+  await loadTemplate(harness.page, tpl, "front");
+  const areaBefore = panelArea(decode(await capture(harness.page, 0)));
+  await harness.page.mouse.move(cx, cy);
+  await harness.page.mouse.wheel(0, -600);
+  const areaAfter = panelArea(decode(await capture(harness.page, 0)));
+  expect(areaAfter, "滚轮向上应该把菜单放大").toBeGreaterThan(areaBefore * 1.15);
+
+  // 滚回去要变小，证明是双向的而不是只会长大
+  await harness.page.mouse.wheel(0, 600);
+  expect(panelArea(decode(await capture(harness.page, 0))), "滚轮向下应该把菜单缩小").toBeLessThan(areaAfter);
+});
+
+test("interactive：没声明 interactive 的元素不该被拖动", async () => {
+  const tpl = path.join(TEMPLATES, "crying.json");
+  await loadTemplate(harness.page, tpl, "front");
+  const before = decode(await capture(harness.page, 0));
+
+  // 往 (T_T) 文字上拖一把，它没有 interactive，画面应该纹丝不动
+  const box = (await harness.page.locator("canvas").first().boundingBox())!;
+  const cx = box.x + box.width * 0.5;
+  const cy = box.y + box.height * 0.92;
+  await harness.page.mouse.move(cx, cy);
+  await harness.page.mouse.down();
+  await harness.page.mouse.move(cx - 150, cy - 100, { steps: 6 });
+  await harness.page.mouse.up();
+
+  const after = decode(await capture(harness.page, 0));
+  expect(diffRatio(before, after, 0.05), "非交互元素不该被拖走").toBeLessThanOrEqual(0.0005);
 });
 
 test("生成器 id 确定：同一模板重复展开产出同一串 id", async () => {

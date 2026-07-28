@@ -208,3 +208,23 @@ export function deltaE00(c1: Rgb, c2: Rgb): number {
 
   return Math.sqrt((dL / Sl) ** 2 + (dC / Sc) ** 2 + (dH / Sh) ** 2 + Rt * (dC / Sc) * (dH / Sh));
 }
+
+/**
+ * 「亮而不饱和」的像素占比。
+ *
+ * lowres-life 的菜单是浅灰白面板，背景是彩色画面，用这个能把面板本身量出来。
+ * 不能用 coverage 量它——那个模板有全屏马赛克，相对空模板底图的差异区域是整幅画面，
+ * 覆盖率恒等于 1，缩放前后都一样，断言等于没写。
+ */
+export function panelArea(p: PNG, minBright = 195, maxChroma = 28): number {
+  let n = 0;
+  for (let i = 0; i < p.width * p.height; i++) {
+    const o = i << 2;
+    const r = p.data[o];
+    const g = p.data[o + 1];
+    const b = p.data[o + 2];
+    const mn = Math.min(r, g, b);
+    if (mn > minBright && Math.max(r, g, b) - mn < maxChroma) n++;
+  }
+  return n / (p.width * p.height);
+}

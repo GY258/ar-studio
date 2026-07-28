@@ -334,6 +334,20 @@ function validateElement(e: Raw, at: string, p: string[], ids: Set<string>) {
   validateAnchor(e.anchor, at, p);
   validateSize(e.size, at, p);
   if (e.opacity !== undefined && !inRange(e.opacity, 0, 1)) p.push(`${at}.opacity 应在 [0, 1]`);
+  if (e.interactive !== undefined) {
+    const it = e.interactive as Raw;
+    if (typeof it !== "object" || it === null) {
+      p.push(`${at}.interactive 形如 { "drag": true, "resize": true }`);
+    } else {
+      for (const k of ["drag", "resize"] as const) {
+        if (it[k] !== undefined && typeof it[k] !== "boolean") p.push(`${at}.interactive.${k} 只能是 true/false`);
+      }
+      const anchor = e.anchor as Raw | undefined;
+      if (anchor?.space === "face") {
+        p.push(`${at}.interactive 对 face 空间元素无效——位置由 landmark 决定，用户拖完下一帧就被拉回去`);
+      }
+    }
+  }
   if (e.rotation !== undefined && !num(e.rotation)) p.push(`${at}.rotation 必须是数字（度）`);
   if (e.animations !== undefined) {
     if (!Array.isArray(e.animations)) p.push(`${at}.animations 必须是数组`);

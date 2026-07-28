@@ -133,6 +133,14 @@ export interface ElementV2 {
   followRoll?: boolean;
   opacity?: number;
   animations?: import("./animations").AnimationV2[];
+  /**
+   * 让用户自己拖位置 / 滚轮缩放。只对 screen 空间有意义——
+   * face 空间的元素位置由 landmark 决定，用户拖了下一帧就被拉回去。
+   *
+   * 调整量存在渲染器里，不写回 JSON：模板是作者定的初始摆位，
+   * 用户的临时调整不该污染它。切模板即重置。
+   */
+  interactive?: { drag?: boolean; resize?: boolean };
 }
 
 /** 帧效果：蒙版来源 × 效果种类 × 作用区域。三者正交，一次引擎活换一批模板。 */

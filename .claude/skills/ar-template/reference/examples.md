@@ -31,6 +31,7 @@
         {
           "generate": "trail",
           "count": 3,
+          "offset": [0, 0.2],
           "step": 0,
           "decay": 1,
           "phaseShift": 0.9,
@@ -80,15 +81,9 @@
     {
       "id": "menu",
       "asset": { "kind": "svg-lib", "key": "quality-menu" },
-      "anchor": { "space": "screen", "nx": 0.74, "ny": 0.76 },
-      "size": { "ref": "vw", "scale": 0.44 }
-    },
-    {
-      "id": "cursor",
-      "asset": { "kind": "svg-lib", "key": "cursor-hand" },
-      "anchor": { "space": "screen", "nx": 0.86, "ny": 0.735 },
-      "size": { "ref": "vw", "scale": 0.075 },
-      "animations": [{ "preset": "float", "amplitude": 0.004, "period": 3.0 }]
+      "anchor": { "space": "screen", "nx": 0.78, "ny": 0.68 },
+      "size": { "ref": "vw", "scale": 0.26 },
+      "interactive": { "drag": true, "resize": true }
     }
   ]
 }
