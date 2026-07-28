@@ -274,17 +274,24 @@ export class ParticleSystem {
           nx /= L;
           ny /= L;
         }
-        nx_ += nx * 7; // 推出体外
-        ny_ += ny * 7;
+        nx_ += nx * 5; // 推出体外
+        ny_ += ny * 5;
         const impact = Math.hypot(this.vx[i], this.vy[i]);
         const vn = this.vx[i] * nx + this.vy[i] * ny;
         this.vx[i] -= vn * nx;
         this.vy[i] -= vn * ny;
-        this.vx[i] *= 1 - fric;
-        this.vy[i] *= 1 - fric;
+        // 碰撞后大幅减速：摩擦 + 额外衰减
+        const dampFactor = Math.max(0.02, 1 - fric);
+        this.vx[i] *= dampFactor * 0.6;
+        this.vy[i] *= dampFactor * 0.6;
         if (!this.settled[i]) {
           this.settled[i] = 1;
-          if (s.settle) this.life[i] = Math.min(this.life[i], 1.4 + Math.random() * 1.6);
+          if (s.settle) {
+            this.life[i] = Math.min(this.life[i], 1.4 + Math.random() * 1.6);
+          } else {
+            // 液体碰到人体后缩短生命，不让它滑太远
+            this.life[i] = Math.min(this.life[i], 1.0 + Math.random() * 1.0);
+          }
           if (s.splash && impact > 260) this.splash(nx_, ny_, nx, ny, s);
         }
       }

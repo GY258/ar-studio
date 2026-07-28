@@ -233,7 +233,7 @@ export class ArEngine {
 
   private layoutProp() {
     if (!this.cfg?.emitter) return;
-    const pw = this.W * 0.24 * (this.cfg.emitter.aspect > 0.7 ? 0.85 : 1) * (this.cfg.slug === "cloud" ? 2.1 : 1);
+    const pw = this.W * 0.24 * (this.cfg.emitter.aspect > 0.7 ? 0.85 : 1) * (this.cfg.slug === "cloud" ? 1.4 : 1);
     const ph = pw * this.cfg.emitter.aspect;
     this.prop.scale.set(pw, ph, 1);
   }
