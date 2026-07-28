@@ -4,11 +4,15 @@ import type { FaceTrackElement, FaceTrackAnimation } from "./types";
 import { getSvg, getSvgAspect, rasterizeSvg, rasterizeText } from "./svg-assets";
 import { WASM_BASE, FACE_MODEL } from "@/lib/assets";
 import { resolveLandmark } from "./anchors";
+import { evaluateAnimations, type AnimationV2 } from "./animations";
 
 interface FaceMesh {
   mesh: THREE.Mesh;
   elem: FaceTrackElement;
-  baseOffsetY: number;
+  /** v1 兼容：从 face_track_animation 转换来的动画 */
+  resolvedAnimations?: AnimationV2[];
+  /** v1 兼容：trailing-tear 的序号（替代 id.slice(-1)） */
+  trailIndex: number;
 }
 
 export class FaceRenderer {
@@ -28,10 +32,7 @@ export class FaceRenderer {
     scene.add(this.group);
   }
 
-  setViewport(w: number, h: number) {
-    this.W = w;
-    this.H = h;
-  }
+  setViewport(w: number, h: number) { this.W = w; this.H = h; }
 
   async loadFaceMesh(): Promise<void> {
     if (this.landmarker || this.loading) return;
@@ -39,17 +40,12 @@ export class FaceRenderer {
     try {
       const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
       this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: {
-          modelAssetPath: FACE_MODEL,
-          delegate: "GPU",
-        },
+        baseOptions: { modelAssetPath: FACE_MODEL, delegate: "GPU" },
         runningMode: "VIDEO",
         numFaces: 1,
         outputFaceBlendshapes: false,
       });
-    } finally {
-      this.loading = false;
-    }
+    } finally { this.loading = false; }
   }
 
   async setElements(elements: FaceTrackElement[], anim?: FaceTrackAnimation) {
@@ -57,82 +53,94 @@ export class FaceRenderer {
     this.animation = anim ?? null;
     const gen = this.generation;
 
+    // v1 兼容：按 landmark 分组计算 trailing-tear 序号
+    const trailCounters = new Map<string, number>();
+
     for (const elem of elements) {
       if (gen !== this.generation) return;
-      let tex: THREE.Texture;
 
-      if (elem.type === "blush") {
-        const c = document.createElement("canvas");
-        c.width = 128; c.height = 64;
-        const ctx = c.getContext("2d")!;
-        const grd = ctx.createRadialGradient(64, 32, 0, 64, 32, 60);
-        grd.addColorStop(0, "rgba(242,147,126,0.5)");
-        grd.addColorStop(1, "rgba(242,147,126,0)");
-        ctx.fillStyle = grd;
-        ctx.fillRect(0, 0, 128, 64);
-        tex = new THREE.CanvasTexture(c);
-      } else if (elem.type === "sticker" && elem.svgAsset) {
+      // --- 纹理创建：统一由 svgAsset / text / type 决定 ---
+      let tex: THREE.Texture;
+      let blending = THREE.NormalBlending;
+
+      if (elem.svgAsset) {
         const svgStr = getSvg(elem.svgAsset);
         if (!svgStr) continue;
+        const aspect = getSvgAspect(elem.svgAsset);
         const pw = 128;
-        const ph = Math.round(pw * (elem.aspect ?? 1));
+        const ph = Math.round(pw * aspect);
         const canvas = await rasterizeSvg(svgStr, pw, ph);
         if (gen !== this.generation) return;
         tex = new THREE.CanvasTexture(canvas);
-      } else if ((elem.type === "sticker" || elem.type === "text") && elem.text) {
+      } else if (elem.text) {
         const fontSize = Math.round(this.W * (elem.fontSizeW ?? 0.03));
         const canvas = rasterizeText(
-          elem.text,
-          fontSize,
+          elem.text, fontSize,
           elem.color ?? "#FFFFFF",
           elem.fontWeight ?? 600,
           elem.shadow,
         );
         tex = new THREE.CanvasTexture(canvas);
-      } else if (elem.type === "text" && elem.text) {
-        const fontSize = Math.round(this.W * (elem.fontSizeW ?? 0.08));
-        const canvas = rasterizeText(
-          elem.text,
-          fontSize,
-          elem.color ?? "#FFFFFF",
-          700,
-          elem.shadow,
-        );
-        tex = new THREE.CanvasTexture(canvas);
-      } else if (elem.svgAsset) {
-        const svgStr = getSvg(elem.svgAsset);
-        if (!svgStr) continue;
-        const pw = 128;
-        const aspect = elem.svgAsset === "tear-cluster" ? 200 / 130 : 1.5;
-        const ph = Math.round(pw * aspect);
-        const canvas = await rasterizeSvg(svgStr, pw, ph);
-        if (gen !== this.generation) return;
-        tex = new THREE.CanvasTexture(canvas);
+      } else if (elem.type === "blush") {
+        // v1 兼容：blush 用程序化渐变椭圆
+        const c = document.createElement("canvas");
+        c.width = 128; c.height = 64;
+        const ctx = c.getContext("2d")!;
+        const color = elem.color ?? "rgba(242,147,126,0.5)";
+        const grd = ctx.createRadialGradient(64, 32, 0, 64, 32, 60);
+        grd.addColorStop(0, color);
+        grd.addColorStop(1, color.replace(/[\d.]+\)$/, "0)"));
+        ctx.fillStyle = grd;
+        ctx.fillRect(0, 0, 128, 64);
+        tex = new THREE.CanvasTexture(c);
+        // v1 → v2：设 opacity，update 统一读
+        if (elem.opacity === undefined) elem.opacity = 0.5;
+        console.warn(`[compat] "${elem.id}" uses type:"blush". Migrate to asset:{kind:"gradient"}`);
       } else {
         continue;
       }
 
       tex.colorSpace = THREE.SRGBColorSpace;
       const mat = new THREE.MeshBasicMaterial({
-        map: tex,
-        transparent: true,
-        depthWrite: false,
-        depthTest: false,
+        map: tex, transparent: true, depthWrite: false, depthTest: false, blending,
       });
-
-      if (elem.type === "blush") {
-        mat.blending = THREE.NormalBlending;
-      }
 
       const geo = new THREE.PlaneGeometry(1, 1);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.renderOrder = 5;
+      if (elem.rotation) mesh.rotation.z = (-elem.rotation * Math.PI) / 180;
 
-      if (elem.rotation) {
-        mesh.rotation.z = (-elem.rotation * Math.PI) / 180;
+      // v1 兼容：计算 trail 序号（替代 id.slice(-1)）
+      let trailIndex = 0;
+      if (elem.type === "trailing-tear" && elem.landmark !== undefined) {
+        const key = String(elem.landmark) + (elem.mirror ? "-r" : "-l");
+        trailIndex = trailCounters.get(key) ?? 0;
+        trailCounters.set(key, trailIndex + 1);
       }
 
-      this.items.push({ mesh, elem, baseOffsetY: 0 });
+      // v1 兼容：tear-pool 自动加 offsetY 让顶部对齐眼睑
+      if (elem.type === "tear-pool" && elem.offsetY === undefined) {
+        const aspect = elem.svgAsset ? getSvgAspect(elem.svgAsset) : 1;
+        elem.offsetY = (elem.iodScale ?? 0.28) * aspect * 0.5;
+      }
+
+      // v1 兼容：从 face_track_animation 构建元素级动画
+      let resolvedAnimations = elem.animations;
+      if (!resolvedAnimations && this.animation) {
+        if (elem.type === "tear-pool" && this.animation.breathe) {
+          resolvedAnimations = [{ preset: "pulse" as const, ...this.animation.breathe }];
+        } else if (elem.type === "trailing-tear" && this.animation.tears?.period > 0) {
+          const a = this.animation.tears;
+          resolvedAnimations = [{
+            preset: "emit-fall-fade" as const,
+            distance: a.distance,
+            period: a.period,
+            phase: (trailIndex * a.phaseShift) / a.period,
+          }];
+        }
+      }
+
+      this.items.push({ mesh, elem, resolvedAnimations, trailIndex });
       this.group.add(mesh);
     }
   }
@@ -145,10 +153,7 @@ export class FaceRenderer {
         this.lastLandmarks = result.faceLandmarks[0];
         this.lastFaceTime = nowMs;
       }
-      // 不立即清空 lastLandmarks，让 update 根据时间判断
-    } catch {
-      // skip frame
-    }
+    } catch { /* skip frame */ }
   }
 
   update(t: number) {
@@ -162,167 +167,73 @@ export class FaceRenderer {
       return idx !== null && idx < lm.length ? lm[idx] : null;
     };
 
-    let iod = 0;
-    let roll = 0;
-    let noseBridgeX = 0;
-    let noseBridgeY = 0;
-
+    let iod = 0, roll = 0;
     if (hasFace) {
-      const lIris = lm[468];
-      const rIris = lm[473];
+      const lIris = lm[468], rIris = lm[473];
       iod = Math.hypot((rIris.x - lIris.x) * this.W, (rIris.y - lIris.y) * this.H);
       roll = Math.atan2(rIris.y - lIris.y, rIris.x - lIris.x);
-      // 鼻梁 = 两虹膜中点
-      noseBridgeX = (0.5 - (lIris.x + rIris.x) / 2) * this.W;
-      noseBridgeY = (0.5 - (lIris.y + rIris.y) / 2) * this.H;
     }
 
-    for (const item of this.items) {
-      const { mesh, elem } = item;
+    for (const { mesh, elem, resolvedAnimations } of this.items) {
+      const mat = mesh.material as THREE.MeshBasicMaterial;
 
-      // 固定屏幕位置的文字（如 (T_T)）：始终显示
-      if (elem.type === "text" && elem.nx !== undefined && elem.ny !== undefined && elem.landmark === undefined) {
+      // --- 屏幕空间元素（无 landmark）：始终显示 ---
+      if (elem.nx !== undefined && elem.ny !== undefined && elem.landmark === undefined) {
         mesh.visible = true;
         const wx = (elem.nx - 0.5) * this.W;
         const wy = (0.5 - elem.ny) * this.H;
-        const texMap = (mesh.material as THREE.MeshBasicMaterial).map;
-        if (texMap?.image) {
-          const img = texMap.image as HTMLCanvasElement;
+        if (mat.map?.image) {
+          const img = mat.map.image as HTMLCanvasElement;
           mesh.scale.set(img.width, img.height, 1);
         }
         mesh.position.set(wx, wy, 3);
         continue;
       }
 
-      // 需要人脸的元素
-      if (!hasFace) {
-        mesh.visible = false;
-        continue;
-      }
+      // --- 人脸空间元素：需要人脸 ---
+      if (!hasFace) { mesh.visible = false; continue; }
       mesh.visible = true;
 
-      // --- sticker 类型：相对锚点定位，跟随人脸 ---
-      if (elem.type === "sticker") {
-        const anchor = getLm(elem.landmark ?? "nose_bridge");
-        if (!anchor) continue;
-        const ax = (0.5 - anchor.x) * this.W;
-        const ay = (0.5 - anchor.y) * this.H;
+      const anchor = getLm(elem.landmark ?? "nose_bridge");
+      if (!anchor) continue;
+      const ax = (0.5 - anchor.x) * this.W;
+      const ay = (0.5 - anchor.y) * this.H;
 
-        // 偏移量以 IOD 为单位（offsetY 正 = 往下，Three.js Y 正 = 往上，取反）
-        const ox = (elem.offsetX ?? 0) * iod;
-        const oy = -(elem.offsetY ?? 0) * iod;
-
-        // 旋转偏移量跟随头部 roll
-        const cosR = Math.cos(-roll);
-        const sinR = Math.sin(-roll);
-        const rotOx = ox * cosR - oy * sinR;
-        const rotOy = ox * sinR + oy * cosR;
-
-        // 大小以 IOD 为单位
-        const scale = iod * (elem.iodScale ?? 0.25);
-        const aspect = elem.aspect ?? 1;
-
-        // 浮动动画
-        let floatOff = 0;
-        if (elem.float) {
-          floatOff = Math.sin(t * Math.PI * 2 / elem.float.period) * iod * elem.float.amplitude;
-        }
-
-        const texMap = (mesh.material as THREE.MeshBasicMaterial).map;
-        if (texMap?.image) {
-          const img = texMap.image as HTMLCanvasElement;
-          const imgAspect = img.height / img.width;
-          mesh.scale.set(scale, scale * imgAspect, 1);
-        } else {
-          mesh.scale.set(scale, scale * aspect, 1);
-        }
-
-        mesh.position.set(ax + rotOx, ay + rotOy + floatOff, 3);
-        // 保持元素自身旋转 + 头部 roll
-        const selfRot = elem.rotation ? (-elem.rotation * Math.PI / 180) : 0;
-        mesh.rotation.z = selfRot - roll;
-        continue;
+      // 基础尺寸
+      const baseScale = iod * (elem.iodScale ?? 0.25);
+      const svgAspect = elem.svgAsset ? getSvgAspect(elem.svgAsset) : (elem.aspect ?? 1);
+      // 文字用纹理自身比例
+      let texAspect = svgAspect;
+      if (elem.text && mat.map?.image) {
+        const img = mat.map.image as HTMLCanvasElement;
+        texAspect = img.height / img.width;
       }
 
-      // --- tear-pool: T 型固定在眼下不动 ---
-      if (elem.type === "tear-pool" && elem.landmark !== undefined) {
-        const anchor = getLm(elem.landmark);
-        if (!anchor) continue;
-        const wx = (0.5 - anchor.x) * this.W;
-        const wy = (0.5 - anchor.y) * this.H;
-        const scale = iod * (elem.iodScale ?? 0.28);
-        const aspect = elem.svgAsset ? getSvgAspect(elem.svgAsset) : 1;
+      // 偏移（IOD 单位）
+      const offX = (elem.offsetX ?? 0) * iod;
+      const offY = -(elem.offsetY ?? 0) * iod;
 
-        const sw = elem.mirror ? -scale : scale;
-        const h = scale * aspect;
-        mesh.scale.set(sw, h, 1);
-        mesh.position.set(wx, wy - h * 0.5, 3);
-        mesh.rotation.z = -roll;
-        (mesh.material as THREE.MeshBasicMaterial).opacity = 1;
-        continue;
-      }
+      // 应用动画
+      const anim = evaluateAnimations(resolvedAnimations, t, this.H, iod);
 
-      // --- trailing-tear: 水滴从眼下冒出然后往下掉 ---
-      if (elem.type === "trailing-tear" && elem.landmark !== undefined) {
-        const anchor = getLm(elem.landmark);
-        if (!anchor) continue;
-        const wx = (0.5 - anchor.x) * this.W;
-        const wy = (0.5 - anchor.y) * this.H;
-        const idx = parseInt(elem.id.slice(-1)) || 0;
-        const baseScale = iod * (elem.iodScale ?? 0.09);
+      // 旋转偏移跟随头部
+      const cosR = Math.cos(-roll), sinR = Math.sin(-roll);
+      const totalOffX = offX + anim.outwardX * (elem.mirror ? -1 : 1);
+      const totalOffY = offY + anim.positionY;
+      const rotOx = totalOffX * cosR - totalOffY * sinR;
+      const rotOy = totalOffX * sinR + totalOffY * cosR;
 
-        if (this.animation?.tears && this.animation.tears.period > 0) {
-          const a = this.animation.tears;
-          // 每滴错开 phaseShift 秒
-          const phase = ((t + idx * a.phaseShift) % a.period) / a.period;
+      // 尺寸
+      const sw = baseScale * anim.scaleX * (elem.mirror ? -1 : 1);
+      const sh = baseScale * texAspect * anim.scaleY;
 
-          // 0~0.15: 在眼下冒出（从小变大）
-          // 0.15~0.85: 往下掉
-          // 0.85~1: 淡出消失
-          let scale: number, dropY: number, opacity: number;
+      mesh.scale.set(sw, sh, 1);
+      mesh.position.set(ax + rotOx, ay + rotOy, 3);
+      mat.opacity = anim.opacity * (elem.opacity ?? 1);
 
-          if (phase < 0.15) {
-            // 冒出阶段
-            const p = phase / 0.15;
-            scale = baseScale * p;
-            dropY = 0;
-            opacity = p;
-          } else if (phase < 0.85) {
-            // 下落阶段
-            const p = (phase - 0.15) / 0.70;
-            scale = baseScale * (1 - p * 0.3); // 下落时略微缩小
-            dropY = p * iod * a.distance;
-            opacity = 0.9;
-          } else {
-            // 淡出阶段
-            const p = (phase - 0.85) / 0.15;
-            scale = baseScale * 0.7;
-            dropY = iod * a.distance;
-            opacity = 1 - p;
-          }
-
-          mesh.scale.set(scale, scale * 1.4, 1); // 水滴比圆稍长
-          // 沿脸颊往下，略向外偏移
-          const outward = (elem.mirror ? -1 : 1) * dropY * 0.08;
-          mesh.position.set(wx + outward, wy - dropY - iod * 0.1, 3);
-          (mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
-        }
-        mesh.rotation.z = -roll;
-        continue;
-      }
-
-      // --- blush ---
-      if (elem.type === "blush" && elem.landmark !== undefined) {
-        const anchor = getLm(elem.landmark);
-        if (!anchor) continue;
-        const wx = (0.5 - anchor.x) * this.W;
-        const wy = (0.5 - anchor.y) * this.H;
-        const scale = iod * (elem.iodScale ?? 0.4);
-        mesh.scale.set(scale, scale * 0.5, 1);
-        mesh.position.set(wx, wy, 2.5);
-        mesh.rotation.z = -roll;
-        continue;
-      }
+      // 自身旋转 + 头部 roll
+      const selfRot = elem.rotation ? (-elem.rotation * Math.PI / 180) : 0;
+      mesh.rotation.z = selfRot - roll;
     }
   }
 

@@ -129,6 +129,8 @@ export interface FaceTrackElement {
   aspect?: number;
   /** 旋转角度 */
   rotation?: number;
+  /** 透明度 0~1 */
+  opacity?: number;
   /** 文字字号 %W */
   fontSizeW?: number;
   fontWeight?: number;

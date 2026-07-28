@@ -188,9 +188,9 @@ export function expandGenerator(
   return result;
 }
 
-/** 展开模板 JSON 中所有生成器。 */
+/** 展开模板 JSON 中所有生成器。每次调用重置计数器确保确定性。 */
 export function expandGenerators(generators: GeneratorV2[]): FaceTrackElement[] {
-  globalCounter = 0;
+  globalCounter = 0; // 重置，保证同一模板重复展开 id 一致
   const result: FaceTrackElement[] = [];
   for (const gen of generators) {
     result.push(...expandGenerator(gen));
