@@ -87,6 +87,21 @@ const SVG_LIB: Record<string, string> = {
     <path d="M52 118c4 6 12 7 17 2" stroke-width="7"/>
   </g>
 </svg>`,
+
+  "quality-menu": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 300" fill="none">
+  <rect x="0" y="0" width="340" height="300" rx="14" fill="#EFEFEF" fill-opacity=".92"/>
+  <rect x="12" y="68" width="316" height="46" rx="8" fill="#2C6FBB"/>
+  <text x="28" y="52" font-family="system-ui,sans-serif" font-size="26" font-weight="600" fill="#333">144p</text>
+  <text x="28" y="98" font-family="system-ui,sans-serif" font-size="26" font-weight="700" fill="#FFF">240p</text>
+  <text x="28" y="148" font-family="system-ui,sans-serif" font-size="26" font-weight="600" fill="#333">720p</text>
+  <text x="28" y="198" font-family="system-ui,sans-serif" font-size="26" font-weight="600" fill="#333">1080p</text>
+  <text x="28" y="248" font-family="system-ui,sans-serif" font-size="26" font-weight="600" fill="#333">4K</text>
+  <text x="170" y="284" font-family="system-ui,sans-serif" font-size="14" fill="#999" text-anchor="middle">Quality</text>
+</svg>`,
+
+  "cursor-hand": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <path d="M10 8V22l4-4 2.5 6 3-1.2-2.5-6H22L10 8Z" fill="#FFF" stroke="#333" stroke-width="1.5" stroke-linejoin="round"/>
+</svg>`,
 };
 
 /** 运行时注册的 inline SVG（LLM 生成） */

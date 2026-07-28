@@ -1,0 +1,34 @@
+{
+  "slug": "lowres-life",
+  "name": { "zh": "只有我是高清的", "en": "Only I Am HD" },
+  "category": "fun",
+  "sort_order": 90,
+  "price_cents": 0,
+  "template_type": "overlay",
+  "perception": ["segmentation"],
+  "preview": {},
+  "source": {
+    "mask": { "provider": "person", "feather": 0.015, "onLost": "clear" },
+    "apply": "outside",
+    "effect": { "kind": "pixelate", "blocks": 56 }
+  },
+  "overlay_elements": [
+    {
+      "id": "menu",
+      "type": "svg",
+      "svgAsset": "quality-menu",
+      "nx": 0.74,
+      "ny": 0.76,
+      "sizeW": 0.44
+    },
+    {
+      "id": "cursor",
+      "type": "svg",
+      "svgAsset": "cursor-hand",
+      "nx": 0.86,
+      "ny": 0.735,
+      "sizeW": 0.075,
+      "float": { "amplitude": 0.004, "period": 3.0 }
+    }
+  ]
+}

@@ -35,6 +35,7 @@ function toConfig(r: Raw): TemplateConfig {
     overlayElements: r.overlay_elements as unknown as TemplateConfig["overlayElements"],
     faceTrackElements: r.face_track_elements as unknown as TemplateConfig["faceTrackElements"],
     faceTrackAnimation: r.face_track_animation as unknown as TemplateConfig["faceTrackAnimation"],
+    source: r.source as unknown as TemplateConfig["source"],
   };
 }
 

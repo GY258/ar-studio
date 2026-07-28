@@ -147,6 +147,19 @@ export interface FaceTrackAnimation {
   tears: { count: number; distance: number; period: number; phaseShift: number };
 }
 
+/** 帧效果：蒙版来源 × 效果种类 × 作用区域 */
+export interface SourceEffect {
+  mask: {
+    provider: "person" | "none";
+    feather?: number;
+    onLost?: "clear" | "hold" | "full";
+  };
+  apply: "inside" | "outside";
+  effect:
+    | { kind: "pixelate"; blocks: number }
+    | { kind: "blur"; radius: number };
+}
+
 /** 完整配置，只有服务端确认权益后才下发。 */
 export interface TemplateConfig extends TemplateListing {
   templateType?: TemplateType;
@@ -160,6 +173,8 @@ export interface TemplateConfig extends TemplateListing {
   /** facetrack 类型的元素列表 */
   faceTrackElements?: FaceTrackElement[];
   faceTrackAnimation?: FaceTrackAnimation;
+  /** 帧效果（背景马赛克等） */
+  source?: SourceEffect;
 }
 
 export type ControlValues = Record<string, number>;

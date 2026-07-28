@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 300" fill="none">
+  <rect x="0" y="0" width="340" height="300" rx="14" fill="#EFEFEF" fill-opacity=".92"/>
+  <rect x="12" y="68" width="316" height="46" rx="8" fill="#2C6FBB"/>
+  <text x="28" y="52" font-family="system-ui,sans-serif" font-size="26" font-weight="600" fill="#333">144p</text>
+  <text x="28" y="98" font-family="system-ui,sans-serif" font-size="26" font-weight="700" fill="#FFF">240p</text>
+  <text x="28" y="148" font-family="system-ui,sans-serif" font-size="26" font-weight="600" fill="#333">720p</text>
+  <text x="28" y="198" font-family="system-ui,sans-serif" font-size="26" font-weight="600" fill="#333">1080p</text>
+  <text x="28" y="248" font-family="system-ui,sans-serif" font-size="26" font-weight="600" fill="#333">4K</text>
+  <text x="170" y="284" font-family="system-ui,sans-serif" font-size="14" fill="#999" text-anchor="middle">Quality</text>
+</svg>

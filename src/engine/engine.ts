@@ -35,6 +35,9 @@ export class ArEngine {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-640, 640, 360, -360, -100, 100);
   private readonly bg: THREE.Mesh;
+  private readonly videoTex: THREE.VideoTexture;
+  private bgMat: THREE.Material;
+  private maskTex: THREE.DataTexture | null = null;
   private readonly prop: THREE.Mesh;
   private readonly propMat: THREE.MeshBasicMaterial;
   private readonly field = new OccupancyField();
@@ -50,6 +53,7 @@ export class ArEngine {
   private readonly overlays: OverlayRenderer;
   private readonly faceRenderer: FaceRenderer;
   private templateType: TemplateType = "particle";
+  private perception: string[] = ["segmentation"];
   private segmenter: ImageSegmenter | null = null;
   private raf = 0;
   private lastT = 0;
@@ -72,9 +76,10 @@ export class ArEngine {
     this.renderer = new THREE.WebGLRenderer({ canvas: opts.canvas, antialias: true, preserveDrawingBuffer: false });
     this.renderer.setClearColor(0x000000, 1);
 
-    const videoTex = new THREE.VideoTexture(this.video);
-    videoTex.colorSpace = THREE.SRGBColorSpace;
-    this.bg = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: videoTex }));
+    this.videoTex = new THREE.VideoTexture(this.video);
+    this.videoTex.colorSpace = THREE.SRGBColorSpace;
+    this.bgMat = new THREE.MeshBasicMaterial({ map: this.videoTex });
+    this.bg = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.bgMat);
     this.bg.position.z = -1;
     this.bg.renderOrder = 0;
     this.scene.add(this.bg);
@@ -160,6 +165,7 @@ export class ArEngine {
   setTemplate(cfg: TemplateConfig) {
     this.cfg = cfg;
     this.templateType = cfg.templateType ?? "particle";
+    this.perception = cfg.perception ?? (this.templateType === "particle" ? ["segmentation"] : []);
 
     // 清理其他类型的渲染状态
     this.overlays.clear();
@@ -184,6 +190,75 @@ export class ArEngine {
       this.faceRenderer.setElements(cfg.faceTrackElements, cfg.faceTrackAnimation).catch((e) => this.onError?.(e as Error));
       this.loadFace().catch((e) => this.onError?.(e as Error));
     }
+
+    // 帧效果（背景马赛克等）
+    this.setupSourceEffect(cfg.source);
+
+    // 按 perception 按需加载模型
+    if (this.perception.includes("segmentation") && !this.segmenter) {
+      this.loadPerception().catch((e) => this.onError?.(e as Error));
+    }
+    if (this.perception.includes("face")) {
+      this.loadFace().catch((e) => this.onError?.(e as Error));
+    }
+  }
+
+  private setupSourceEffect(source?: import("./types").SourceEffect) {
+    if (!source || source.effect.kind !== "pixelate") {
+      // 恢复普通视频材质
+      this.bgMat = new THREE.MeshBasicMaterial({ map: this.videoTex });
+      this.bg.material = this.bgMat;
+      this.maskTex?.dispose();
+      this.maskTex = null;
+      return;
+    }
+
+    // 创建蒙版纹理（112x63，与 OccupancyField 同尺寸）
+    const GW = 112, GH = 63;
+    const maskData = new Uint8Array(GW * GH);
+    this.maskTex = new THREE.DataTexture(maskData, GW, GH, THREE.RedFormat, THREE.UnsignedByteType);
+    this.maskTex.minFilter = THREE.LinearFilter;
+    this.maskTex.magFilter = THREE.LinearFilter;
+
+    const blocks = source.effect.blocks;
+    const applyOutside = source.apply === "outside";
+
+    this.bgMat = new THREE.ShaderMaterial({
+      uniforms: {
+        videoTex: { value: this.videoTex },
+        maskTex: { value: this.maskTex },
+        blocks: { value: blocks },
+        applyOutside: { value: applyOutside ? 1.0 : 0.0 },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D videoTex;
+        uniform sampler2D maskTex;
+        uniform float blocks;
+        uniform float applyOutside;
+        varying vec2 vUv;
+        void main() {
+          vec2 grid = (floor(vUv * blocks) + 0.5) / blocks;
+          // 蒙版 u 镜像：与 OccupancyField.at() 的 u = 0.5 - wx/w 一致
+          vec2 maskUV = vec2(1.0 - vUv.x, vUv.y);
+          float m = smoothstep(0.42, 0.58, texture2D(maskTex, maskUV).r);
+          vec3 pixelated = texture2D(videoTex, grid).rgb;
+          vec3 sharp = texture2D(videoTex, vUv).rgb;
+          // outside: 人清晰背景糊；inside: 人糊背景清晰
+          vec3 color = applyOutside > 0.5
+            ? mix(pixelated, sharp, m)
+            : mix(sharp, pixelated, m);
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
+    });
+    this.bg.material = this.bgMat;
   }
 
   /** 切模板不丢已调好的参数：调用方只覆盖新模板有的 key（PRD 4.2 非功能要求）。 */
@@ -328,14 +403,24 @@ export class ArEngine {
     this.lastT = t;
     if (dt <= 0) return;
 
-    // 只在有新视频帧时跑感知
+    // 按 perception 驱动感知，不再按 templateType 锁死
     if (this.video.currentTime !== this.lastVideoTime) {
       this.lastVideoTime = this.video.currentTime;
-      if (this.templateType === "facetrack") {
+      if (this.perception.includes("face")) {
         this.faceRenderer.detectFace(this.video, now);
-      } else if (this.templateType === "particle") {
+      }
+      if (this.perception.includes("segmentation")) {
         this.runSegmentation(now);
       }
+    }
+
+    // 更新蒙版纹理（帧效果用）
+    if (this.maskTex && this.field.seen) {
+      const data = this.maskTex.image.data as unknown as Uint8Array;
+      for (let i = 0; i < this.field.grid.length; i++) {
+        data[i] = (this.field.grid[i] * 255) | 0;
+      }
+      this.maskTex.needsUpdate = true;
     }
 
     if (this.templateType === "overlay") {
