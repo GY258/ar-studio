@@ -21,9 +21,14 @@ import { FACE_ANCHORS } from "../src/engine/anchors";
 const OUT = path.join(process.cwd(), "test/fixtures");
 const W = 960;
 const H = 540;
-/** categoryMask 的分辨率，MediaPipe 输出的量级 */
-const MW = 256;
-const MH = 144;
+/**
+ * categoryMask 的分辨率。
+ * MediaPipe 的 selfie segmenter 实测输出和输入同分辨率（960×540），
+ * 之前这里写 256×144 是凭印象填的，比真实情况低一个量级——
+ * 拿它验蒙版边缘质量会得出过于乐观的结论。
+ */
+const MW = W;
+const MH = H;
 
 const BG_VAL = 0;
 const PERSON_VAL = 255;
@@ -119,18 +124,33 @@ function inEllipse(x: number, y: number, cx: number, cy: number, rx: number, ry:
 }
 
 /**
- * 背景画成彩色棋盘格。
- * 纯色背景没法验证马赛克 —— 一块纯色降采样之后还是同一块纯色，
- * 「蒙版外局部方差显著下降」这条断言就恒成立，等于没测。
+ * 逐像素的确定性噪声，±26。
+ *
+ * 光有大块棋盘格是不够的：格子 40px、马赛克块 10px，打完码块内还是同一个颜色，
+ * 「蒙版外方差显著下降」和「清晰区与原帧逐像素相同」两条断言全都失效——
+ * 大片纯色打了码依然和原图一模一样。加一层 1px 粒度的噪声之后，
+ * 马赛克才真的抹掉信息，两条断言才有区分力。真实摄像头画面本来也有这种细节。
  */
+function grain(x: number, y: number): number {
+  const n = ((x * 73856093) ^ (y * 19349663) ^ ((x + y) * 83492791)) >>> 0;
+  return ((n >>> 8) % 53) - 26;
+}
+
+function clamp8(v: number) {
+  return v < 0 ? 0 : v > 255 ? 255 : v | 0;
+}
+
+/** 背景：彩色棋盘格 + 细噪声。 */
 function bgColor(x: number, y: number, w: number, h: number): [number, number, number] {
   const u = x / w;
   const v = y / h;
   const cell = (Math.floor(u * 24) + Math.floor(v * 14)) % 2;
-  const r = cell ? 40 : 210;
-  const g = Math.round(60 + 150 * v);
-  const b = cell ? 190 : 55;
-  return [r, g, b];
+  const g = grain(x, y);
+  return [
+    clamp8((cell ? 40 : 210) + g),
+    clamp8(Math.round(60 + 150 * v) + g),
+    clamp8((cell ? 190 : 55) + g),
+  ];
 }
 
 function renderImage(shape: FaceShape | null, pts: Pt[] | null): PNG {
@@ -145,11 +165,13 @@ function renderImage(shape: FaceShape | null, pts: Pt[] | null): PNG {
         const ny = y / H;
         // 身体：脖子以下的梯形，让分割蒙版不只是一个圆
         const bodyTop = shape.cy + shape.ry * 1.0;
+        // 人身上也要有细节，否则「人清晰」这件事在图上看不出来
+        const gr = grain(x, y);
         if (ny > bodyTop && Math.abs(nx - shape.cx) < shape.rx * (0.9 + (ny - bodyTop) * 3)) {
-          [r, g, b] = [58, 74, 112];
+          [r, g, b] = [clamp8(58 + gr), clamp8(74 + gr), clamp8(112 + gr)];
         }
         if (inEllipse(nx, ny, shape.cx, shape.cy, shape.rx, shape.ry, shape.roll)) {
-          [r, g, b] = [232, 194, 168];
+          [r, g, b] = [clamp8(232 + gr), clamp8(194 + gr), clamp8(168 + gr)];
         }
         if (pts) {
           // 眼睛和嘴巴，纯粹为了人眼看预览图时能判断左右和朝向

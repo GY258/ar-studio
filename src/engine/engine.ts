@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OccupancyField } from "./occupancy";
+import { MaskField } from "./mask-field";
 import {
   MediaPipeSegmentationProvider,
   type SegmentationProvider,
@@ -46,6 +47,8 @@ export class ArEngine {
   private readonly prop: THREE.Mesh;
   private readonly propMat: THREE.MeshBasicMaterial;
   private readonly field = new OccupancyField();
+  /** 帧效果专用的高分辨率蒙版。粒子那套 112×63 的场太粗，抠图会露台阶 */
+  private readonly maskField = new MaskField();
   private readonly particles = new ParticleSystem();
   private readonly propTextures = new Map<string, THREE.Texture>();
 
@@ -275,13 +278,11 @@ export class ArEngine {
       return;
     }
     this.onLost = source.mask.onLost ?? "clear";
-
-    // 创建蒙版纹理（112x63，与 OccupancyField 同尺寸）
-    const GW = 112, GH = 63;
-    const maskData = new Uint8Array(GW * GH);
-    this.maskTex = new THREE.DataTexture(maskData, GW, GH, THREE.RedFormat, THREE.UnsignedByteType);
-    this.maskTex.minFilter = THREE.LinearFilter;
-    this.maskTex.magFilter = THREE.LinearFilter;
+    this.maskField.setFeather(source.mask.feather ?? 0);
+    this.maskField.reset();
+    // 纹理尺寸跟 maskField 走，而 maskField 的尺寸要等第一帧 mask 才知道，
+    // 所以这里先给一个 1x1 占位，updateMask 里发现尺寸对不上再重建。
+    this.maskTex = makeMaskTexture(1, 1);
 
     const blocks = source.effect.blocks;
     const applyOutside = source.apply === "outside";
@@ -312,9 +313,12 @@ export class ArEngine {
         varying vec2 vUv;
         void main() {
           vec2 grid = (floor(vUv * blocks) + 0.5) / blocks;
-          // 蒙版 u 镜像：与 OccupancyField.at() 的 u = 0.5 - wx/w 一致
-          vec2 maskUV = vec2(1.0 - vUv.x, vUv.y);
-          float m = smoothstep(0.42, 0.58, texture2D(maskTex, maskUV).r);
+          // 蒙版和视频同在「视频空间」，用同一套 uv 取样。
+          // 这里**不要**再补一次镜像：背景平面的 scale.x = -1 已经把两者一起翻了，
+          // shader 里再翻蒙版就翻反了 —— 人在画面偏左时，清晰区会跑到右边去。
+          // OccupancyField.at() 里那个 u = 0.5 - wx/w 是「世界坐标 → 场」的映射，
+          // 和这里的「uv → 纹理」是两回事，别把两条规则混在一起。
+          float m = smoothstep(0.42, 0.58, texture2D(maskTex, vUv).r);
           vec3 pixelated = texture2D(videoTex, grid).rgb;
           vec3 sharp = texture2D(videoTex, vUv).rgb;
           // outside: 人清晰背景糊；inside: 人糊背景清晰
@@ -322,6 +326,11 @@ export class ArEngine {
             ? mix(pixelated, sharp, m)
             : mix(sharp, pixelated, m);
           gl_FragColor = vec4(color, 1.0);
+
+          // 必须补这一行。纹理标了 SRGBColorSpace，采样时硬件已经把 sRGB 转成线性；
+          // 内置材质会在输出端转回来，裸 ShaderMaterial 不会 —— 少了这一步，
+          // 只要帧效果一开，整幅画面就整体压暗（实测 232 → 206、194 → 138）。
+          #include <colorspace_fragment>
         }
       `,
     });
@@ -541,7 +550,12 @@ export class ArEngine {
 
   private runSegmentation(nowMs: number) {
     try {
-      this.segProvider?.segment(this.source, nowMs, (d, w, h) => this.field.ingest(d, w, h));
+      this.segProvider?.segment(this.source, nowMs, (d, w, h) => {
+        // 两个场吃同一份原始 mask，各自按自己的用途处理：
+        // 占据场给粒子碰撞（粗且重平滑），蒙版场给帧效果（细且跟手）。
+        this.field.ingest(d, w, h);
+        if (this.maskTex) this.maskField.ingest(d, w, h);
+      });
     } catch (e) {
       this.onError?.(e as Error);
     }
@@ -583,11 +597,21 @@ export class ArEngine {
    */
   private updateMask() {
     if (!this.maskTex) return;
+
+    // maskField 的尺寸第一帧才定下来，对不上就换一张纹理
+    const mw = this.maskField.width;
+    const mh = this.maskField.height;
+    if (mw > 0 && (this.maskTex.image.width !== mw || this.maskTex.image.height !== mh)) {
+      this.maskTex.dispose();
+      this.maskTex = makeMaskTexture(mw, mh);
+      const shader = this.bgMat as THREE.ShaderMaterial;
+      if (shader.uniforms?.maskTex) shader.uniforms.maskTex.value = this.maskTex;
+    }
+
     const data = this.maskTex.image.data as unknown as Uint8Array;
-    if (this.field.seen) {
-      for (let i = 0; i < this.field.grid.length; i++) {
-        data[i] = (this.field.grid[i] * 255) | 0;
-      }
+    if (this.maskField.seen) {
+      const src = this.maskField.data;
+      if (src && src.length === data.length) data.set(src);
     } else if (this.onLost === "hold") {
       return; // 保持上一帧蒙版，适合短暂遮挡
     } else {
@@ -654,6 +678,15 @@ export class ArEngine {
       this.onStats?.({ fps: this.fps, tracking: this.isTracking(now), degraded: this.degraded });
     }
   };
+}
+
+/** 单通道蒙版纹理。LinearFilter 让放大到全屏时边缘是渐变而不是硬台阶。 */
+function makeMaskTexture(w: number, h: number): THREE.DataTexture {
+  const tex = new THREE.DataTexture(new Uint8Array(w * h), w, h, THREE.RedFormat, THREE.UnsignedByteType);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
 }
 
 /** video 要 VideoTexture（每帧自动上传），静态图/canvas 用普通 Texture 上传一次。 */

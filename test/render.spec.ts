@@ -200,24 +200,77 @@ test("丢脸兜底：face 模板在 noface 下不崩溃，screen 元素仍显示
   expect(cov, "face 空间元素应该已经隐藏，覆盖率不该和有脸时一样高").toBeLessThan(0.05);
 });
 
-test("lowres-life：蒙版内像素接近原帧，蒙版外方差显著下降", async () => {
+test("lowres-life：蒙版内与原帧逐像素相同，蒙版外被真正抹掉细节", async () => {
   const tpl = path.join(TEMPLATES, "lowres-life.json");
   await loadTemplate(harness.page, tpl, "front");
   const frame = decode(await capture(harness.page, 0));
   const base = await baseFrame("front");
 
+  // 直接比像素，不用局部方差。方差是间接指标：人脸轮廓本身就是强边缘，
+  // 打了码方差照样高；反过来大片纯色打了码方差也不降。
   const W = frame.width;
   const H = frame.height;
-  // 人脸中心一块（蒙版内）和左上角一块（蒙版外，且不被菜单遮住）
-  const insideVarBase = localVariance(base, (W * 0.45) | 0, (H * 0.35) | 0, 60, 60);
-  const insideVarNow = localVariance(frame, (W * 0.45) | 0, (H * 0.35) | 0, 60, 60);
-  const outsideVarBase = localVariance(base, (W * 0.06) | 0, (H * 0.1) | 0, 120, 120);
-  const outsideVarNow = localVariance(frame, (W * 0.06) | 0, (H * 0.1) | 0, 120, 120);
+  const same = (x: number, y: number) => {
+    const o = (y * W + x) << 2;
+    return (
+      Math.abs(frame.data[o] - base.data[o]) +
+        Math.abs(frame.data[o + 1] - base.data[o + 1]) +
+        Math.abs(frame.data[o + 2] - base.data[o + 2]) <=
+      6
+    );
+  };
+  const ratioIn = (x0: number, y0: number, w: number, h: number) => {
+    let n = 0;
+    let t = 0;
+    for (let y = y0; y < y0 + h; y++)
+      for (let x = x0; x < x0 + w; x++) {
+        if (same(x, y)) n++;
+        t++;
+      }
+    return n / t;
+  };
 
-  expect(Math.abs(insideVarNow - insideVarBase), "蒙版内（人）应该基本没被改动").toBeLessThan(
-    Math.max(20, insideVarBase * 0.5),
+  // 人脸中心（蒙版内）：应该原样保留
+  expect(ratioIn((W * 0.44) | 0, (H * 0.32) | 0, 60, 60), "蒙版内应与原帧逐像素相同").toBeGreaterThan(0.97);
+  // 左上角背景（蒙版外，菜单在右下角够不着）：马赛克应该把细节抹掉
+  expect(ratioIn((W * 0.05) | 0, (H * 0.08) | 0, 120, 120), "蒙版外应被马赛克改写").toBeLessThan(0.25);
+});
+
+test("蒙版左右不反向：清晰区必须落在人身上（偏心画面才验得出来）", async () => {
+  // 这条断言是为了抓一个真实发生过的 bug：shader 里给蒙版多补了一次镜像，
+  // 于是人越靠画面边缘，清晰区偏得越远。人站正中间时几乎看不出来——
+  // 所以必须用偏心的 side fixture，front 对这个 bug 免疫。
+  const tpl = path.join(TEMPLATES, "lowres-life.json");
+  await loadTemplate(harness.page, tpl, "side");
+  const frame = decode(await capture(harness.page, 0));
+  const base = await baseFrame("side");
+
+  // 「和原帧逐像素相同」的区域就是没被马赛克的区域。
+  // 菜单画在原帧没有的位置，自然不会被算进去，不用手动排除。
+  const W = frame.width;
+  const H = frame.height;
+  let sx = 0;
+  let n = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) << 2;
+      const d =
+        Math.abs(frame.data[o] - base.data[o]) +
+        Math.abs(frame.data[o + 1] - base.data[o + 1]) +
+        Math.abs(frame.data[o + 2] - base.data[o + 2]);
+      if (d <= 6) {
+        sx += x / W;
+        n++;
+      }
+    }
+  }
+  expect(n / (W * H), "应该存在成规模的清晰区").toBeGreaterThan(0.05);
+
+  // side fixture 的人在视频空间 cx=0.38，画面是镜像的，所以屏幕上在 0.62 附近
+  const sharpCx = sx / n;
+  expect(sharpCx, `清晰区质心 x=${sharpCx.toFixed(3)}，应落在人身上（约 0.62）而不是镜像位置（约 0.38）`).toBeGreaterThan(
+    0.55,
   );
-  expect(outsideVarNow, "蒙版外（背景）局部方差应显著低于原帧").toBeLessThan(outsideVarBase * 0.75);
 });
 
 test("noface 下 onLost:clear 生效：背景恢复清晰，不崩溃", async () => {
