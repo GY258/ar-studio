@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { OverlayElement } from "./types";
-import { SVG_ASSETS, rasterizeSvg, rasterizeText } from "./svg-assets";
+import { getSvg, getSvgAspect, rasterizeSvg, rasterizeText } from "./svg-assets";
 
 export class OverlayRenderer {
   private readonly group = new THREE.Group();
@@ -29,7 +29,7 @@ export class OverlayRenderer {
 
       let tex: THREE.Texture;
       if (elem.type === "svg" && elem.svgAsset) {
-        const svgStr = SVG_ASSETS[elem.svgAsset];
+        const svgStr = getSvg(elem.svgAsset);
         if (!svgStr) continue;
         const pw = Math.round(this.W * elem.sizeW * 2);
         const ph = Math.round(pw * (elem.aspect ?? 1));

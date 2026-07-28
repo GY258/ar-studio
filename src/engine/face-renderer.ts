@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { FilesetResolver, FaceLandmarker, type FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import type { FaceTrackElement, FaceTrackAnimation } from "./types";
-import { SVG_ASSETS, rasterizeSvg, rasterizeText } from "./svg-assets";
+import { getSvg, getSvgAspect, rasterizeSvg, rasterizeText } from "./svg-assets";
 import { WASM_BASE, FACE_MODEL } from "@/lib/assets";
 import { resolveLandmark } from "./anchors";
 
@@ -72,7 +72,7 @@ export class FaceRenderer {
         ctx.fillRect(0, 0, 128, 64);
         tex = new THREE.CanvasTexture(c);
       } else if (elem.type === "sticker" && elem.svgAsset) {
-        const svgStr = SVG_ASSETS[elem.svgAsset];
+        const svgStr = getSvg(elem.svgAsset);
         if (!svgStr) continue;
         const pw = 128;
         const ph = Math.round(pw * (elem.aspect ?? 1));
@@ -100,7 +100,7 @@ export class FaceRenderer {
         );
         tex = new THREE.CanvasTexture(canvas);
       } else if (elem.svgAsset) {
-        const svgStr = SVG_ASSETS[elem.svgAsset];
+        const svgStr = getSvg(elem.svgAsset);
         if (!svgStr) continue;
         const pw = 128;
         const aspect = elem.svgAsset === "tear-cluster" ? 200 / 130 : 1.5;
@@ -251,7 +251,7 @@ export class FaceRenderer {
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
         const scale = iod * (elem.iodScale ?? 0.28);
-        const aspect = 28 / 52; // tear-bar SVG viewBox ratio
+        const aspect = elem.svgAsset ? getSvgAspect(elem.svgAsset) : 1;
 
         const sw = elem.mirror ? -scale : scale;
         const h = scale * aspect;

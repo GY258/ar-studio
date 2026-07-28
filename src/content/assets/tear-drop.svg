@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 34" fill="none">
+  <path d="M12 1.5c0 0 9.5 14.6 9.5 20.6a9.5 9.5 0 1 1-19 0C2.5 16.1 12 1.5 12 1.5Z" fill="#62C3F2"/>
+  <path d="M12 1.5c0 0 9.5 14.6 9.5 20.6a9.5 9.5 0 1 1-19 0C2.5 16.1 12 1.5 12 1.5Z" fill="url(#tdShade)"/>
+  <ellipse cx="8.2" cy="23.5" rx="2.4" ry="3.6" transform="rotate(-18 8.2 23.5)" fill="#fff" fill-opacity=".65"/>
+  <defs>
+    <linearGradient id="tdShade" x1="4" y1="4" x2="20" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8FD8FA"/><stop offset="1" stop-color="#4FB4EC"/>
+    </linearGradient>
+  </defs>
+</svg>

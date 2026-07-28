@@ -1,10 +1,17 @@
 /**
- * 内联 SVG 素材。来源：Teardrop Sticker Kit。
+ * SVG 素材管理。
+ *
+ * 素材来源两种：
+ * 1. svg-lib: 公共素材库 src/content/assets/*.svg（构建时打包）
+ * 2. svg-inline: LLM 生成的内联 SVG（运行时注入，过 sanitize）
+ *
+ * 运行时通过 key 查找，渲染器不关心来源。
  */
 
-export const SVG_ASSETS: Record<string, string> = {
+import { sanitizeSvg, extractAspect } from "./svg-sanitize";
 
-  /* ---- Crying filter: tear streaks ---- */
+/** 内置素材库。构建时作为字符串常量打包，不依赖文件系统。 */
+const SVG_LIB: Record<string, string> = {
 
   "tear-streak-left": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 28" fill="none">
   <path d="M8 14H44" stroke="#62C3F2" stroke-width="24" stroke-linecap="round"/>
@@ -36,8 +43,6 @@ export const SVG_ASSETS: Record<string, string> = {
   <circle cx="52" cy="23" r="2.6" fill="#fff" fill-opacity=".6"/>
 </svg>`,
 
-  /* ---- Emotion Folders filter ---- */
-
   "folder": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 92" fill="none">
   <defs>
     <linearGradient id="fldFront" x1="56" y1="30" x2="56" y2="88" gradientUnits="userSpaceOnUse">
@@ -57,8 +62,6 @@ export const SVG_ASSETS: Record<string, string> = {
     <circle cx="75" cy="76" r="3.2" fill-opacity=".9"/>
   </g>
 </svg>`,
-
-  /* ---- Crayon Rain filter ---- */
 
   "crayon-drop": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 170" fill="none">
   <defs>
@@ -85,6 +88,37 @@ export const SVG_ASSETS: Record<string, string> = {
   </g>
 </svg>`,
 };
+
+/** 运行时注册的 inline SVG（LLM 生成） */
+const inlineCache: Record<string, string> = {};
+
+/** 获取 SVG 字符串。先查 inline 缓存，再查内置库。 */
+export function getSvg(key: string): string | null {
+  return inlineCache[key] ?? SVG_LIB[key] ?? null;
+}
+
+/** 注册 inline SVG。过 sanitize，失败抛错。 */
+export function registerInlineSvg(key: string, svg: string): void {
+  const problems = sanitizeSvg(svg);
+  if (problems.length) {
+    throw new Error(`SVG "${key}" failed sanitize:\n  - ${problems.join("\n  - ")}`);
+  }
+  inlineCache[key] = svg;
+}
+
+/** 获取 SVG 的宽高比 */
+export function getSvgAspect(key: string): number {
+  const svg = getSvg(key);
+  return svg ? extractAspect(svg) : 1;
+}
+
+/** 所有可用的 SVG key 列表 */
+export function listSvgKeys(): string[] {
+  return [...new Set([...Object.keys(SVG_LIB), ...Object.keys(inlineCache)])];
+}
+
+// --- 保持向后兼容的导出 ---
+export const SVG_ASSETS = SVG_LIB;
 
 /** 把 SVG 字符串渲染到 canvas 上 */
 export function rasterizeSvg(
