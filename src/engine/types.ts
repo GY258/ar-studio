@@ -107,8 +107,8 @@ export interface OverlayElement {
 export interface FaceTrackElement {
   id: string;
   type: "tear-pool" | "trailing-tear" | "blush" | "text" | "sticker";
-  /** 锚定的 landmark 索引 */
-  landmark?: number;
+  /** 锚定的 landmark：语义名（推荐）或数字索引（兼容旧 JSON） */
+  landmark?: string | number;
   /** SVG asset key */
   svgAsset?: string;
   /** 大小相对 IOD 的比例 */

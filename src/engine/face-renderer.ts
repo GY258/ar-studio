@@ -3,6 +3,7 @@ import { FilesetResolver, FaceLandmarker, type FaceLandmarkerResult } from "@med
 import type { FaceTrackElement, FaceTrackAnimation } from "./types";
 import { SVG_ASSETS, rasterizeSvg, rasterizeText } from "./svg-assets";
 import { WASM_BASE, FACE_MODEL } from "@/lib/assets";
+import { resolveLandmark } from "./anchors";
 
 interface FaceMesh {
   mesh: THREE.Mesh;
@@ -152,9 +153,14 @@ export class FaceRenderer {
 
   update(t: number) {
     const lm = this.lastLandmarks;
-    // 丢帧容忍：0.5 秒内保持上一帧位置，超过才隐藏
     const elapsed = performance.now() - this.lastFaceTime;
     const hasFace = lm && lm.length >= 478 && elapsed < 500;
+
+    const getLm = (landmark: string | number | undefined) => {
+      if (landmark === undefined || !lm) return null;
+      const idx = resolveLandmark(landmark);
+      return idx !== null && idx < lm.length ? lm[idx] : null;
+    };
 
     let iod = 0;
     let roll = 0;
@@ -197,8 +203,8 @@ export class FaceRenderer {
 
       // --- sticker 类型：相对锚点定位，跟随人脸 ---
       if (elem.type === "sticker") {
-        const anchorIdx = elem.landmark ?? 168;
-        const anchor = lm[anchorIdx];
+        const anchor = getLm(elem.landmark ?? "nose_bridge");
+        if (!anchor) continue;
         const ax = (0.5 - anchor.x) * this.W;
         const ay = (0.5 - anchor.y) * this.H;
 
@@ -240,7 +246,8 @@ export class FaceRenderer {
 
       // --- tear-pool: T 型固定在眼下不动 ---
       if (elem.type === "tear-pool" && elem.landmark !== undefined) {
-        const anchor = lm[elem.landmark];
+        const anchor = getLm(elem.landmark);
+        if (!anchor) continue;
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
         const scale = iod * (elem.iodScale ?? 0.28);
@@ -257,7 +264,8 @@ export class FaceRenderer {
 
       // --- trailing-tear: 水滴从眼下冒出然后往下掉 ---
       if (elem.type === "trailing-tear" && elem.landmark !== undefined) {
-        const anchor = lm[elem.landmark];
+        const anchor = getLm(elem.landmark);
+        if (!anchor) continue;
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
         const idx = parseInt(elem.id.slice(-1)) || 0;
@@ -305,7 +313,8 @@ export class FaceRenderer {
 
       // --- blush ---
       if (elem.type === "blush" && elem.landmark !== undefined) {
-        const anchor = lm[elem.landmark];
+        const anchor = getLm(elem.landmark);
+        if (!anchor) continue;
         const wx = (0.5 - anchor.x) * this.W;
         const wy = (0.5 - anchor.y) * this.H;
         const scale = iod * (elem.iodScale ?? 0.4);
