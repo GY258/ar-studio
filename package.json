@@ -17,7 +17,8 @@
     "render:preview": "tsx scripts/render-preview.ts",
     "test:render": "playwright test",
     "record:fixture": "tsx scripts/record-fixture.ts",
-    "gen:skill-reference": "tsx scripts/gen-skill-reference.ts"
+    "gen:skill-reference": "tsx scripts/gen-skill-reference.ts",
+    "gen:font": "tsx scripts/gen-font.ts"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.14",

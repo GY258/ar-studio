@@ -11,6 +11,7 @@
 import * as THREE from "three";
 import type { ElementBlend, ElementV2, SizeRef } from "./types";
 import { getSvg, getSvgAspect, rasterizeSvg, rasterizeText } from "./svg-assets";
+import { ensureTextFont } from "./text-font";
 import { extractAspect } from "./svg-sanitize";
 import { evaluateAnimations } from "./animations";
 import type { FaceFrame, FaceTracker } from "./face-tracker";
@@ -67,6 +68,11 @@ export class ElementRenderer {
   private async build(elements: ElementV2[]): Promise<void> {
     this.clear();
     const gen = this.generation;
+
+    // 有文字元素就先把内嵌字体等到位。不等的话第一次栅格化会落到系统字体上，
+    // 同一份 JSON 在不同机器上字形不同 —— golden 就只在录它的那台机器上成立。
+    if (elements.some((e) => e.asset.kind === "text")) await ensureTextFont();
+    if (gen !== this.generation) return;
 
     for (const elem of elements) {
       if (gen !== this.generation) return; // 已切模板，放弃这批

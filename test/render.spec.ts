@@ -423,6 +423,26 @@ test("帧效果必须挂在内置材质上，不能退回裸 ShaderMaterial", as
   expect(await harness.page.evaluate(() => window.harness.bgMaterialType())).toBe("MeshBasicMaterial");
 });
 
+test("文字用的是内嵌字体，不是系统字体", async () => {
+  /*
+   * 这条钉的是「golden 必须跨机器成立」。
+   *
+   * canvas 的 fillText 用系统字体，同一份 JSON 在 macOS 上落到 SF Pro Rounded、
+   * 在 Linux CI 上落到 DejaVu Sans，字形不同 → 元素掩膜对不上。crying 底部那个
+   * (T_T) 占了掩膜将近一半，实测只换字体就能把 IoU 从 1.0 打到 0.70，
+   * 而 CI 上是 0.52 —— 这个仓库的 CI 因此红了不止一天。
+   *
+   * 所以断言的不是「画得像不像」，而是「那个 family 真的注册进去了」。
+   * 有人把内嵌字体删掉换回系统字体栈，这条会立刻红，而不是等 CI 上莫名其妙的
+   * 掩膜偏差去暴露。
+   */
+  await loadTemplate(harness.page, path.join(TEMPLATES, "crying.json"), "front");
+  const loaded = await harness.page.evaluate(() =>
+    document.fonts.check('700 64px "ARStudioText"'),
+  );
+  expect(loaded, "内嵌字体应该已经注册到 document.fonts").toBe(true);
+});
+
 test("生成器 id 确定：同一模板重复展开产出同一串 id", async () => {
   const raw = JSON.parse(fs.readFileSync(path.join(TEMPLATES, "crying.json"), "utf8"));
   const a = expandGenerators(raw.elements).map((e) => e.id);

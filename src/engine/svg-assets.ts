@@ -9,6 +9,7 @@
  */
 
 import { sanitizeSvg, extractAspect } from "./svg-sanitize";
+import { TEXT_FONT_FAMILY } from "./text-font";
 
 /** 内置素材库。构建时作为字符串常量打包，不依赖文件系统。 */
 const SVG_LIB: Record<string, string> = {
@@ -162,7 +163,13 @@ export function rasterizeSvg(
   });
 }
 
-/** 把文字渲染到 canvas 上 */
+/**
+ * 把文字渲染到 canvas 上。
+ *
+ * 调用前必须 await ensureTextFont()，否则第一次栅格化会落到系统字体上 ——
+ * 那正是这个内嵌字体要解决的问题（见 text-font.ts）。后面的系统字体只是兜底，
+ * 字体加载失败时不至于什么都画不出来。
+ */
 export function rasterizeText(
   text: string,
   fontSize: number,
@@ -172,7 +179,7 @@ export function rasterizeText(
 ): HTMLCanvasElement {
   const c = document.createElement("canvas");
   const ctx = c.getContext("2d")!;
-  const font = `${fontWeight} ${fontSize}px "SF Pro Rounded","Nunito","Inter",system-ui,sans-serif`;
+  const font = `${fontWeight} ${fontSize}px "${TEXT_FONT_FAMILY}",system-ui,sans-serif`;
   ctx.font = font;
   const m = ctx.measureText(text);
   const pad = fontSize * 0.5;
