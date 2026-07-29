@@ -339,6 +339,16 @@ export class ArEngine {
       shader.uniforms.applyOutside = { value: applyOutside ? 1.0 : 0.0 };
       // 过渡带往哪边推。0.12 ≈ 把整条过渡带挪出人体轮廓，见下面的注释
       shader.uniforms.maskBias = { value: applyOutside ? 0.12 : -0.12 };
+      shader.uniforms.uTime = { value: 0 };
+      const g = effect.kind === "glitch" ? effect : null;
+      shader.uniforms.gBlocks = { value: g?.blocks ?? 48 };
+      shader.uniforms.gDisplace = { value: g?.displace ?? 0 };
+      shader.uniforms.gChannelSplit = { value: g?.channelSplit ?? 0 };
+      shader.uniforms.gScanline = { value: g?.scanline ?? 0 };
+      shader.uniforms.gColorNoise = { value: g?.colorNoise ?? 0 };
+      shader.uniforms.gDarkBias = { value: g?.darkBias ?? 0 };
+      shader.uniforms.gSpeed = { value: g?.speed ?? 1 };
+      shader.uniforms.gSeed = { value: g?.seed ?? 0 };
 
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -349,7 +359,25 @@ export class ArEngine {
           uniform vec2 blurStep;
           uniform float amount;
           uniform float applyOutside;
-          uniform float maskBias;`,
+          uniform float maskBias;
+          // 时间。由 renderAt(t) / loop() 传的同一个 t 驱动，不读挂钟 ——
+          // 读挂钟的话「同一份输入渲染多少次都是同一张图」就不成立了
+          uniform float uTime;
+          uniform float gBlocks;
+          uniform float gDisplace;
+          uniform float gChannelSplit;
+          uniform float gScanline;
+          uniform float gColorNoise;
+          uniform float gDarkBias;
+          uniform float gSpeed;
+          uniform float gSeed;
+
+          /** 确定性 hash。glitch 的每一处随机都走它，不许出现真随机数 */
+          float arHash(vec2 p, float seed) {
+            p = fract(p * vec2(123.34, 456.21) + seed * 0.017);
+            p += dot(p, p + 45.32);
+            return fract(p.x * p.y);
+          }`,
         )
         /*
          * 辅助函数挂在 <map_pars_fragment> 后面，不能挂在 <common> 后面：
@@ -709,6 +737,7 @@ export class ArEngine {
   renderAt(t: number, nowMs = t * 1000) {
     this.perceive(nowMs);
     this.updateMask();
+    this.setEffectTime(t);
     this.elements.update(t, this.faceTracker, this.faceTracker.frame(nowMs));
     this.renderer.render(this.scene, this.camera);
   }
@@ -764,6 +793,11 @@ export class ArEngine {
     this.maskTex.needsUpdate = true;
   }
 
+  /** 把时间喂给帧效果。t 由调用方给，引擎自己不读挂钟 —— 见 uTime 的注释。 */
+  private setEffectTime(t: number) {
+    if (this.bgUniforms?.uTime) this.bgUniforms.uTime.value = t;
+  }
+
   private loop = (now: number) => {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.loop);
@@ -783,6 +817,7 @@ export class ArEngine {
     }
 
     this.updateMask();
+    this.setEffectTime(t);
 
     if (this.cfg?.elements?.length) {
       this.elements.update(t, this.faceTracker, this.faceTracker.frame(now));

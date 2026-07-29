@@ -195,6 +195,8 @@ ${Object.entries(ANCHOR_PAIRS)
   effect: { kind: "pixelate";   blocks: number }   // blocks ∈ [4, 200]，短边格数
         | { kind: "blur";       radius: number }   // [0.001, 0.1]，长边的比例
         | { kind: "desaturate"; amount: number }   // [0, 1]，1 = 全灰
+        | { kind: "glitch"; blocks; displace; channelSplit;        // 数字信号损坏，见下
+                            scanline; colorNoise; darkBias; speed; seed }
         | { kind: "mask-debug" }                   // 调试视图，见下
 }
 \`\`\`
@@ -206,6 +208,32 @@ ${Object.entries(ANCHOR_PAIRS)
 （红 = 判为人，绿 = 过渡带，背景是压暗的原图）。不这么做的话你是在透过马赛克看蒙版，
 蒙版的边界和效果自己的块状边缘两个未知量叠在一起，调哪个都像没用。
 调试模板记得配 \`"hidden": true\`，别让它出现在模板库里。
+
+### glitch
+
+\`\`\`jsonc
+{ "kind": "glitch",
+  "blocks": 56,          // [8, 200] 短边分几行，错位块的粒度
+  "displace": 0.05,      // [0, 0.5] 横向错位强度，画面宽度的比例
+  "channelSplit": 0.003, // [0, 0.05] RGB 通道分离
+  "scanline": 0.35,      // [0, 1] 扫描线
+  "colorNoise": 0.55,    // [0, 1] 色块乱码密度
+  "darkBias": 0.75,      // [0, 1] 噪声往暗部集中的程度
+  "speed": 8,            // [0.1, 60] 每秒变几次
+  "seed": 1337 }         // 必填
+\`\`\`
+
+配 \`apply: "inside"\` 就是「只有人坏掉、背景干净」。
+
+**\`darkBias\` 是这个效果对不对味的关键**：真实的信号损坏几乎只出现在暗部，
+浅色皮肤是干净的。调到 0 的话脸上也会花，立刻变成廉价滤镜。
+
+\`seed\` 必填，理由同 scatter：损坏是 \`hash(块, 帧号, seed)\` 的纯函数，
+用随机数的话 \`renderAt(t)\` 不再确定，渲染回归就不成立。
+
+注意这**不是 datamosh**。真 datamosh 是时间域的（丢 I 帧 + 复用运动矢量），
+需要跨帧历史，而引擎是无历史的。这里是逐帧程序化损坏：静态几乎一样，
+快速运动时不会有「融化」的拖影。
 
 \`provider: "person"\` 时 \`perception\` 必须包含 \`"segmentation"\`，否则分割模型不会被加载。
 \`blocks\` 是真实参数，和菜单文案上写的「240p」没有换算关系。

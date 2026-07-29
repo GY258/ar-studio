@@ -176,7 +176,7 @@ const GENERATORS = ["mirrorPair", "trail", "columns", "scatter", "ring", "spread
 const JITTER_GENERATORS = ["mirrorPair", "trail", "ring", "spread"];
 const MASK_PROVIDERS = ["person", "face-ellipse", "none"];
 /** schema 认识的 kind。是不是**实现了**另说，见下面的 IMPLEMENTED_EFFECTS */
-const EFFECT_KINDS = ["pixelate", "blur", "desaturate", "mask-debug", "posterize", "pixel-art"];
+const EFFECT_KINDS = ["pixelate", "blur", "desaturate", "glitch", "mask-debug", "posterize", "pixel-art"];
 
 /** 展开后的元素数硬上限。生成器很容易写出爆炸的数量。 */
 const MAX_ELEMENTS = 120;
@@ -273,6 +273,13 @@ function validateAsset(a: unknown, at: string, p: string[]) {
       }
       if (!/viewBox\s*=/.test(asset.svg)) {
         p.push(`${at}.asset.svg 缺 viewBox。高宽比从 viewBox 解析，没有就只能按 1:1 画`);
+      }
+      if (!/xmlns\s*=\s*["']http:\/\/www\.w3\.org\/2000\/svg["']/.test(asset.svg)) {
+        p.push(
+          `${at}.asset.svg 缺 xmlns="http://www.w3.org/2000/svg"。` +
+            `内联 SVG 是当图片加载的（Blob → Image），没有命名空间浏览器直接拒绝解析 —— ` +
+            `不在这里拦住的话，运行时只会抛一句 "SVG rasterization failed"，不告诉你是哪个元素`,
+        );
       }
     }
   }
@@ -627,5 +634,24 @@ function validateSource(raw: Raw, p: string[]) {
   }
   if (kind === "desaturate" && !inRange(eff.amount, 0, 1)) {
     p.push("source.effect.amount 应在 [0, 1]，1 = 全灰");
+  }
+  if (kind === "glitch") {
+    if (!inRange(eff.blocks, 8, 200)) p.push("source.effect.blocks 应在 [8, 200]（短边分几行，错位块的粒度）");
+    for (const [k, hi, hint] of [
+      ["displace", 0.5, "横向错位强度，画面宽度的比例"],
+      ["channelSplit", 0.05, "RGB 通道分离量，画面宽度的比例"],
+      ["scanline", 1, "扫描线强度"],
+      ["colorNoise", 1, "色块乱码密度"],
+      ["darkBias", 1, "噪声往暗部集中的程度。0 = 脸上也花"],
+    ] as const) {
+      if (!inRange(eff[k], 0, hi)) p.push(`source.effect.${k} 应在 [0, ${hi}]（${hint}）`);
+    }
+    if (!inRange(eff.speed, 0.1, 60)) p.push("source.effect.speed 应在 [0.1, 60]（每秒变几次）");
+    if (!num(eff.seed)) {
+      p.push(
+        "source.effect.seed 必填。损坏必须是 hash(块, 帧号, seed) 的纯函数 —— " +
+          "用随机数的话 renderAt(t) 不再确定，整套渲染回归就不成立了",
+      );
+    }
   }
 }

@@ -193,6 +193,37 @@ export interface SourceEffect {
     | { kind: "blur"; radius: number }
     /** amount 0~1，1 = 全灰。apply:"outside" 就是「只有我是彩色的」 */
     | { kind: "desaturate"; amount: number }
+    /**
+     * 数字信号损坏。四种损坏叠在一起才像，所以是一个 kind 带四个强度，
+     * 不是四个 kind —— 而且 source.effect 是单个对象，拆开还得先把它改成数组。
+     *
+     * 注意这不是 datamosh。真 datamosh 是时间域的（丢 I 帧 + 复用运动矢量），
+     * 需要跨帧历史，而 renderAt(t) 是无历史的。这里是逐帧程序化损坏：
+     * 静态几乎一样，快速运动时不会有「融化」的拖影。
+     */
+    | {
+        kind: "glitch";
+        /** 错位块的粒度，短边分几行 */
+        blocks: number;
+        /** 横向错位强度，画面宽度的比例 */
+        displace: number;
+        /** RGB 通道分离量，画面宽度的比例 */
+        channelSplit: number;
+        /** 扫描线强度 0~1 */
+        scanline: number;
+        /** 色块乱码密度 0~1 */
+        colorNoise: number;
+        /**
+         * 噪声往暗部集中的程度 0~1。
+         * 参考素材里乱码几乎全在头发和深色衣服上，浅色皮肤是干净的 ——
+         * 不按亮度加权的话脸上也会花，立刻变成廉价滤镜。
+         */
+        darkBias: number;
+        /** 每秒变几次。损坏是离散跳变的，不是连续飘 */
+        speed: number;
+        /** 必填。噪声必须是 hash(块, 帧号, seed) 的纯函数，不能用随机数 */
+        seed: number;
+      }
     /** 调试视图：直接把蒙版画出来，不做效果。红 = 判为人，绿 = 过渡带 */
     | { kind: "mask-debug" }
     | { kind: "posterize"; levels: number }

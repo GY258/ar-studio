@@ -70,6 +70,65 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
     vec4 effectTexel = vec4( mix( sharpTexel.rgb, vec3( lum ), amount ), sharpTexel.a );`,
 
   /*
+   * 数字信号损坏：横向错位 + RGB 通道分离 + 色块乱码 + 扫描线。
+   *
+   * **全部是 hash(块, 帧号, seed) 的纯函数，一个随机数都没有。**
+   * 用 Math.random() 或读挂钟的话，renderAt(t) 就不再是「同一份输入渲染多少次都是
+   * 同一张图」，整套 golden 回归当场塌掉。时间也是离散的（floor(uTime * speed)）——
+   * 既是为了确定性，也是因为真实的信号损坏本来就是一跳一跳的，连续飘反而假。
+   *
+   * darkBias 是这个效果「对味」的关键：参考素材里乱码几乎全在头发和深色衣服上，
+   * 浅色皮肤是干净的。不按亮度加权的话脸上也会花，立刻变成廉价滤镜。
+   */
+  glitch: `
+    float gFrame = floor( uTime * gSpeed );
+    // 行错位：整行整行地平移，这是「数据错位」最识别得出来的特征
+    float gRow = floor( vMapUv.y * gBlocks );
+    float rowRand = arHash( vec2( gRow, gFrame ), gSeed );
+    // 只有一部分行会错位，全错的话读起来是「画面在抖」而不是「数据坏了」
+    float rowShift = step( 0.72, rowRand ) * ( arHash( vec2( gRow, gFrame + 7.0 ), gSeed ) - 0.5 ) * gDisplace;
+    vec2 gUv = vec2( fract( vMapUv.x + rowShift ), vMapUv.y );
+
+    // 通道分离：R 和 B 往两边错开，G 留在原地
+    vec4 gCenter = srcTexel( gUv );
+    float gR = srcTexel( vec2( fract( gUv.x + gChannelSplit ), gUv.y ) ).r;
+    float gB = srcTexel( vec2( fract( gUv.x - gChannelSplit ), gUv.y ) ).b;
+    vec3 gRgb = vec3( gR, gCenter.g, gB );
+
+    // 暗部权重：亮的地方基本不坏。取 1.8 次幂是因为线性权重下脸上仍然会花 ——
+    // 参考素材里浅色皮肤是干净的，乱码全在头发和深色衣服上
+    float gLum = dot( gCenter.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+    float gDark = pow( mix( 1.0, 1.0 - smoothstep( 0.06, 0.34, gLum ), gDarkBias ), 2.2 );
+
+    /*
+     * 色块乱码，两级网格。
+     *
+     * 单级（一个细网格均匀撒）出来的是彩色胡椒粉，读作噪点不是数据损坏。
+     * 真实的坏块是**成簇**的：某一片数据坏了，那一整片才碎。
+     * 所以先用粗网格决定「这一片坏没坏」，再在坏掉的片里用细网格出块。
+     *
+     * 细网格取竖条（宽格数 > 高格数），因为视频数据是按行存的，
+     * 坏起来是一条一条的竖直碎片，方块反而不像。
+     */
+    vec2 gRegion = floor( vMapUv * vec2( 13.0, 9.0 ) );
+    float gRegionOn = step( 0.52, arHash( gRegion + vec2( 0.0, gFrame * 3.0 ), gSeed ) );
+    vec2 gCell = floor( vMapUv * vec2( gBlocks * 2.0, gBlocks * 0.45 ) );
+    float gPick = arHash( gCell + vec2( 0.0, gFrame * 13.0 ), gSeed );
+    float gOn = gRegionOn * step( 1.0 - gColorNoise * 0.55 * gDark, gPick );
+    vec3 gNoise = vec3(
+      arHash( gCell + vec2( 1.7, gFrame ), gSeed ),
+      arHash( gCell + vec2( 9.1, gFrame ), gSeed ),
+      arHash( gCell + vec2( 4.3, gFrame ), gSeed )
+    );
+    // 归一化到高饱和：直接用 hash 会得到一堆灰扑扑的中间色
+    gNoise = gNoise / max( 0.001, max( gNoise.r, max( gNoise.g, gNoise.b ) ) );
+    gRgb = mix( gRgb, gNoise, gOn );
+
+    // 扫描线：奇偶行压暗。乘在最后，让乱码块也吃到
+    float gScan = 1.0 - gScanline * 0.5 * ( 1.0 - abs( fract( vMapUv.y * gBlocks * 3.0 ) * 2.0 - 1.0 ) );
+    vec4 effectTexel = vec4( gRgb * gScan, gCenter.a );`,
+
+  /*
    * 调试用：把蒙版本身画出来，不做任何效果。
    *
    * 存在的理由是「不要透过马赛克看蒙版」—— 抠图不准的时候，
