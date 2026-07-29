@@ -429,6 +429,42 @@ export class ArEngine {
    * 裸 shader 吃不到 three 的 DECODE_VIDEO_TEXTURE，摄像头源上颜色会整体偏亮，
    * 而离线 harness 用的是图片源，这个 bug 在测试里根本复现不出来。
    */
+  /**
+   * 蒙版这一路的实时状态。排查「效果没生效」时的第一手证据。
+   *
+   * 「整幅画面都没效果」和「效果作用错了地方」是两类完全不同的故障：
+   * 前者多半是 seen=false 走了 onLost 兜底（整张蒙版被填成「哪里都不作用」），
+   * 后者才是蒙版本身的问题。光看画面区分不了，看这几个数字一眼就知道。
+   */
+  debugMaskStats() {
+    const src = this.maskField.data;
+    let min = 255;
+    let max = 0;
+    let sum = 0;
+    if (src) {
+      for (let i = 0; i < src.length; i++) {
+        const v = src[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+        sum += v;
+      }
+    }
+    return {
+      seen: this.maskField.seen,
+      maskSize: `${this.maskField.width}x${this.maskField.height}`,
+      texSize: this.maskTex ? `${this.maskTex.image.width}x${this.maskTex.image.height}` : "无",
+      // 0~255。整张都是 255 且 seen=false 就是走了兜底，效果当然哪里都不作用
+      min,
+      max,
+      mean: src?.length ? +(sum / src.length).toFixed(1) : null,
+      onLost: this.onLost,
+      applyOutside: this.applyOutside,
+      blocks: this.bgUniforms?.blocks?.value ?? null,
+      effect: this.cfg?.source?.effect.kind ?? "无",
+      perception: this.perception.join(","),
+    };
+  }
+
   debugBgMaterialType(): string {
     return this.bgMat.type;
   }

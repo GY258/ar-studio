@@ -40,6 +40,13 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     const engine = new ArEngine({ canvas, video, onStats: setStats });
     engineRef.current = engine;
 
+    // 开发期把引擎挂到 window 上，控制台里能直接问它状态：
+    //   __engine.debugMaskStats()
+    // 生产环境不挂 —— 那是给排查用的，不是 API。
+    if (process.env.NODE_ENV !== "production") {
+      (window as unknown as { __engine?: ArEngine }).__engine = engine;
+    }
+
     engine
       .loadPerception()
       .then(() => setPhase("ready"))
