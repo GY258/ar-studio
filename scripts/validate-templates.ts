@@ -70,8 +70,14 @@ for (const file of targets()) {
   // 展开信息：元素数和兼容层触发情况一起报出来，
   // 「校验过了但什么都看不见」多半在这一行就能看出苗头。
   const { elements, warnings } = migrateElements(raw);
+  // 「无元素」有两种：particle 模板本来就不用元素，只有帧效果的模板也不用。
+  // 一律写「particle 模板」会把 colorful-me 这类说成另一个类型，看着像出错了。
   const detail =
-    elements.length > 0 ? `${DIM}${elements.length} 个元素${OFF}` : `${DIM}无元素（particle 模板）${OFF}`;
+    elements.length > 0
+      ? `${DIM}${elements.length} 个元素${OFF}`
+      : raw.source
+        ? `${DIM}无元素（只有帧效果）${OFF}`
+        : `${DIM}无元素（particle 模板）${OFF}`;
   console.log(`${GREEN}✓${OFF} ${name}  ${detail}`);
   for (const w of warnings) {
     console.log(`    ${YELLOW}compat${OFF} ${w}`);

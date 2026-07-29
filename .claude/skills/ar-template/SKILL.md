@@ -86,6 +86,12 @@ npm run test:render
 
 **「一串往下掉的东西」** → `mirrorPair` 套 `children` 里的 `generate: "trail"`，
 动画用 `emit-fall-fade`，相位差写 `trail` 的 `phaseShift`（秒）而不是逐个手填 `phase`。
+受重力的东西（眼泪、雨滴）加 `ease: "gravity"`——缺省的线性读起来是匀速下滑，
+这是「像贴纸」最直接的来源。整齐得像流水线时给 `item` 加 `jitter`（必须带 `seed`）。
+
+**「贴在皮肤上的东西」**（腮红、纹身、脸彩）→ 加 `blend: "multiply"`；
+半透明的水光、眼泪用 `"screen"`；发光的星星光斑用 `"add"`。
+缺省的 normal 是一块不透明色块糊在脸上，贴脸类元素基本都不该用它。
 
 **「满屏飘」** → `generate: "scatter"` + `seed`，或者 `columns`。
 
@@ -98,6 +104,8 @@ npm run test:render
 
 **「背景打码 / 只有人清晰」** → 不是元素，是和 `elements` 平级的 `source` 字段。
 见 `reference/schema.md` 的帧效果一节，参考 `lowres-life.json`。
+现在有三种：`pixelate` / `blur` / `desaturate`。只有帧效果、`elements: []` 是合法模板，
+参考 `colorful-me.json`（「只有我是彩色的」）。
 
 **「生成器覆盖不了的怪排列」**（比如摆成心形）→ 直接输出平铺元素列表，不用生成器。
 两者完全等价。

@@ -52,6 +52,7 @@ interface ElementV2 {
   rotation?: number;          // 度
   followRoll?: boolean;       // 是否跟头部滚转。face 空间默认 true
   opacity?: number;           // [0, 1]
+  blend?: "normal" | "add" | "screen" | "multiply";    // 与背后画面的混合，缺省 normal
   animations?: AnimationV2[];
   interactive?: { drag?: boolean; resize?: boolean };  // 让用户自己拖/缩，仅 screen 空间
 }
@@ -83,6 +84,15 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 
 高度一律按 viewBox 的高宽比自动算——不要手填 aspect，这个字段已经没有了。
 
+**\`blend\` 决定元素怎么和背后的画面融。** 缺省 \`normal\` 是一块不透明的色块糊在脸上，
+真实的眼泪是折射的，颜色主要来自它背后的皮肤：
+
+- \`multiply\` 压暗底色 → 腮红、纹身、脸彩这类「长在皮肤上」的
+- \`screen\` 提亮但保留底下的明暗 → 眼泪、水光
+- \`add\` 发光 → 星星、光斑
+
+贴在脸上的半透明东西默认就该考虑 \`multiply\` 或 \`screen\`，别一律用 normal。
+
 **\`interactive\`** 让用户在画面上直接拖动元素、滚轮或双指缩放它。
 只对 \`space: "screen"\` 有意义——face 空间的位置由 landmark 决定，拖了下一帧就被拉回去。
 调整量只存在渲染器里，不写回 JSON，切模板即重置。假 UI 面板、水印这类
@@ -95,7 +105,7 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 \`\`\`ts
 | { preset: "float";  amplitude: number; period: number; phase?: number }
   // 上下浮动。amplitude 是画面高度的比例，0.01 = 1%H
-| { preset: "fall";   period: number; phase?: number }
+| { preset: "fall";   period: number; phase?: number; ease?: Ease }
   // 从画面顶飞到画面底并循环。走整屏高度，与锚点的 ny 无关
 | { preset: "pulse";  scaleRange: [number, number]; period: number; phase?: number }
 | { preset: "spin";   period: number; phase?: number }
@@ -103,11 +113,21 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
     distance: number;        // 位移距离，单位 IOD
     period: number;
     phase?: number;
+    ease?: Ease;
     outwardDrift?: number;   // 默认 0.08，越往下越往外撇
     shrink?: number;         // 默认 0.3
     emitPortion?: number;    // 默认 0.15，冒出来占周期的比例
     fadePortion?: number }   // 默认 0.15
+
+type Ease = "linear" | "in" | "out" | "inout" | "gravity" | "bounce"   // 缺省 linear
 \`\`\`
+
+**缺省的 \`linear\` 读起来是「一张贴纸在匀速下滑」。** 水是加速下落的，
+眼泪、雨滴这类受重力的东西写 \`ease: "gravity"\`，起步慢、落到下巴快。
+
+\`ease\` 只有 \`fall\` 和 \`emit-fall-fade\` 支持，它们是「0→1 走一趟」的过程。
+\`float\` / \`pulse\` / \`spin\` 是周期性的，缓动套在相位上会在每个周期的接缝处
+留一个速度拐折（转一圈然后顿一下），所以写了会被校验拒收，不是悄悄不生效。
 
 ## 生成器
 
@@ -135,6 +155,24 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 
 \`item\` 是「去掉 id 和 anchor 的 ElementV2」——这两个字段由生成器负责填，写了会被拒收。
 
+### item.jitter：把整齐的一批打散
+
+生成器默认产出一批一模一样的东西。\`trail\` 写 \`step: 0 + decay: 1\` 时三滴眼泪
+起点相同、大小相同，只有相位差，于是沿同一条线单列前进，像流水线上的零件。
+真实的眼泪大小不一、路径略有偏离、时间不规整。
+
+\`\`\`ts
+jitter?: {
+  size?: number;              // 尺寸倍率的随机半宽，0.2 = ±20%
+  phase?: number;             // 归一化相位的随机偏移
+  offset?: [number, number];  // 位置的随机偏移，单位 IOD
+  seed: number;               // 必填，理由同 scatter
+}
+\`\`\`
+
+支持 \`mirrorPair\` / \`trail\` / \`ring\` / \`spread\`。\`columns\` 是版式（标签逐个对齐），
+抖了就歪，写了会被拒收；\`scatter\` 本来就是随机的，用它自己的 seed / sizeRange。
+
 ## 成对锚点（mirrorPair 的 anchor）
 
 ${Object.entries(ANCHOR_PAIRS)
@@ -153,18 +191,25 @@ ${Object.entries(ANCHOR_PAIRS)
           feather?: number;                // [0, 0.1]
           onLost?: "clear" | "hold" | "full" },
   apply: "inside" | "outside",             // 效果作用在人身上 / 背景上
-  effect: { kind: "pixelate"; blocks: number }   // blocks ∈ [4, 200]，短边格数
-        | { kind: "blur"; radius: number }       // 尚未实现
+  effect: { kind: "pixelate";   blocks: number }   // blocks ∈ [4, 200]，短边格数
+        | { kind: "blur";       radius: number }   // [0.001, 0.1]，长边的比例
+        | { kind: "desaturate"; amount: number }   // [0, 1]，1 = 全灰
 }
 \`\`\`
 
 \`provider: "person"\` 时 \`perception\` 必须包含 \`"segmentation"\`，否则分割模型不会被加载。
 \`blocks\` 是真实参数，和菜单文案上写的「240p」没有换算关系。
 
+只有帧效果、没有任何贴纸是合法的：\`"elements": []\` + 一个 \`source\` 就是一个完整模板
+（\`apply: "outside"\` + \`desaturate\` = 「只有我是彩色的」）。
+
+\`posterize\` / \`pixel-art\` 只留了枚举值没有实现，写了会被校验拦下来 ——
+校验器的名单是从引擎的实现表导出来的，不会出现「能过校验但没效果」。
+
 ## 硬约束
 
 1. 锚点只写语义名。数字编号是引擎内部实现，写进 JSON 会被校验拒收。
-2. \`scatter\` 必须带 \`seed\`。没有 seed 展开不确定，渲染回归的 golden 对比不成立。
+2. \`scatter\` 和 \`item.jitter\` 必须带 \`seed\`。没有 seed 展开不确定，渲染回归的 golden 对比不成立。
 3. \`svg-inline\` 里出现 \`script\` / \`foreignObject\` / \`on*\` 事件属性 / 外链 \`href\` /
    \`style\` 里的 \`url(\` 外链，校验会**拒收**而不是清洗。修掉它，不要绕过。
 4. 单模板展开后 ≤ 120 个元素。
