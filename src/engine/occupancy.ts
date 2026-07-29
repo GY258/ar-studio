@@ -25,20 +25,20 @@ export class OccupancyField {
   }
 
   /**
-   * 吃一帧 MediaPipe 的 categoryMask。
+   * 吃一帧置信度图（0~1）。
    *
-   * 不同模型 / 版本里「人」到底编码成 0 还是非 0 并不一致，
-   * 所以用四角采样定背景值——角落几乎总是背景。
-   * 例外：贴着墙拍、角落里也是人，这个假设会破，那时候把 bgVal 写死成实测值。
+   * 这里**要**阈值化成 0/1，和 MaskField 正好相反：粒子碰撞需要的是一个粗且硬的
+   * 占据场，注释里那两条（时域平滑、先模糊再求梯度）就是为了把它变糊。
+   * 半透明的头发边缘对碰撞没有意义 —— 一颗雪要么撞上要么没撞上。
+   *
+   * 阈值取 0.5 就够：置信度的语义是固定的，1 = 人。
+   * 原来那段四角采样定背景值的逻辑是 categoryMask 时代的产物，一并去掉了。
    */
-  ingest(data: Uint8Array, mw: number, mh: number) {
-    const corners = [data[0], data[mw - 1], data[(mh - 1) * mw], data[mh * mw - 1]].sort((a, b) => a - b);
-    const bgVal = corners[1];
-
+  ingest(data: Float32Array, mw: number, mh: number) {
     for (let y = 0; y < GH; y++) {
       const sy = ((y * mh) / GH) | 0;
       for (let x = 0; x < GW; x++) {
-        this.raw[y * GW + x] = data[sy * mw + (((x * mw) / GW) | 0)] !== bgVal ? 1 : 0;
+        this.raw[y * GW + x] = data[sy * mw + (((x * mw) / GW) | 0)] > 0.5 ? 1 : 0;
       }
     }
 

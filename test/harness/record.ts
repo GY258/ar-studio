@@ -11,6 +11,7 @@ import { MediaPipeSegmentationProvider } from "@/engine/segmentation";
 
 interface Recorded {
   landmarks: { x: number; y: number; z: number }[] | null;
+  /** 分割置信度 0~1，逐像素。写文件时再量化成 8bit 灰度 */
   mask: { data: number[]; w: number; h: number } | null;
 }
 

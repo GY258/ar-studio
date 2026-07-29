@@ -64,28 +64,31 @@ export class MaskField {
   }
 
   /**
-   * 吃一帧 categoryMask。
+   * 吃一帧置信度图（0~1）。
    *
-   * 背景值同样用四角采样定——不同 MediaPipe 版本里「人」编码成 0 还是非 0 不一致。
-   * 贴墙拍、四角也是人时这个假设会破，那时候把 bgVal 写死成实测值。
+   * **不做二值化。** 这是这个场和占据场最大的区别：模型给的连续值里
+   * 带着头发丝、耳廓、肩线的真实过渡，切成 0/1 就只剩一圈用盒式模糊硬凑出来的
+   * 均匀粗边 —— 头发糊成一顶头盔，那正是「抠得不准」最主要的观感来源。
+   *
+   * 原来这里还有一段四角采样定背景值的逻辑，那是 categoryMask 时代的产物
+   * （不同版本里「人」编码成 0 还是非 0 不一致）。置信度的语义是固定的，
+   * 1 = 人，不需要猜，顺带也就不怕「贴着墙拍、四角也是人」把假设打破。
    */
-  ingest(raw: Uint8Array, mw: number, mh: number) {
+  ingest(raw: Float32Array, mw: number, mh: number) {
     if (mw <= 0 || mh <= 0) return;
     this.resize(mw, mh);
     const { w, h, raw: cur, blurred, accum, out } = this;
     if (!cur || !blurred || !accum || !out) return;
 
-    const corners = [raw[0], raw[mw - 1], raw[(mh - 1) * mw], raw[mh * mw - 1]].sort((a, b) => a - b);
-    const bgVal = corners[1];
-
-    // 最近邻降采样成 0/1
+    // 最近邻降采样，值原样保留（下一步会换成面积平均）
     let occupied = 0;
     for (let y = 0; y < h; y++) {
       const sy = ((y * mh) / h) | 0;
       for (let x = 0; x < w; x++) {
-        const v = raw[sy * mw + (((x * mw) / w) | 0)] !== bgVal ? 1 : 0;
+        const v = raw[sy * mw + (((x * mw) / w) | 0)];
         cur[y * w + x] = v;
-        occupied += v;
+        // 「见过人」按半数以上把握算，不把过渡带的半信半疑计进去
+        if (v > 0.5) occupied++;
       }
     }
     this.seen = occupied > w * h * 0.005;
