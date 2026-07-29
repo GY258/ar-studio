@@ -16,6 +16,10 @@ import type { Emitter, Substance } from "./types";
 const MAX = 9000;
 const NORMAL_EPS = 10; // 求表面法线的差分步长，世界像素
 
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
 export class ParticleSystem {
   private readonly px = new Float32Array(MAX);
   private readonly py = new Float32Array(MAX);
@@ -24,6 +28,22 @@ export class ParticleSystem {
   private readonly life = new Float32Array(MAX);
   private readonly siz = new Float32Array(MAX);
   private readonly phase = new Float32Array(MAX);
+  /**
+   * 每颗自己的闪烁频率。全场同一个频率时眼睛会认出那个周期，
+   * 读作「整体在频闪」而不是「颗粒各自在闪」—— 只有相位不同是不够的。
+   */
+  private readonly freq = new Float32Array(MAX);
+  /**
+   * 深度 z ∈ [0,1]，0 = 最远。近处大、快、亮，远处小、慢、淡。
+   *
+   * 取值范围和「0 是最远」这个约定现在就钉死：P-1（粒子被人体遮挡）要用同一个 z
+   * 判定这颗粒子在人前还是人后，改了这里那条就得跟着改。
+   *
+   * TODO: 用的是 Math.random()。粒子目前不参与 L2（renderAt 不 step 粒子），
+   * 将来要把粒子纳入渲染回归的话，这里连同 emit/splash 里其余的 random 都得换成
+   * 调用方传入的播种 rng，否则「同一份输入渲染多少次都是同一张图」不再成立。
+   */
+  private readonly depth = new Float32Array(MAX);
   private readonly streak = new Float32Array(MAX);
   private readonly settled = new Uint8Array(MAX);
   private readonly isSplash = new Uint8Array(MAX);
@@ -71,12 +91,23 @@ export class ParticleSystem {
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           gl_PointSize = psize * 2.0 * uDpr;
         }`,
+      /*
+       * 亮核 + 一圈暗边。
+       *
+       * 暗边是为了让白雪在白墙上还能读出来：普通混合下纯白粒子叠在浅色背景上
+       * 几乎没有对比度，只有把外沿压暗一点，眼睛才认得出这是一颗一颗的东西。
+       * 加法混合时这圈暗边会被加成一起变亮，等于自动失效，正好不影响金粉那类发光物质。
+       *
+       * 这几个数是在离线 harness 的浅灰背景上定的，真机对着白墙还要再调。
+       */
       fragmentShader: `
         varying vec3 vC; varying float vA;
         void main(){
           float d = length(gl_PointCoord - 0.5);
           if (d > 0.5) discard;
-          gl_FragColor = vec4(vC, smoothstep(0.5, 0.0, d) * vA);
+          float core = smoothstep(0.5, 0.0, d);
+          float rim  = smoothstep(0.5, 0.34, d) - core;
+          gl_FragColor = vec4(mix(vC, vC * 0.45, rim), max(core, rim * 0.55) * vA);
         }`,
     });
     this.dots = new THREE.Points(this.dotGeo, this.dotMat);
@@ -156,8 +187,15 @@ export class ParticleSystem {
     this.liqMat.uniforms.uCol.value.setRGB(s.color[0], s.color[1], s.color[2]);
     // 棕色液体不该反出白高光
     this.liqMat.uniforms.uGloss.value = s.color[0] < 0.5 ? 0.28 : 0.85;
-    // 雪用加法混合才有颗粒的通透感；水用加法会变成发光的线
-    this.dotMat.blending = s.settle ? THREE.AdditiveBlending : THREE.NormalBlending;
+    /*
+     * 混合方式由物质自己声明，不再从 settle 推。
+     *
+     * 以前是 `settle ? Additive : Normal`，等于把「会不会堆积」和「用什么混合」
+     * 绑在一个字段上，而它们是两件事：金粉要发光也要堆积，雪要堆积但不能发光
+     * —— 白色加法叠在白墙、窗边、浅色沙发上完全看不见，
+     * 在深色背景上调得很漂亮，到用户家里就没了。
+     */
+    this.dotMat.blending = s.blend === "add" ? THREE.AdditiveBlending : THREE.NormalBlending;
     this.dotMat.needsUpdate = true;
   }
 
@@ -200,24 +238,31 @@ export class ParticleSystem {
     this.acc -= n;
     for (let k = 0; k < n; k++) {
       const i = this.alloc();
+      // 深度先定，size / speed / alpha 三处都按它缩放，层次感就出来了
+      const z = Math.random();
+      this.depth[i] = z;
       this.px[i] = ox + (Math.random() - 0.5) * e.band * propW;
       this.py[i] = oy + (Math.random() - 0.5) * 8;
-      const sp = s.speed[0] + Math.random() * (s.speed[1] - s.speed[0]);
+      const sp = (s.speed[0] + Math.random() * (s.speed[1] - s.speed[0])) * lerp(0.7, 1.3, z);
       const ang = (e.tilt ?? 0) + (Math.random() - 0.5) * s.spread;
       this.vx[i] = Math.sin(ang) * sp;
       this.vy[i] = -Math.cos(ang) * sp;
-      this.siz[i] = s.size[0] + Math.random() * (s.size[1] - s.size[0]);
+      this.siz[i] = (s.size[0] + Math.random() * (s.size[1] - s.size[0])) * lerp(0.5, 1.6, z);
       this.streak[i] = s.streak;
       this.phase[i] = Math.random() * 7;
+      this.freq[i] = 4 + Math.random() * 6;
       this.life[i] = 9;
       this.settled[i] = 0;
       this.isSplash[i] = 0;
     }
   }
 
-  private splash(x: number, y: number, nx: number, ny: number, s: Substance) {
+  /** z 从撞上来的那一颗继承：溅起的水花跟母体在同一个深度层上。 */
+  private splash(x: number, y: number, nx: number, ny: number, s: Substance, z: number) {
     for (let k = 0; k < s.splash; k++) {
       const i = this.alloc();
+      this.depth[i] = z;
+      this.freq[i] = 4 + Math.random() * 6;
       const a = Math.atan2(ny, nx) + (Math.random() - 0.5) * 1.5;
       const sp = 80 + Math.random() * 220;
       this.px[i] = x;
@@ -292,7 +337,7 @@ export class ParticleSystem {
             // 液体碰到人体后缩短生命，不让它滑太远
             this.life[i] = Math.min(this.life[i], 1.0 + Math.random() * 1.0);
           }
-          if (s.splash && impact > 260) this.splash(nx_, ny_, nx, ny, s);
+          if (s.splash && impact > 260) this.splash(nx_, ny_, nx, ny, s, this.depth[i]);
         }
       }
 
@@ -304,7 +349,9 @@ export class ParticleSystem {
       }
 
       const fade = Math.min(1, this.life[i] / (this.settled[i] && s.settle ? 1.2 : 0.9));
-      const a = s.twinkle ? fade * (0.55 + 0.45 * Math.sin(t * 7 + this.phase[i])) : fade;
+      // 远处的粒子淡一点，和 size / speed 一起构成深度层次
+      const depth = lerp(0.55, 1.0, this.depth[i]);
+      const a = (s.twinkle ? fade * (0.55 + 0.45 * Math.sin(t * this.freq[i] + this.phase[i])) : fade) * depth;
 
       if (this.streak[i] > 0 && !this.isSplash[i]) {
         this.dotSiz[i] = 0;

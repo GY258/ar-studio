@@ -19,6 +19,14 @@ export interface Substance {
   splash: number;
   settle: boolean;
   twinkle: boolean;
+  /**
+   * 圆点的混合方式。缺省 normal。
+   *
+   * 和 settle 解耦是刻意的：以前混合方式是从 settle 推出来的（会堆积 → 加法），
+   * 于是「会堆积但要发光」和「会堆积但别发光」表达不出来。
+   * add 只给真正在发光的东西（金粉、火星），白色的雪用 add 会在浅色背景上消失。
+   */
+  blend?: "normal" | "add";
 }
 
 /** 发射器（道具）。asset 缺省时用内置的程序化贴图，零外部素材也能跑。 */

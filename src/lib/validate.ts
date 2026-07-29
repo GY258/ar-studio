@@ -98,6 +98,12 @@ export function validateTemplate(raw: Raw): string[] {
     if (!num(s.splash) || (s.splash as number) < 0) p.push("substance.splash 必须是 ≥0 的整数");
     if (typeof s.settle !== "boolean") p.push("substance.settle 必填 true/false");
     if (typeof s.twinkle !== "boolean") p.push("substance.twinkle 必填 true/false");
+    if (s.blend !== undefined && !["normal", "add"].includes(s.blend as string)) {
+      p.push(
+        `substance.blend "${s.blend}" 无效，只能是 normal（缺省）或 add。` +
+          `add 是发光，只给金粉、火星这类真的在发光的东西 —— 白色的雪用 add 在浅色背景上会消失`,
+      );
+    }
   }
 
   const cs = raw.controls;
