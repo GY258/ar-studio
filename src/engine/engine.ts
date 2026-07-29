@@ -308,6 +308,27 @@ export class ArEngine {
      * 有效果和没效果两条路的颜色就永远一致。
      */
     const mat = new THREE.MeshBasicMaterial({ map: this.sourceTex });
+
+    /*
+     * 必须给出 program 缓存 key，否则切模板时会拿到上一个效果的 shader。
+     *
+     * three 缓存编译好的 program，key 默认是 material.customProgramCacheKey()，
+     * 而它的默认实现是 onBeforeCompile.toString()。我们这个函数的**源码文本永远一样**
+     * —— 效果片段是 ${EFFECT_SNIPPETS[kind]} 在运行时插进模板字符串的，不出现在函数源码里。
+     * 于是 three 认为 pixelate 和 desaturate 是同一个 shader，直接复用先编译的那个。
+     *
+     * 表现极具迷惑性，而且方向取决于先开了哪个模板：
+     *   先 desaturate 后 pixelate → 跑 desaturate 的 shader，amount=0 → 画面完全不变，
+     *                                看着像「马赛克没开」
+     *   先 pixelate 后 desaturate → 跑 pixelate 的 shader，blocks=(0,0) → 1.0/0.0 → NaN uv
+     *                                → 整片背景变成一块死平色
+     * 两种都不报错。硬刷新之后「好了」，是因为刷新后第一个编译的恰好是它。
+     *
+     * 这个坑是加第二种 effect.kind 的那一刻才出现的 —— 在只有 pixelate 的年代，
+     * 所有模板本来就该共用同一个 program。
+     */
+    mat.customProgramCacheKey = () => `ar-source-effect:${effect.kind}`;
+
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.maskTex = { value: this.maskTex };
       // blocks 的定义是「短边分几格」，长边按比例给更多格，块才是正方形的。

@@ -21,6 +21,7 @@ import { migrateElements } from "../src/lib/migrate";
 import {
   launchHarness,
   loadTemplate,
+  switchTemplate,
   capture,
   templatePeriod,
   type FixtureName,
@@ -313,6 +314,62 @@ for (const [kind, effect] of [
     }
   });
 }
+
+test("切模板换效果：不能复用上一个效果的 shader", async () => {
+  /*
+   * three 缓存编译好的 program，key 默认是 onBeforeCompile.toString()，
+   * 而我们那个函数的源码文本永远一样（效果片段是运行时插进模板字符串的）。
+   * 不显式给 customProgramCacheKey 的话，切模板会拿到上一个效果的 shader。
+   *
+   * 两个方向的表现都极具迷惑性、都不报错：
+   *   先 desaturate 后 pixelate → 跑 desaturate 的 shader，amount=0，画面完全不变
+   *   先 pixelate 后 desaturate → 跑 pixelate 的 shader，blocks=(0,0)，1.0/0.0 → NaN uv
+   *
+   * 只在**同一个引擎上切模板**时才犯 —— 每次新建引擎的话第一个编译的永远是对的，
+   * 所以这条必须走 switchTemplate 而不是 loadTemplate。
+   */
+  const base = await baseFrame("front");
+  const W = base.width;
+  const H = base.height;
+
+  // 背景左上角，两个模板都会在这里作用（人在画面中间）
+  const box = { x: (W * 0.05) | 0, y: (H * 0.08) | 0, w: 120, h: 120 };
+  const stats = (frame: typeof base) => {
+    let chroma = 0;
+    let same = 0;
+    let n = 0;
+    for (let y = box.y; y < box.y + box.h; y++) {
+      for (let x = box.x; x < box.x + box.w; x++) {
+        const o = (y * W + x) << 2;
+        const [r, g, b] = [frame.data[o], frame.data[o + 1], frame.data[o + 2]];
+        chroma += Math.max(r, g, b) - Math.min(r, g, b);
+        if (
+          Math.abs(r - base.data[o]) + Math.abs(g - base.data[o + 1]) + Math.abs(b - base.data[o + 2]) <= 6
+        ) {
+          same++;
+        }
+        n++;
+      }
+    }
+    return { chroma: chroma / n, sameRatio: same / n };
+  };
+
+  const pixelate = path.join(TEMPLATES, "lowres-life.json");
+  const desat = path.join(TEMPLATES, "colorful-me.json");
+
+  // 方向一：pixelate → desaturate
+  await loadTemplate(harness.page, pixelate, "front");
+  await switchTemplate(harness.page, desat);
+  const afterDesat = stats(decode(await capture(harness.page, 0)));
+  expect(afterDesat.chroma, "切到 desaturate 后背景该没彩度了").toBeLessThan(3);
+
+  // 方向二：desaturate → pixelate
+  await loadTemplate(harness.page, desat, "front");
+  await switchTemplate(harness.page, pixelate);
+  const afterPixelate = stats(decode(await capture(harness.page, 0)));
+  expect(afterPixelate.sameRatio, "切到 pixelate 后背景该被改写").toBeLessThan(0.35);
+  expect(afterPixelate.chroma, "pixelate 不该把背景变灰").toBeGreaterThan(10);
+});
 
 test("蒙版左右不反向：清晰区必须落在人身上（偏心画面才验得出来）", async () => {
   // 这条断言是为了抓一个真实发生过的 bug：shader 里给蒙版多补了一次镜像，
