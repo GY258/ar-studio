@@ -25,6 +25,7 @@
       "item": {
         "asset": { "kind": "svg-lib", "key": "tear-streak" },
         "size": { "ref": "iod", "scale": 0.28 },
+        "blend": "screen",
         "animations": [{ "preset": "pulse", "scaleRange": [0.97, 1.03], "period": 2.0 }]
       },
       "children": [
@@ -38,7 +39,11 @@
           "item": {
             "asset": { "kind": "svg-lib", "key": "tear-drop" },
             "size": { "ref": "iod", "scale": 0.16 },
-            "animations": [{ "preset": "emit-fall-fade", "distance": 1.2, "period": 2.8 }]
+            "blend": "screen",
+            "jitter": { "size": 0.22, "phase": 0.12, "offset": [0.05, 0.04], "seed": 71 },
+            "animations": [
+              { "preset": "emit-fall-fade", "distance": 1.2, "period": 2.8, "ease": "gravity" }
+            ]
           }
         }
       ]
@@ -64,26 +69,51 @@
 ```json
 {
   "slug": "lowres-life",
-  "name": { "zh": "只有我是高清的", "en": "Only I Am HD" },
+  "name": {
+    "zh": "只有我是高清的",
+    "en": "Only I Am HD"
+  },
   "category": "fun",
   "sort_order": 90,
   "price_cents": 0,
   "schema_version": 2,
   "template_type": "overlay",
-  "perception": ["segmentation"],
+  "perception": [
+    "segmentation"
+  ],
   "preview": {},
   "source": {
-    "mask": { "provider": "person", "feather": 0.015, "onLost": "clear" },
+    "mask": {
+      "provider": "person",
+      "feather": 0.004,
+      "onLost": "clear"
+    },
     "apply": "outside",
-    "effect": { "kind": "pixelate", "blocks": 56 }
+    "effect": {
+      "kind": "pixelate",
+      "blocks": 56
+    }
   },
   "elements": [
     {
       "id": "menu",
-      "asset": { "kind": "svg-lib", "key": "quality-menu" },
-      "anchor": { "space": "screen", "nx": 0.78, "ny": 0.68 },
-      "size": { "ref": "vw", "scale": 0.26 },
-      "interactive": { "drag": true, "resize": true }
+      "asset": {
+        "kind": "svg-lib",
+        "key": "quality-menu"
+      },
+      "anchor": {
+        "space": "screen",
+        "nx": 0.78,
+        "ny": 0.68
+      },
+      "size": {
+        "ref": "vw",
+        "scale": 0.26
+      },
+      "interactive": {
+        "drag": true,
+        "resize": true
+      }
     }
   ]
 }

@@ -2,6 +2,7 @@ import type { Control, TemplateConfig } from "@/engine/types";
 import { resolveControls } from "@/engine/resolve";
 import { FACE_ANCHORS, ANCHOR_PAIRS } from "@/engine/anchors";
 import { listSvgKeys } from "@/engine/svg-assets";
+import { IMPLEMENTED_EFFECTS } from "@/engine/source-effects";
 import { sanitizeSvg } from "@/engine/svg-sanitize";
 import { migrateElements } from "./migrate";
 
@@ -40,6 +41,9 @@ export function validateTemplate(raw: Raw): string[] {
   if (!name || typeof name.zh !== "string") p.push("name.zh 必填");
   if (typeof raw.category !== "string") p.push("category 必填");
   if (raw.sort_order !== undefined && !num(raw.sort_order)) p.push("sort_order 是数字");
+  if (raw.hidden !== undefined && typeof raw.hidden !== "boolean") {
+    p.push("hidden 只能是 true/false（true = 不进模板库列表，但 /studio/<slug> 仍可直接访问）");
+  }
   if (!num(raw.price_cents) || raw.price_cents < 0) p.push("price_cents 必须是 ≥0 的数字");
 
   const templateType = (raw.template_type as string) || "particle";
@@ -98,6 +102,12 @@ export function validateTemplate(raw: Raw): string[] {
     if (!num(s.splash) || (s.splash as number) < 0) p.push("substance.splash 必须是 ≥0 的整数");
     if (typeof s.settle !== "boolean") p.push("substance.settle 必填 true/false");
     if (typeof s.twinkle !== "boolean") p.push("substance.twinkle 必填 true/false");
+    if (s.blend !== undefined && !["normal", "add"].includes(s.blend as string)) {
+      p.push(
+        `substance.blend "${s.blend}" 无效，只能是 normal（缺省）或 add。` +
+          `add 是发光，只给金粉、火星这类真的在发光的东西 —— 白色的雪用 add 在浅色背景上会消失`,
+      );
+    }
   }
 
   const cs = raw.controls;
@@ -154,12 +164,19 @@ export function checkWiring(cfg: TemplateConfig): string[] {
 const ANCHOR_NAMES = Object.keys(FACE_ANCHORS);
 const PAIR_NAMES = Object.keys(ANCHOR_PAIRS);
 const ANIM_PRESETS = ["float", "fall", "pulse", "spin", "emit-fall-fade"];
+const EASES = ["linear", "in", "out", "inout", "gravity", "bounce"];
+/** 只有「0→1 走一趟」的原语能缓动。周期性原语套 ease 会在接缝处顿一下，见 animations.ts */
+const EASE_PRESETS = ["fall", "emit-fall-fade"];
 const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient"];
 const SIZE_REFS = ["vw", "iod", "eye_width", "face_width"];
 const SIZE_FITS = ["width", "font"];
+const BLENDS = ["normal", "add", "screen", "multiply"];
 const GENERATORS = ["mirrorPair", "trail", "columns", "scatter", "ring", "spread"];
+/** 支持 item.jitter 的生成器。columns 是版式（标签逐个对齐），抖了就歪 */
+const JITTER_GENERATORS = ["mirrorPair", "trail", "ring", "spread"];
 const MASK_PROVIDERS = ["person", "face-ellipse", "none"];
-const EFFECT_KINDS = ["pixelate", "blur", "posterize", "pixel-art"];
+/** schema 认识的 kind。是不是**实现了**另说，见下面的 IMPLEMENTED_EFFECTS */
+const EFFECT_KINDS = ["pixelate", "blur", "desaturate", "mask-debug", "posterize", "pixel-art"];
 
 /** 展开后的元素数硬上限。生成器很容易写出爆炸的数量。 */
 const MAX_ELEMENTS = 120;
@@ -202,6 +219,16 @@ function validateAnimations(anims: unknown[], at: string, p: string[]) {
     }
     if (aa.phase !== undefined && !num(aa.phase)) {
       p.push(`${path}.phase 必须是数字，归一化到一个周期（0~1）`);
+    }
+    if (aa.ease !== undefined) {
+      if (!EASES.includes(aa.ease as string)) {
+        p.push(`${path}.ease "${aa.ease}" 无效，可选：${EASES.join(" / ")}`);
+      } else if (!EASE_PRESETS.includes(aa.preset as string)) {
+        p.push(
+          `${path}.ease 对 ${aa.preset} 无效 —— 只有 ${EASE_PRESETS.join(" / ")} 支持缓动。` +
+            `float / pulse / spin 是周期性的，缓动会在每个周期的接缝处留一个速度拐折`,
+        );
+      }
     }
     if (aa.preset === "pulse" && !pair(aa.scaleRange)) {
       p.push(`${path}.scaleRange 必须是 [最小, 最大] 两个数字`);
@@ -349,9 +376,47 @@ function validateElement(e: Raw, at: string, p: string[], ids: Set<string>) {
     }
   }
   if (e.rotation !== undefined && !num(e.rotation)) p.push(`${at}.rotation 必须是数字（度）`);
+  validateBlend(e.blend, at, p);
   if (e.animations !== undefined) {
     if (!Array.isArray(e.animations)) p.push(`${at}.animations 必须是数组`);
     else validateAnimations(e.animations, at, p);
+  }
+}
+
+function validateBlend(b: unknown, at: string, p: string[]) {
+  if (b === undefined) return;
+  if (!BLENDS.includes(b as string)) {
+    p.push(
+      `${at}.blend "${b}" 无效，可选：${BLENDS.join(" / ")}` +
+        `（multiply 让腮红贴到皮肤上，screen 让眼泪透出底色，add 用来发光）`,
+    );
+  }
+}
+
+/** 逐实例抖动。scatter 自己有 seed，不走这条。 */
+function validateJitter(j: unknown, at: string, generator: string, p: string[]) {
+  if (typeof j !== "object" || j === null || Array.isArray(j)) {
+    p.push(`${at}.jitter 必须是对象，形如 { "size": 0.2, "phase": 0.15, "seed": 7 }`);
+    return;
+  }
+  if (!JITTER_GENERATORS.includes(generator)) {
+    p.push(
+      `${at}.jitter 对 ${generator} 无效，只有 ${JITTER_GENERATORS.join(" / ")} 支持。` +
+        `scatter 本来就是随机的，用它自己的 seed / sizeRange`,
+    );
+  }
+  const jj = j as Raw;
+  if (!num(jj.seed)) {
+    p.push(`${at}.jitter.seed 必填。没有 seed 每次展开抖出来的都不一样，渲染回归的 golden 对比就不成立`);
+  }
+  for (const k of ["size", "phase"] as const) {
+    if (jj[k] !== undefined && !num(jj[k])) p.push(`${at}.jitter.${k} 必须是数字（随机范围的半宽，0.2 = ±20%）`);
+  }
+  if (jj.offset !== undefined && !pair(jj.offset)) {
+    p.push(`${at}.jitter.offset 必须是 [x, y]，单位 IOD`);
+  }
+  if (jj.size === undefined && jj.phase === undefined && jj.offset === undefined) {
+    p.push(`${at}.jitter 至少要给 size / phase / offset 中的一个，否则它什么都不做`);
   }
 }
 
@@ -376,6 +441,8 @@ function validateGenerator(g: Raw, at: string, p: string[]) {
     }
     if (item.id !== undefined) p.push(`${at}.item.id 不要写，生成器负责发 id`);
     if (item.anchor !== undefined) p.push(`${at}.item.anchor 不要写，生成器负责填 anchor`);
+    validateBlend(item.blend, `${at}.item`, p);
+    if (item.jitter !== undefined) validateJitter(item.jitter, `${at}.item`, kind, p);
   }
 
   switch (kind) {
@@ -427,8 +494,13 @@ function validateElementSection(raw: Raw, templateType: string, p: string[]) {
   const v2 = raw.elements;
   const v1 = raw.overlay_elements ?? raw.face_track_elements;
 
+  // 只有帧效果、没有贴纸是合法的：「只有我是彩色的」不需要任何元素。
+  // 这时空 elements 不是「什么都不会显示」，而是这个模板的全部内容都在 source 里。
+  const sourceOnly = Boolean(raw.source);
+
   if (!Array.isArray(v2)) {
     if (!Array.isArray(v1) || v1.length === 0) {
+      if (sourceOnly) return;
       p.push(
         `${templateType} 类型需要 elements 数组（v2）。` +
           `旧模板的 ${templateType === "overlay" ? "overlay_elements" : "face_track_elements"} 仍受支持，但会走兼容层并打警告`,
@@ -441,7 +513,8 @@ function validateElementSection(raw: Raw, templateType: string, p: string[]) {
   }
 
   if (v2.length === 0) {
-    p.push("elements 是空数组，这个模板什么都不会显示");
+    if (sourceOnly) return;
+    p.push("elements 是空数组，而且没有 source 帧效果，这个模板什么都不会显示");
     return;
   }
 
@@ -532,13 +605,27 @@ function validateSource(raw: Raw, p: string[]) {
     p.push(`source.effect.kind "${kind}" 无效，可选：${EFFECT_KINDS.join(" / ")}`);
     return;
   }
-  if (kind === "posterize" || kind === "pixel-art") {
-    p.push(`source.effect.kind "${kind}" 目前只留了接口没有实现，本轮只有 pixelate 能跑`);
+  /*
+   * 「引擎实现了没有」直接问引擎，不在这里手抄一份名单。
+   *
+   * 抄一份的下场已经发生过一次：blur 在这里是合法 kind、radius 也校验了，
+   * 但 setupSourceEffect 只认 pixelate，于是声明 blur 的模板能过校验、能正常渲染、
+   * 什么效果都没有、且不报任何错。对 LLM 生成模板尤其致命 —— 全套 gate 绿灯放行，
+   * 产出一个「没效果」的模板。
+   */
+  if (!IMPLEMENTED_EFFECTS.includes(kind)) {
+    p.push(
+      `source.effect.kind "${kind}" 只留了枚举值没有实现，装上去不会有任何效果。` +
+        `已实现的：${IMPLEMENTED_EFFECTS.join(" / ")}`,
+    );
   }
   if ((kind === "pixelate" || kind === "pixel-art") && !inRange(eff.blocks, 4, 200)) {
     p.push("source.effect.blocks 应在 [4, 200]（短边分几格）。注意它和菜单上写的 240p 没有换算关系");
   }
-  if (kind === "blur" && (!num(eff.radius) || (eff.radius as number) <= 0)) {
-    p.push("source.effect.radius 必须是正数");
+  if (kind === "blur" && !inRange(eff.radius, 0.001, 0.1)) {
+    p.push("source.effect.radius 应在 [0.001, 0.1]，单位是长边的比例（0.01 ≈ 长边的 1%）");
+  }
+  if (kind === "desaturate" && !inRange(eff.amount, 0, 1)) {
+    p.push("source.effect.amount 应在 [0, 1]，1 = 全灰");
   }
 }

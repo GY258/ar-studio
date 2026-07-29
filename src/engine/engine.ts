@@ -10,6 +10,7 @@ import { ElementRenderer } from "./element-renderer";
 import { FaceTracker, MediaPipeLandmarkProvider, type FrameSource, type LandmarkProvider } from "./face-tracker";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
+import { EFFECT_COMBINE, EFFECT_SNIPPETS } from "./source-effects";
 import type { ControlValues, TemplateConfig, TemplateType } from "./types";
 
 export interface EngineStats {
@@ -68,6 +69,8 @@ export class ArEngine {
   private applyOutside = true;
   /** source.effect.blocks，短边格数。resize 时要按新比例重算长边格数 */
   private blocks = 0;
+  /** source.effect.radius，归一化到长边。resize 时要按新比例重算 uv 步长 */
+  private blurRadius = 0;
   /** 注入进背景材质的 uniform 引用，onBeforeCompile 时拿到 */
   private bgUniforms: Record<string, { value: unknown }> | null = null;
   private raf = 0;
@@ -269,12 +272,13 @@ export class ArEngine {
   }
 
   private setupSourceEffect(source?: import("./types").SourceEffect) {
-    if (!source || source.effect.kind !== "pixelate") {
+    if (!source || !EFFECT_SNIPPETS[source.effect.kind]) {
       // 恢复普通视频材质
       this.bgMat = new THREE.MeshBasicMaterial({ map: this.sourceTex });
       this.bg.material = this.bgMat;
       this.bgUniforms = null;
       this.blocks = 0;
+      this.blurRadius = 0;
       this.maskTex?.dispose();
       this.maskTex = null;
       return;
@@ -286,10 +290,11 @@ export class ArEngine {
     // 所以这里先给一个 1x1 占位，updateMask 里发现尺寸对不上再重建。
     this.maskTex = makeMaskTexture(1, 1);
 
-    const blocks = source.effect.blocks;
+    const effect = source.effect;
     const applyOutside = source.apply === "outside";
     this.applyOutside = applyOutside;
-    this.blocks = blocks;
+    this.blocks = effect.kind === "pixelate" || effect.kind === "pixel-art" ? effect.blocks : 0;
+    this.blurRadius = effect.kind === "blur" ? effect.radius : 0;
 
     /*
      * 往内置 MeshBasicMaterial 里注入，而不是自己写一个裸 ShaderMaterial。
@@ -303,12 +308,37 @@ export class ArEngine {
      * 有效果和没效果两条路的颜色就永远一致。
      */
     const mat = new THREE.MeshBasicMaterial({ map: this.sourceTex });
+
+    /*
+     * 必须给出 program 缓存 key，否则切模板时会拿到上一个效果的 shader。
+     *
+     * three 缓存编译好的 program，key 默认是 material.customProgramCacheKey()，
+     * 而它的默认实现是 onBeforeCompile.toString()。我们这个函数的**源码文本永远一样**
+     * —— 效果片段是 ${EFFECT_SNIPPETS[kind]} 在运行时插进模板字符串的，不出现在函数源码里。
+     * 于是 three 认为 pixelate 和 desaturate 是同一个 shader，直接复用先编译的那个。
+     *
+     * 表现极具迷惑性，而且方向取决于先开了哪个模板：
+     *   先 desaturate 后 pixelate → 跑 desaturate 的 shader，amount=0 → 画面完全不变，
+     *                                看着像「马赛克没开」
+     *   先 pixelate 后 desaturate → 跑 pixelate 的 shader，blocks=(0,0) → 1.0/0.0 → NaN uv
+     *                                → 整片背景变成一块死平色
+     * 两种都不报错。硬刷新之后「好了」，是因为刷新后第一个编译的恰好是它。
+     *
+     * 这个坑是加第二种 effect.kind 的那一刻才出现的 —— 在只有 pixelate 的年代，
+     * 所有模板本来就该共用同一个 program。
+     */
+    mat.customProgramCacheKey = () => `ar-source-effect:${effect.kind}`;
+
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.maskTex = { value: this.maskTex };
       // blocks 的定义是「短边分几格」，长边按比例给更多格，块才是正方形的。
       // 两个轴都用同一个数会得到被拉长的矩形块，一眼假。resize 时同步更新。
-      shader.uniforms.blocks = { value: this.blockGrid(blocks) };
+      shader.uniforms.blocks = { value: this.blockGrid(this.blocks) };
+      shader.uniforms.blurStep = { value: this.blurStep(this.blurRadius) };
+      shader.uniforms.amount = { value: effect.kind === "desaturate" ? effect.amount : 0 };
       shader.uniforms.applyOutside = { value: applyOutside ? 1.0 : 0.0 };
+      // 过渡带往哪边推。0.12 ≈ 把整条过渡带挪出人体轮廓，见下面的注释
+      shader.uniforms.maskBias = { value: applyOutside ? 0.12 : -0.12 };
 
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -316,30 +346,71 @@ export class ArEngine {
           `#include <common>
           uniform sampler2D maskTex;
           uniform vec2 blocks;
-          uniform float applyOutside;`,
+          uniform vec2 blurStep;
+          uniform float amount;
+          uniform float applyOutside;
+          uniform float maskBias;`,
+        )
+        /*
+         * 辅助函数挂在 <map_pars_fragment> 后面，不能挂在 <common> 后面：
+         * map 这个 sampler 是 <map_pars_fragment> 声明的，而它排在 <common> 之后。
+         * 挂错位置的表现是整个 shader 编译失败 → 材质变黑 → 一整帧全黑，
+         * 而 three 只在控制台打一行，测试里看到的现象是「清晰区面积为 0」。
+         */
+        .replace(
+          "#include <map_pars_fragment>",
+          `#include <map_pars_fragment>
+          /*
+           * 取一个纹素并补上 three 对视频纹理的 sRGB→线性 解码。
+           *
+           * 每个 kind 都要对自己那份纹素补这一下，漏一个的表现是「有效果的区域偏亮」，
+           * 而且**只在摄像头源上出现** —— 离线 harness 用的是图片源，走硬件解码，
+           * 逐像素断言全都照过。所以这件事必须收口成一个函数，不能靠每处手抄。
+           */
+          /*
+           * 采一次蒙版并做完阈值。收口成函数是因为马赛克要在块内多点采样，
+           * 每个采样点都得问一次「这里是不是人」—— 复制三遍那段翻转 + smoothstep
+           * 迟早会漏改一处，而漏改的表现是边界莫名其妙偏一点，最难查。
+           *
+           * 蒙版要上下翻一次再采：画面源是 image / video，three 给它 flipY = true，
+           * 上传时翻了一次；蒙版是 DataTexture，three 的默认是 flipY = false，没翻。
+           * 同一个 uv 在两张纹理上指的是上下相反的两行。
+           *
+           * 这和水平镜像是两回事：背景平面的 scale.x = -1 已经把画面和蒙版一起翻了，
+           * x 这一路**不要**再补，补了人偏左时清晰区会跑到右边去。
+           *
+           * 过渡带整体挪到吃效果的那一侧（maskBias），不能骑在边界上：
+           * 对称过渡意味着人的轮廓内侧混着背景的效果，blocks 大的时候
+           * 一整块糊斑贴在肩膀上。
+           */
+          float maskAt(vec2 uv) {
+            return smoothstep(0.42 - maskBias, 0.58 - maskBias, texture2D(maskTex, vec2(uv.x, 1.0 - uv.y)).r);
+          }
+
+          vec4 srcTexel(vec2 uv) {
+            vec4 c = texture2D( map, uv );
+            #ifdef DECODE_VIDEO_TEXTURE
+              c = vec4( mix( pow( c.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), c.rgb * 0.0773993808, vec3( lessThanEqual( c.rgb, vec3( 0.04045 ) ) ) ), c.w );
+            #endif
+            return c;
+          }`,
         )
         .replace(
           "#include <map_fragment>",
           `
-          vec2 gridUv = (floor(vMapUv * blocks) + 0.5) / blocks;
-          vec4 sharpTexel = texture2D( map, vMapUv );
-          vec4 blockTexel = texture2D( map, gridUv );
-          #ifdef DECODE_VIDEO_TEXTURE
-            sharpTexel = vec4( mix( pow( sharpTexel.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), sharpTexel.rgb * 0.0773993808, vec3( lessThanEqual( sharpTexel.rgb, vec3( 0.04045 ) ) ) ), sharpTexel.w );
-            blockTexel = vec4( mix( pow( blockTexel.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), blockTexel.rgb * 0.0773993808, vec3( lessThanEqual( blockTexel.rgb, vec3( 0.04045 ) ) ) ), blockTexel.w );
-          #endif
-          // 蒙版和视频同在「视频空间」，用同一套 uv 取样。
-          // 这里**不要**再补一次镜像：背景平面的 scale.x = -1 已经把两者一起翻了，
-          // shader 里再翻蒙版就翻反了 —— 人在画面偏左时，清晰区会跑到右边去。
-          // OccupancyField.at() 里那个 u = 0.5 - wx/w 是「世界坐标 → 场」的映射，
-          // 和这里的「uv → 纹理」是两回事，别把两条规则混在一起。
-          float m = smoothstep(0.42, 0.58, texture2D(maskTex, vMapUv).r);
-          // outside: 人清晰背景糊；inside: 人糊背景清晰
-          diffuseColor *= applyOutside > 0.5 ? mix(blockTexel, sharpTexel, m) : mix(sharpTexel, blockTexel, m);
+          vec4 sharpTexel = srcTexel( vMapUv );
+          float m = maskAt( vMapUv );
+          // m 在效果片段之前算好：马赛克要按人/背景加权取样，得先知道蒙版
+          ${EFFECT_SNIPPETS[effect.kind]}
+          ${
+            EFFECT_COMBINE[effect.kind] ??
+            // outside: 人保持原样、背景吃效果；inside: 反过来
+            "diffuseColor *= applyOutside > 0.5 ? mix(effectTexel, sharpTexel, m) : mix(sharpTexel, effectTexel, m);"
+          }
           `,
         );
 
-      // 留着引用，resize 要改 blocks，蒙版换尺寸要改 maskTex
+      // 留着引用，resize 要改 blocks / blurStep，蒙版换尺寸要改 maskTex
       this.bgUniforms = shader.uniforms as Record<string, { value: unknown }>;
     };
 
@@ -379,6 +450,42 @@ export class ArEngine {
    * 裸 shader 吃不到 three 的 DECODE_VIDEO_TEXTURE，摄像头源上颜色会整体偏亮，
    * 而离线 harness 用的是图片源，这个 bug 在测试里根本复现不出来。
    */
+  /**
+   * 蒙版这一路的实时状态。排查「效果没生效」时的第一手证据。
+   *
+   * 「整幅画面都没效果」和「效果作用错了地方」是两类完全不同的故障：
+   * 前者多半是 seen=false 走了 onLost 兜底（整张蒙版被填成「哪里都不作用」），
+   * 后者才是蒙版本身的问题。光看画面区分不了，看这几个数字一眼就知道。
+   */
+  debugMaskStats() {
+    const src = this.maskField.data;
+    let min = 255;
+    let max = 0;
+    let sum = 0;
+    if (src) {
+      for (let i = 0; i < src.length; i++) {
+        const v = src[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+        sum += v;
+      }
+    }
+    return {
+      seen: this.maskField.seen,
+      maskSize: `${this.maskField.width}x${this.maskField.height}`,
+      texSize: this.maskTex ? `${this.maskTex.image.width}x${this.maskTex.image.height}` : "无",
+      // 0~255。整张都是 255 且 seen=false 就是走了兜底，效果当然哪里都不作用
+      min,
+      max,
+      mean: src?.length ? +(sum / src.length).toFixed(1) : null,
+      onLost: this.onLost,
+      applyOutside: this.applyOutside,
+      blocks: this.bgUniforms?.blocks?.value ?? null,
+      effect: this.cfg?.source?.effect.kind ?? "无",
+      perception: this.perception.join(","),
+    };
+  }
+
   debugBgMaterialType(): string {
     return this.bgMat.type;
   }
@@ -389,6 +496,18 @@ export class ArEngine {
   private blockGrid(n: number): THREE.Vector2 {
     const aspect = this.W / this.H;
     return aspect >= 1 ? new THREE.Vector2(Math.round(n * aspect), n) : new THREE.Vector2(n, Math.round(n / aspect));
+  }
+
+  /**
+   * 模糊半径（长边的比例）→ 两个轴各自的 uv 步长。
+   *
+   * uv 两个轴的物理长度不一样，直接把同一个数当步长会得到被拉长的模糊 ——
+   * 和 blocks 那个坑是同一个，所以同样要挂在 resize 上。
+   */
+  private blurStep(radius: number): THREE.Vector2 {
+    if (radius <= 0) return new THREE.Vector2(0, 0);
+    const long = Math.max(this.W, this.H);
+    return new THREE.Vector2((radius * long) / this.W, (radius * long) / this.H);
   }
 
   private propTexture(cfg: TemplateConfig): THREE.Texture | null {
@@ -448,9 +567,12 @@ export class ArEngine {
     // 分割遮罩覆盖整个视频帧，视频通过 cover 显示在 bgW×bgH 的区域内，
     // 粒子碰撞要对齐这个实际显示区域。
     this.field.setViewport(bgW, bgH);
-    // 视口比例变了，马赛克的长边格数要跟着变，否则块会被拉长
+    // 视口比例变了，马赛克的长边格数和模糊的 uv 步长都要跟着变，否则会被拉长
     if (this.blocks && this.bgUniforms?.blocks) {
       this.bgUniforms.blocks.value = this.blockGrid(this.blocks);
+    }
+    if (this.blurRadius && this.bgUniforms?.blurStep) {
+      this.bgUniforms.blurStep.value = this.blurStep(this.blurRadius);
     }
     this.particles.setPixelRatio(dpr);
     this.elements.setViewport(this.W, this.H);

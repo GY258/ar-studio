@@ -19,6 +19,14 @@ export interface Substance {
   splash: number;
   settle: boolean;
   twinkle: boolean;
+  /**
+   * 圆点的混合方式。缺省 normal。
+   *
+   * 和 settle 解耦是刻意的：以前混合方式是从 settle 推出来的（会堆积 → 加法），
+   * 于是「会堆积但要发光」和「会堆积但别发光」表达不出来。
+   * add 只给真正在发光的东西（金粉、火星），白色的雪用 add 会在浅色背景上消失。
+   */
+  blend?: "normal" | "add";
 }
 
 /** 发射器（道具）。asset 缺省时用内置的程序化贴图，零外部素材也能跑。 */
@@ -64,6 +72,13 @@ export interface TemplateListing {
   priceCents: number;
   preview: { poster?: string; video?: string; shape?: Emitter["shape"]; thumb?: string };
   locked: boolean;
+  /**
+   * 不进模板库列表，但 /studio/<slug> 仍然能直接访问。
+   *
+   * 给调试工具和还没做完的模板用。**不是权限**：配置照常下发，
+   * 知道 slug 的人就能用，别拿它当付费墙 —— 那是 priceCents + 权益表的事。
+   */
+  hidden?: boolean;
 }
 
 /* ============================================================
@@ -100,6 +115,18 @@ export type SizeRef = "vw" | "iod" | "eye_width" | "face_width";
  */
 export type SizeFit = "width" | "font";
 
+/**
+ * 元素与背后画面的混合方式。
+ *
+ * 默认 normal —— 一块不透明的色块糊在脸上。真实的眼泪是折射的，颜色主要来自
+ * 它背后的皮肤；腮红是长在皮肤上的红，不是浮在脸前面的一层雾。
+ *
+ *   multiply  压暗底色。腮红、纹身、脸彩这类「长在皮肤上」的
+ *   screen    提亮底色，保留底下的明暗。眼泪、水光
+ *   add       发光。星星、光斑
+ */
+export type ElementBlend = "normal" | "add" | "screen" | "multiply";
+
 export type ElementAsset =
   /** 素材库贴纸，key 来自 svg-assets.ts */
   | { kind: "svg-lib"; key: string }
@@ -127,6 +154,8 @@ export interface ElementV2 {
   anchor: ElementAnchor;
   /** fit 缺省时：text 按 font，其余按 width */
   size: { ref: SizeRef; scale: number; fit?: SizeFit };
+  /** 与背后画面的混合方式。缺省 normal，行为与没有这个字段时完全一致 */
+  blend?: ElementBlend;
   /** 度。正数顺时针 */
   rotation?: number;
   /** 是否跟随头部 roll。face 空间默认 true，screen 空间恒 false */
@@ -160,7 +189,12 @@ export interface SourceEffect {
   apply: "inside" | "outside";
   effect:
     | { kind: "pixelate"; blocks: number }
+    /** radius 是长边的比例，0.01 ≈ 长边的 1% */
     | { kind: "blur"; radius: number }
+    /** amount 0~1，1 = 全灰。apply:"outside" 就是「只有我是彩色的」 */
+    | { kind: "desaturate"; amount: number }
+    /** 调试视图：直接把蒙版画出来，不做效果。红 = 判为人，绿 = 过渡带 */
+    | { kind: "mask-debug" }
     | { kind: "posterize"; levels: number }
     | { kind: "pixel-art"; blocks: number; levels: number; palette?: string; dither?: "none" | "bayer4" };
 }

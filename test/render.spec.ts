@@ -16,10 +16,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { expandGenerators } from "../src/engine/generators";
+import { applyEase, evaluateAnimations } from "../src/engine/animations";
 import { migrateElements } from "../src/lib/migrate";
 import {
   launchHarness,
   loadTemplate,
+  switchTemplate,
   capture,
   templatePeriod,
   type FixtureName,
@@ -65,14 +67,21 @@ function hasAnimations(templatePath: string): boolean {
   return migrateElements(raw).elements.some((e) => (e.animations?.length ?? 0) > 0);
 }
 
-/** 有元素的模板才需要渲染回归；particle 模板走的是另一条线，本轮不碰。 */
+/**
+ * 有元素的模板才需要渲染回归；particle 模板走的是另一条线，本轮不碰。
+ *
+ * 「有元素」要看数组长度，不能只看字段在不在：只有帧效果的模板（colorful-me）
+ * 写的是 `elements: []`，字段存在但一个元素都没有，进了这条回归会卡在
+ * 「展开后应该有元素」上，而它根本就不该有元素。
+ */
 function templatesWithElements(): string[] {
   return fs
     .readdirSync(TEMPLATES)
     .filter((f) => f.endsWith(".json"))
     .filter((f) => {
       const raw = JSON.parse(fs.readFileSync(path.join(TEMPLATES, f), "utf8"));
-      return Boolean(raw.elements ?? raw.overlay_elements ?? raw.face_track_elements);
+      const els = raw.elements ?? raw.overlay_elements ?? raw.face_track_elements;
+      return Array.isArray(els) && els.length > 0;
     })
     .sort();
 }
@@ -236,6 +245,132 @@ test("lowres-life：蒙版内与原帧逐像素相同，蒙版外被真正抹掉
   expect(ratioIn((W * 0.05) | 0, (H * 0.08) | 0, 120, 120), "蒙版外应被马赛克改写").toBeLessThan(0.25);
 });
 
+/**
+ * 帧效果必须真的作用。
+ *
+ * 这条挡的是一类静默失效：`blur` 曾经能过校验、能正常渲染、什么效果都没有、
+ * 也不报任何错 —— 校验器认识的 kind 和引擎实现了的 kind 是两份各写各的名单。
+ * 对 LLM 生成模板尤其致命：全套 gate 绿灯放行，产出一个「没效果」的模板。
+ * 所以每加一个 kind 都要在这里加一行，证明它确实改变了画面。
+ */
+for (const [kind, effect] of [
+  ["blur", { kind: "blur", radius: 0.02 }],
+  ["desaturate", { kind: "desaturate", amount: 1 }],
+] as const) {
+  test(`帧效果 ${kind}：蒙版外真的变了，蒙版内逐像素不变`, async () => {
+    const file = path.join(ARTIFACTS, `__effect-${kind}.json`);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        slug: `effect-${kind}`,
+        name: { zh: "帧效果" },
+        category: "test",
+        price_cents: 0,
+        template_type: "overlay",
+        perception: ["segmentation"],
+        source: {
+          mask: { provider: "person", feather: 0.015, onLost: "clear" },
+          apply: "outside",
+          effect,
+        },
+        elements: [],
+      }),
+    );
+    await loadTemplate(harness.page, file, "front");
+    const frame = decode(await capture(harness.page, 0));
+    const base = await baseFrame("front");
+
+    const W = frame.width;
+    const H = frame.height;
+    const stats = (x0: number, y0: number, w: number, h: number) => {
+      let same = 0;
+      let total = 0;
+      let chroma = 0;
+      for (let y = y0; y < y0 + h; y++) {
+        for (let x = x0; x < x0 + w; x++) {
+          const o = (y * W + x) << 2;
+          const [r, g, b] = [frame.data[o], frame.data[o + 1], frame.data[o + 2]];
+          if (
+            Math.abs(r - base.data[o]) + Math.abs(g - base.data[o + 1]) + Math.abs(b - base.data[o + 2]) <= 6
+          ) {
+            same++;
+          }
+          chroma += Math.max(r, g, b) - Math.min(r, g, b);
+          total++;
+        }
+      }
+      return { sameRatio: same / total, chroma: chroma / total };
+    };
+
+    // 人脸中心（蒙版内）：apply "outside" 不该动它
+    expect(stats((W * 0.44) | 0, (H * 0.32) | 0, 60, 60).sameRatio, "蒙版内应与原帧逐像素相同").toBeGreaterThan(
+      0.97,
+    );
+    // 左上角背景（蒙版外）：效果必须真的落下去
+    const outside = stats((W * 0.05) | 0, (H * 0.08) | 0, 120, 120);
+    expect(outside.sameRatio, `蒙版外应被 ${kind} 改写`).toBeLessThan(0.35);
+    if (kind === "desaturate") {
+      expect(outside.chroma, "amount=1 时蒙版外应该没有彩度了").toBeLessThan(2);
+    }
+  });
+}
+
+test("切模板换效果：不能复用上一个效果的 shader", async () => {
+  /*
+   * three 缓存编译好的 program，key 默认是 onBeforeCompile.toString()，
+   * 而我们那个函数的源码文本永远一样（效果片段是运行时插进模板字符串的）。
+   * 不显式给 customProgramCacheKey 的话，切模板会拿到上一个效果的 shader。
+   *
+   * 两个方向的表现都极具迷惑性、都不报错：
+   *   先 desaturate 后 pixelate → 跑 desaturate 的 shader，amount=0，画面完全不变
+   *   先 pixelate 后 desaturate → 跑 pixelate 的 shader，blocks=(0,0)，1.0/0.0 → NaN uv
+   *
+   * 只在**同一个引擎上切模板**时才犯 —— 每次新建引擎的话第一个编译的永远是对的，
+   * 所以这条必须走 switchTemplate 而不是 loadTemplate。
+   */
+  const base = await baseFrame("front");
+  const W = base.width;
+  const H = base.height;
+
+  // 背景左上角，两个模板都会在这里作用（人在画面中间）
+  const box = { x: (W * 0.05) | 0, y: (H * 0.08) | 0, w: 120, h: 120 };
+  const stats = (frame: typeof base) => {
+    let chroma = 0;
+    let same = 0;
+    let n = 0;
+    for (let y = box.y; y < box.y + box.h; y++) {
+      for (let x = box.x; x < box.x + box.w; x++) {
+        const o = (y * W + x) << 2;
+        const [r, g, b] = [frame.data[o], frame.data[o + 1], frame.data[o + 2]];
+        chroma += Math.max(r, g, b) - Math.min(r, g, b);
+        if (
+          Math.abs(r - base.data[o]) + Math.abs(g - base.data[o + 1]) + Math.abs(b - base.data[o + 2]) <= 6
+        ) {
+          same++;
+        }
+        n++;
+      }
+    }
+    return { chroma: chroma / n, sameRatio: same / n };
+  };
+
+  const pixelate = path.join(TEMPLATES, "lowres-life.json");
+  const desat = path.join(TEMPLATES, "colorful-me.json");
+
+  // 方向一：pixelate → desaturate
+  await loadTemplate(harness.page, pixelate, "front");
+  await switchTemplate(harness.page, desat);
+  const afterDesat = stats(decode(await capture(harness.page, 0)));
+  expect(afterDesat.chroma, "切到 desaturate 后背景该没彩度了").toBeLessThan(3);
+
+  // 方向二：desaturate → pixelate
+  await loadTemplate(harness.page, desat, "front");
+  await switchTemplate(harness.page, pixelate);
+  const afterPixelate = stats(decode(await capture(harness.page, 0)));
+  expect(afterPixelate.sameRatio, "切到 pixelate 后背景该被改写").toBeLessThan(0.35);
+  expect(afterPixelate.chroma, "pixelate 不该把背景变灰").toBeGreaterThan(10);
+});
+
 test("蒙版左右不反向：清晰区必须落在人身上（偏心画面才验得出来）", async () => {
   // 这条断言是为了抓一个真实发生过的 bug：shader 里给蒙版多补了一次镜像，
   // 于是人越靠画面边缘，清晰区偏得越远。人站正中间时几乎看不出来——
@@ -345,10 +480,194 @@ test("帧效果必须挂在内置材质上，不能退回裸 ShaderMaterial", as
   expect(await harness.page.evaluate(() => window.harness.bgMaterialType())).toBe("MeshBasicMaterial");
 });
 
+test("文字用的是内嵌字体，不是系统字体", async () => {
+  /*
+   * 这条钉的是「golden 必须跨机器成立」。
+   *
+   * canvas 的 fillText 用系统字体，同一份 JSON 在 macOS 上落到 SF Pro Rounded、
+   * 在 Linux CI 上落到 DejaVu Sans，字形不同 → 元素掩膜对不上。crying 底部那个
+   * (T_T) 占了掩膜将近一半，实测只换字体就能把 IoU 从 1.0 打到 0.70，
+   * 而 CI 上是 0.52 —— 这个仓库的 CI 因此红了不止一天。
+   *
+   * 所以断言的不是「画得像不像」，而是「那个 family 真的注册进去了」。
+   * 有人把内嵌字体删掉换回系统字体栈，这条会立刻红，而不是等 CI 上莫名其妙的
+   * 掩膜偏差去暴露。
+   */
+  await loadTemplate(harness.page, path.join(TEMPLATES, "crying.json"), "front");
+  const loaded = await harness.page.evaluate(() =>
+    document.fonts.check('700 64px "ARStudioText"'),
+  );
+  expect(loaded, "内嵌字体应该已经注册到 document.fonts").toBe(true);
+});
+
 test("生成器 id 确定：同一模板重复展开产出同一串 id", async () => {
   const raw = JSON.parse(fs.readFileSync(path.join(TEMPLATES, "crying.json"), "utf8"));
   const a = expandGenerators(raw.elements).map((e) => e.id);
   const b = expandGenerators(raw.elements).map((e) => e.id);
   expect(a).toEqual(b);
   expect(new Set(a).size).toBe(a.length);
+});
+
+/**
+ * 混合模式。
+ *
+ * 验的是「方向对不对」和「透明区有没有被污染」，不是像素级外观：
+ * multiply 只许压暗、screen 只许提亮，两者在元素范围外都必须逐像素不变
+ * —— 后者是 multiply 最容易翻车的地方（透明区 rgb=0 会把整块背景乘成黑的）。
+ */
+for (const [blend, dir] of [
+  ["multiply", "darker"],
+  ["screen", "brighter"],
+] as const) {
+  test(`混合模式：${blend} 只${dir === "darker" ? "压暗" : "提亮"}，且不污染元素范围外`, async () => {
+    const base = await baseFrame("front");
+
+    const file = path.join(ARTIFACTS, `__blend-${blend}.json`);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        slug: `blend-${blend}`,
+        name: { zh: "混合" },
+        category: "test",
+        price_cents: 0,
+        template_type: "overlay",
+        perception: [],
+        elements: [
+          {
+            id: "patch",
+            // gradient 是程序化画的，中心不透明、边缘全透明，
+            // 一个元素同时覆盖「实心区」和「透明区」两种情况
+            asset: { kind: "gradient", shape: "ellipse", color: "#8899AA" },
+            anchor: { space: "screen", nx: 0.5, ny: 0.5 },
+            size: { ref: "vw", scale: 0.3 },
+            blend,
+          },
+        ],
+      }),
+    );
+    await loadTemplate(harness.page, file, "front");
+    const shot = decode(await capture(harness.page, 0));
+
+    let changed = 0;
+    let wrongWay = 0;
+    for (let i = 0; i < base.data.length; i += 4) {
+      const x = (i / 4) % base.width;
+      const y = Math.floor(i / 4 / base.width);
+      // 元素是 0.3W 宽、aspect 0.5，即半宽 0.15W、半高 0.075W。留一点富余
+      const inside =
+        Math.abs(x - base.width / 2) < base.width * 0.17 && Math.abs(y - base.height / 2) < base.width * 0.09;
+      for (let c = 0; c < 3; c++) {
+        const d = shot.data[i + c] - base.data[i + c];
+        if (Math.abs(d) <= 1) continue; // 抗锯齿和量化的容差
+        if (!inside) {
+          wrongWay++; // 元素范围外任何变化都算污染
+          continue;
+        }
+        changed++;
+        if (dir === "darker" ? d > 0 : d < 0) wrongWay++;
+      }
+    }
+
+    expect(changed, "元素得真的画上去了").toBeGreaterThan(1000);
+    expect(wrongWay / changed, `${blend} 走反了方向或污染了范围外`).toBeLessThan(0.02);
+  });
+}
+
+test("混合模式：screen 元素的 opacity 仍然有效", async () => {
+  // three 的 opacity 只作用在 alpha 上，而 screen 的混合因子里没有 srcAlpha。
+  // 不开 premultipliedAlpha 的话，这个元素淡出时完全不会变淡 ——
+  // emit-fall-fade 的眼泪会一直亮到消失那一帧。
+  const base = await baseFrame("front");
+  const shoot = async (opacity: number) => {
+    const file = path.join(ARTIFACTS, `__blend-opacity-${opacity}.json`);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        slug: `blend-opacity-${opacity}`,
+        name: { zh: "混合" },
+        category: "test",
+        price_cents: 0,
+        template_type: "overlay",
+        perception: [],
+        elements: [
+          {
+            id: "patch",
+            asset: { kind: "gradient", shape: "ellipse", color: "#8899AA" },
+            anchor: { space: "screen", nx: 0.5, ny: 0.5 },
+            size: { ref: "vw", scale: 0.3 },
+            blend: "screen",
+            opacity,
+          },
+        ],
+      }),
+    );
+    await loadTemplate(harness.page, file, "front");
+    const shot = decode(await capture(harness.page, 0));
+    let sum = 0;
+    for (let i = 0; i < base.data.length; i += 4) {
+      for (let c = 0; c < 3; c++) sum += shot.data[i + c] - base.data[i + c];
+    }
+    return sum;
+  };
+
+  const full = await shoot(1);
+  const faded = await shoot(0.2);
+  expect(full, "screen 应该提亮").toBeGreaterThan(0);
+  expect(faded, "opacity 0.2 的提亮量应该明显小于 opacity 1").toBeLessThan(full * 0.5);
+});
+
+/* ============================================================
+ * 缓动 / 抖动。纯函数，不进浏览器。
+ *
+ * 这两条钉的是「观感能力没有被优化回去」：EFFECT-QUALITY X-2 说的
+ * 「调一个参数把效果调难看了 CI 全绿」，缓动被改回线性正是其中一例。
+ * ============================================================ */
+
+test("缓动：gravity 前半段走得比线性少，两端仍然钉在 0 和 1", () => {
+  expect(applyEase(0.5, "gravity")).toBeLessThan(applyEase(0.5, "linear"));
+  for (const ease of ["linear", "in", "out", "inout", "gravity", "bounce"] as const) {
+    // f(0)=0、f(1)=1 是周期闭合断言成立的前提，任何新曲线都必须满足
+    expect(applyEase(0, ease)).toBeCloseTo(0, 6);
+    expect(applyEase(1, ease)).toBeCloseTo(1, 6);
+  }
+});
+
+test("缓动：不写 ease 时 emit-fall-fade 的输出与线性逐位相同", () => {
+  const base = { preset: "emit-fall-fade", distance: 1.2, period: 2.8 } as const;
+  for (let t = 0; t < 2.8; t += 0.07) {
+    const noEase = evaluateAnimations([{ ...base }], t, 720, 100);
+    const linear = evaluateAnimations([{ ...base, ease: "linear" }], t, 720, 100);
+    expect(noEase).toEqual(linear);
+  }
+});
+
+test("生成器抖动：带 seed 的 jitter 重复展开逐元素相同，且确实打散了", () => {
+  const trail = (jitter?: unknown) => [
+    {
+      generate: "trail",
+      count: 4,
+      step: 0,
+      decay: 1,
+      phaseShift: 0.9,
+      anchor: { space: "screen", nx: 0.5, ny: 0.5 },
+      item: {
+        asset: { kind: "svg-lib", key: "tear-drop" },
+        size: { ref: "iod", scale: 0.16 },
+        animations: [{ preset: "emit-fall-fade", distance: 1.2, period: 2.8 }],
+        ...(jitter ? { jitter } : {}),
+      },
+    },
+  ];
+
+  const jitter = { size: 0.25, phase: 0.2, offset: [0.05, 0.05], seed: 7 };
+  const a = expandGenerators(trail(jitter) as never);
+  const b = expandGenerators(trail(jitter) as never);
+  expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+
+  // 不写 jitter 时 rng 的存在不许改变任何输出，包括 id 分配顺序
+  const plain = expandGenerators(trail() as never);
+  expect(plain.map((e) => e.id)).toEqual(a.map((e) => e.id));
+  // trail 的 step:0 + decay:1 本来让四滴尺寸完全相同，抖动之后必须不同
+  expect(new Set(plain.map((e) => e.size.scale)).size).toBe(1);
+  expect(new Set(a.map((e) => e.size.scale)).size).toBeGreaterThan(1);
 });

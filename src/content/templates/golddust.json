@@ -25,7 +25,8 @@
     "spread": 1.1,
     "splash": 0,
     "settle": true,
-    "twinkle": true
+    "twinkle": true,
+    "blend": "add"
   },
   "controls": [
     {

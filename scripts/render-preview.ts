@@ -68,7 +68,8 @@ async function main() {
       fs.writeFileSync(out, png);
 
       console.log(`${path.relative(process.cwd(), out)}  (${count} 个元素, t=${t}, fixture=${fixture})`);
-      if (count === 0) {
+      // 只有帧效果的模板本来就没有元素，对它报「什么都看不见」是误报
+      if (count === 0 && !JSON.parse(fs.readFileSync(file, "utf8")).source) {
         console.log("  注意：展开后 0 个元素，这张图上不会有任何贴纸");
       }
     }

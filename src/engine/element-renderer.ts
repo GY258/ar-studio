@@ -9,8 +9,9 @@
  */
 
 import * as THREE from "three";
-import type { ElementV2, SizeRef } from "./types";
+import type { ElementBlend, ElementV2, SizeRef } from "./types";
 import { getSvg, getSvgAspect, rasterizeSvg, rasterizeText } from "./svg-assets";
+import { ensureTextFont } from "./text-font";
 import { extractAspect } from "./svg-sanitize";
 import { evaluateAnimations } from "./animations";
 import type { FaceFrame, FaceTracker } from "./face-tracker";
@@ -68,6 +69,11 @@ export class ElementRenderer {
     this.clear();
     const gen = this.generation;
 
+    // 有文字元素就先把内嵌字体等到位。不等的话第一次栅格化会落到系统字体上，
+    // 同一份 JSON 在不同机器上字形不同 —— golden 就只在录它的那台机器上成立。
+    if (elements.some((e) => e.asset.kind === "text")) await ensureTextFont();
+    if (gen !== this.generation) return;
+
     for (const elem of elements) {
       if (gen !== this.generation) return; // 已切模板，放弃这批
 
@@ -81,6 +87,7 @@ export class ElementRenderer {
         depthWrite: false,
         depthTest: false,
       });
+      applyBlend(mat, elem.blend);
       built.tex.colorSpace = THREE.SRGBColorSpace;
 
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
@@ -287,6 +294,46 @@ export class ElementRenderer {
   dispose() {
     this.clear();
     this.group.parent?.remove(this.group);
+  }
+}
+
+/**
+ * 混合模式 → 材质设置。
+ *
+ * 关键是 `premultipliedAlpha = true`：three 会在片元最后做 `rgb *= a`，
+ * 而这个 a 已经包含了纹理 alpha 和 `mat.opacity`（动画的淡入淡出走的就是它）。
+ * 不开这一项，下面三种混合都读不到 alpha：
+ *
+ *   - screen / add 的混合因子里没有 srcAlpha，SVG 抗锯齿边缘那圈半透明像素
+ *     会按全强度贡献，贴纸周围一圈光晕；而且 emit-fall-fade 淡出时压根不会变淡，
+ *     因为 opacity 只作用在 alpha 上，不作用在 rgb 上。
+ *   - multiply 相反：透明区域 rgb=0，乘上去把整块背景压成黑的。
+ *
+ * multiply 用 (DstColor, OneMinusSrcAlpha) 而不是 three 内置的 MultiplyBlending：
+ * 结果是 `dst*(rgb*a) + dst*(1-a)`，即 alpha 越低越趋近「什么都不做」。
+ * 这样素材的透明区是黑是白都无所谓，不用要求作者把透明区画成白色，
+ * gradient 那条程序化路径也不用为 multiply 单开一个分支。
+ *
+ * normal（含不写 blend）保持原样：默认直通，输出与加这个字段之前逐位相同。
+ */
+function applyBlend(mat: THREE.MeshBasicMaterial, blend: ElementBlend = "normal") {
+  if (blend === "normal") return;
+
+  mat.premultipliedAlpha = true;
+  switch (blend) {
+    case "add":
+      mat.blending = THREE.AdditiveBlending;
+      break;
+    case "screen":
+      mat.blending = THREE.CustomBlending;
+      mat.blendSrc = THREE.OneMinusDstColorFactor;
+      mat.blendDst = THREE.OneFactor;
+      break;
+    case "multiply":
+      mat.blending = THREE.CustomBlending;
+      mat.blendSrc = THREE.DstColorFactor;
+      mat.blendDst = THREE.OneMinusSrcAlphaFactor;
+      break;
   }
 }
 
