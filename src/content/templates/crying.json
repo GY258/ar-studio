@@ -16,6 +16,7 @@
       "item": {
         "asset": { "kind": "svg-lib", "key": "tear-streak" },
         "size": { "ref": "iod", "scale": 0.28 },
+        "blend": "screen",
         "animations": [{ "preset": "pulse", "scaleRange": [0.97, 1.03], "period": 2.0 }]
       },
       "children": [
@@ -29,7 +30,11 @@
           "item": {
             "asset": { "kind": "svg-lib", "key": "tear-drop" },
             "size": { "ref": "iod", "scale": 0.16 },
-            "animations": [{ "preset": "emit-fall-fade", "distance": 1.2, "period": 2.8 }]
+            "blend": "screen",
+            "jitter": { "size": 0.22, "phase": 0.12, "offset": [0.05, 0.04], "seed": 71 },
+            "animations": [
+              { "preset": "emit-fall-fade", "distance": 1.2, "period": 2.8, "ease": "gravity" }
+            ]
           }
         }
       ]
