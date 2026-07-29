@@ -5,6 +5,8 @@
  * （engine.ts 拖着 three 和 MediaPipe，校验器跑在服务端和 CI 脚本里，不该背这些）。
  *
  * 每种效果只负责算出 `effectTexel`，蒙版混合那一步是共用的，见 engine.ts。
+ * 片段里可以直接用 `m`（蒙版值，1 = 人）—— 它在片段之前就算好了，
+ * 需要「按人/背景加权取样」的效果（马赛克）靠它。
  *
  * 三条纪律：
  *  1. 取样一律走 `srcTexel()`，它内部补了视频纹理的 sRGB 解码；
@@ -37,6 +39,30 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
   desaturate: `
     float lum = dot( sharpTexel.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
     vec4 effectTexel = vec4( mix( sharpTexel.rgb, vec3( lum ), amount ), sharpTexel.a );`,
+
+  /*
+   * 调试用：把蒙版本身画出来，不做任何效果。
+   *
+   * 存在的理由是「不要透过马赛克看蒙版」—— 抠图不准的时候，
+   * 你同时在看蒙版的边界和效果自己的块状边缘，两个未知量叠在一起，
+   * 调哪个都像没用。这个视图把蒙版单独摘出来：
+   *   红色 = 蒙版判定为人，越实心置信度越高
+   *   绿色细线 = 过渡带（0.05 < m < 0.95），头发丝应该落在这里而不是被切成硬边
+   */
+  "mask-debug": `
+    vec4 effectTexel = sharpTexel;`,
+};
+
+/**
+ * 需要自己接管最后一步合成的 kind。缺省是「按蒙版在原图和效果之间混」，
+ * 调试视图不属于这个模式 —— 它要画的就是蒙版本身。
+ */
+export const EFFECT_COMBINE: Record<string, string> = {
+  "mask-debug": `
+    float edge = step(0.05, m) * step(m, 0.95);
+    vec3 dbg = mix( sharpTexel.rgb * 0.55, vec3( 1.0, 0.15, 0.15 ), m * 0.75 );
+    dbg = mix( dbg, vec3( 0.1, 1.0, 0.2 ), edge * 0.85 );
+    diffuseColor.rgb = dbg;`,
 };
 
 /** 引擎真正实现了的帧效果。校验器从这里取名单，两边不会再各写各的。 */

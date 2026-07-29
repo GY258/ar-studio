@@ -38,6 +38,7 @@ function toConfig(r: Raw): TemplateConfig {
     priceCents: r.price_cents as number,
     preview: (r.preview ?? {}) as TemplateConfig["preview"],
     locked: false,
+    hidden: r.hidden === true,
     templateType,
     perception: (r.perception ?? []) as TemplateConfig["perception"],
     emitter: r.emitter as unknown as TemplateConfig["emitter"],
@@ -133,5 +134,6 @@ export function toListing(t: TemplateConfig, unlocked: boolean): TemplateListing
     priceCents: t.priceCents,
     preview: t.preview,
     locked: t.priceCents > 0 && !unlocked,
+    hidden: t.hidden,
   };
 }

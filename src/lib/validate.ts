@@ -41,6 +41,9 @@ export function validateTemplate(raw: Raw): string[] {
   if (!name || typeof name.zh !== "string") p.push("name.zh 必填");
   if (typeof raw.category !== "string") p.push("category 必填");
   if (raw.sort_order !== undefined && !num(raw.sort_order)) p.push("sort_order 是数字");
+  if (raw.hidden !== undefined && typeof raw.hidden !== "boolean") {
+    p.push("hidden 只能是 true/false（true = 不进模板库列表，但 /studio/<slug> 仍可直接访问）");
+  }
   if (!num(raw.price_cents) || raw.price_cents < 0) p.push("price_cents 必须是 ≥0 的数字");
 
   const templateType = (raw.template_type as string) || "particle";
@@ -173,7 +176,7 @@ const GENERATORS = ["mirrorPair", "trail", "columns", "scatter", "ring", "spread
 const JITTER_GENERATORS = ["mirrorPair", "trail", "ring", "spread"];
 const MASK_PROVIDERS = ["person", "face-ellipse", "none"];
 /** schema 认识的 kind。是不是**实现了**另说，见下面的 IMPLEMENTED_EFFECTS */
-const EFFECT_KINDS = ["pixelate", "blur", "desaturate", "posterize", "pixel-art"];
+const EFFECT_KINDS = ["pixelate", "blur", "desaturate", "mask-debug", "posterize", "pixel-art"];
 
 /** 展开后的元素数硬上限。生成器很容易写出爆炸的数量。 */
 const MAX_ELEMENTS = 120;

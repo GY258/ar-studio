@@ -10,7 +10,7 @@ import { ElementRenderer } from "./element-renderer";
 import { FaceTracker, MediaPipeLandmarkProvider, type FrameSource, type LandmarkProvider } from "./face-tracker";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
-import { EFFECT_SNIPPETS } from "./source-effects";
+import { EFFECT_COMBINE, EFFECT_SNIPPETS } from "./source-effects";
 import type { ControlValues, TemplateConfig, TemplateType } from "./types";
 
 export interface EngineStats {
@@ -355,12 +355,6 @@ export class ArEngine {
           "#include <map_fragment>",
           `
           vec4 sharpTexel = srcTexel( vMapUv );
-          ${EFFECT_SNIPPETS[effect.kind]}
-          // 蒙版和视频同在「视频空间」，用同一套 uv 取样。
-          // 这里**不要**再补一次镜像：背景平面的 scale.x = -1 已经把两者一起翻了，
-          // shader 里再翻蒙版就翻反了 —— 人在画面偏左时，清晰区会跑到右边去。
-          // OccupancyField.at() 里那个 u = 0.5 - wx/w 是「世界坐标 → 场」的映射，
-          // 和这里的「uv → 纹理」是两回事，别把两条规则混在一起。
           /*
            * 蒙版要上下翻一次再采。
            *
@@ -379,8 +373,13 @@ export class ArEngine {
            * x 这一路**不要**再补，补了人偏左时清晰区会跑到右边去。
            */
           float m = smoothstep(0.42, 0.58, texture2D(maskTex, vec2(vMapUv.x, 1.0 - vMapUv.y)).r);
-          // outside: 人保持原样、背景吃效果；inside: 反过来
-          diffuseColor *= applyOutside > 0.5 ? mix(effectTexel, sharpTexel, m) : mix(sharpTexel, effectTexel, m);
+          // m 在效果片段之前算好：马赛克要按人/背景加权取样，得先知道蒙版
+          ${EFFECT_SNIPPETS[effect.kind]}
+          ${
+            EFFECT_COMBINE[effect.kind] ??
+            // outside: 人保持原样、背景吃效果；inside: 反过来
+            "diffuseColor *= applyOutside > 0.5 ? mix(effectTexel, sharpTexel, m) : mix(sharpTexel, effectTexel, m);"
+          }
           `,
         );
 

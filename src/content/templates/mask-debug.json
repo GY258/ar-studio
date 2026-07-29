@@ -1,0 +1,29 @@
+{
+  "slug": "mask-debug",
+  "name": {
+    "zh": "蒙版调试",
+    "en": "Mask Debug"
+  },
+  "category": "debug",
+  "sort_order": 999,
+  "price_cents": 0,
+  "hidden": true,
+  "schema_version": 2,
+  "template_type": "overlay",
+  "perception": [
+    "segmentation"
+  ],
+  "preview": {},
+  "source": {
+    "mask": {
+      "provider": "person",
+      "feather": 0.015,
+      "onLost": "clear"
+    },
+    "apply": "outside",
+    "effect": {
+      "kind": "mask-debug"
+    }
+  },
+  "elements": []
+}

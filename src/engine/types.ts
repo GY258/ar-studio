@@ -72,6 +72,13 @@ export interface TemplateListing {
   priceCents: number;
   preview: { poster?: string; video?: string; shape?: Emitter["shape"]; thumb?: string };
   locked: boolean;
+  /**
+   * 不进模板库列表，但 /studio/<slug> 仍然能直接访问。
+   *
+   * 给调试工具和还没做完的模板用。**不是权限**：配置照常下发，
+   * 知道 slug 的人就能用，别拿它当付费墙 —— 那是 priceCents + 权益表的事。
+   */
+  hidden?: boolean;
 }
 
 /* ============================================================
@@ -186,6 +193,8 @@ export interface SourceEffect {
     | { kind: "blur"; radius: number }
     /** amount 0~1，1 = 全灰。apply:"outside" 就是「只有我是彩色的」 */
     | { kind: "desaturate"; amount: number }
+    /** 调试视图：直接把蒙版画出来，不做效果。红 = 判为人，绿 = 过渡带 */
+    | { kind: "mask-debug" }
     | { kind: "posterize"; levels: number }
     | { kind: "pixel-art"; blocks: number; levels: number; palette?: string; dither?: "none" | "bayer4" };
 }
