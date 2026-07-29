@@ -82,23 +82,35 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
    */
   glitch: `
     float gFrame = floor( uTime * gSpeed );
-    // 行错位：整行整行地平移，这是「数据错位」最识别得出来的特征
+
+    /*
+     * 先用**未错位**的采样算暗部权重，再拿它去调制后面三路损坏。
+     *
+     * 第一版只有色块乱码吃了这个权重，错位和通道分离是全画面无差别的 ——
+     * 结果是整行整行地平移把脸拉花了，嘴和鼻子被切断，而参考素材里脸是完好的。
+     * 「只有暗部坏」必须贯穿所有三路，否则最显眼的那一路（错位）照样毁脸。
+     *
+     * 取 2.2 次幂是因为线性权重下中间调（受光的脸颊）仍然会花。
+     */
+    vec4 gBase = srcTexel( vMapUv );
+    float gLum = dot( gBase.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+    float gDark = pow( mix( 1.0, 1.0 - smoothstep( 0.06, 0.34, gLum ), gDarkBias ), 2.2 );
+
+    // 行错位：整行整行地平移，这是「数据错位」最识别得出来的特征。
+    // 乘 gDark 之后只有暗部会被拉走，亮的皮肤留在原地
     float gRow = floor( vMapUv.y * gBlocks );
     float rowRand = arHash( vec2( gRow, gFrame ), gSeed );
     // 只有一部分行会错位，全错的话读起来是「画面在抖」而不是「数据坏了」
-    float rowShift = step( 0.72, rowRand ) * ( arHash( vec2( gRow, gFrame + 7.0 ), gSeed ) - 0.5 ) * gDisplace;
+    float rowShift = step( 0.72, rowRand ) * ( arHash( vec2( gRow, gFrame + 7.0 ), gSeed ) - 0.5 ) * gDisplace * gDark;
     vec2 gUv = vec2( fract( vMapUv.x + rowShift ), vMapUv.y );
 
-    // 通道分离：R 和 B 往两边错开，G 留在原地
+    // 通道分离：R 和 B 往两边错开，G 留在原地。
+    // 亮部保留一点点（0.25）当底噪，全关掉的话脸会显得太干净、和暗部脱节
+    float gSplit = gChannelSplit * mix( 0.25, 1.0, gDark );
     vec4 gCenter = srcTexel( gUv );
-    float gR = srcTexel( vec2( fract( gUv.x + gChannelSplit ), gUv.y ) ).r;
-    float gB = srcTexel( vec2( fract( gUv.x - gChannelSplit ), gUv.y ) ).b;
+    float gR = srcTexel( vec2( fract( gUv.x + gSplit ), gUv.y ) ).r;
+    float gB = srcTexel( vec2( fract( gUv.x - gSplit ), gUv.y ) ).b;
     vec3 gRgb = vec3( gR, gCenter.g, gB );
-
-    // 暗部权重：亮的地方基本不坏。取 1.8 次幂是因为线性权重下脸上仍然会花 ——
-    // 参考素材里浅色皮肤是干净的，乱码全在头发和深色衣服上
-    float gLum = dot( gCenter.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
-    float gDark = pow( mix( 1.0, 1.0 - smoothstep( 0.06, 0.34, gLum ), gDarkBias ), 2.2 );
 
     /*
      * 色块乱码，两级网格。
@@ -124,7 +136,7 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
     gNoise = gNoise / max( 0.001, max( gNoise.r, max( gNoise.g, gNoise.b ) ) );
     gRgb = mix( gRgb, gNoise, gOn );
 
-    // 扫描线：奇偶行压暗。乘在最后，让乱码块也吃到
+    // 扫描线：全画面无差别，它读作 CRT 而不是数据损坏，压在脸上不碍事
     float gScan = 1.0 - gScanline * 0.5 * ( 1.0 - abs( fract( vMapUv.y * gBlocks * 3.0 ) * 2.0 - 1.0 ) );
     vec4 effectTexel = vec4( gRgb * gScan, gCenter.a );`,
 

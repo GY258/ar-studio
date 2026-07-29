@@ -23,11 +23,11 @@
     "effect": {
       "kind": "glitch",
       "blocks": 56,
-      "displace": 0.05,
+      "displace": 0.04,
       "channelSplit": 0.003,
       "scanline": 0.35,
-      "colorNoise": 0.55,
-      "darkBias": 0.75,
+      "colorNoise": 0.5,
+      "darkBias": 0.85,
       "speed": 8,
       "seed": 1337
     }
