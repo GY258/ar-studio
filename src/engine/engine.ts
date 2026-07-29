@@ -346,6 +346,26 @@ export class ArEngine {
            * 而且**只在摄像头源上出现** —— 离线 harness 用的是图片源，走硬件解码，
            * 逐像素断言全都照过。所以这件事必须收口成一个函数，不能靠每处手抄。
            */
+          /*
+           * 采一次蒙版并做完阈值。收口成函数是因为马赛克要在块内多点采样，
+           * 每个采样点都得问一次「这里是不是人」—— 复制三遍那段翻转 + smoothstep
+           * 迟早会漏改一处，而漏改的表现是边界莫名其妙偏一点，最难查。
+           *
+           * 蒙版要上下翻一次再采：画面源是 image / video，three 给它 flipY = true，
+           * 上传时翻了一次；蒙版是 DataTexture，three 的默认是 flipY = false，没翻。
+           * 同一个 uv 在两张纹理上指的是上下相反的两行。
+           *
+           * 这和水平镜像是两回事：背景平面的 scale.x = -1 已经把画面和蒙版一起翻了，
+           * x 这一路**不要**再补，补了人偏左时清晰区会跑到右边去。
+           *
+           * 过渡带整体挪到吃效果的那一侧（maskBias），不能骑在边界上：
+           * 对称过渡意味着人的轮廓内侧混着背景的效果，blocks 大的时候
+           * 一整块糊斑贴在肩膀上。
+           */
+          float maskAt(vec2 uv) {
+            return smoothstep(0.42 - maskBias, 0.58 - maskBias, texture2D(maskTex, vec2(uv.x, 1.0 - uv.y)).r);
+          }
+
           vec4 srcTexel(vec2 uv) {
             vec4 c = texture2D( map, uv );
             #ifdef DECODE_VIDEO_TEXTURE
@@ -358,37 +378,7 @@ export class ArEngine {
           "#include <map_fragment>",
           `
           vec4 sharpTexel = srcTexel( vMapUv );
-          /*
-           * 蒙版要上下翻一次再采。
-           *
-           * 画面源是 HTMLImageElement / video，three 给它 flipY = true，上传时翻了一次；
-           * 蒙版是 DataTexture，three 给 DataTexture 的默认是 flipY = false，没翻。
-           * 于是同一个 vMapUv 在两张纹理上指的是上下相反的两行 —— 人像蒙版整体倒过来。
-           *
-           * 为什么一直没人发现：lowres-life 的躯干是一整块平的深蓝，打没打码看不出来；
-           * 倒过来的躯干落在顶部的棋盘格上，「清晰 vs 马赛克」也很微妙。
-           * 换成 desaturate（「只有我是彩色的」）立刻就露馅了 —— 彩色的是头顶那片背景。
-           *
-           * 翻在 shader 里而不是给 DataTexture 设 flipY：WebGL 的 UNPACK_FLIP_Y_WEBGL
-           * 对 ArrayBufferView 上传的行为在各家实现上不一致，翻在这里是确定的。
-           *
-           * 注意这和水平镜像是两回事：背景平面的 scale.x = -1 已经把画面和蒙版一起翻了，
-           * x 这一路**不要**再补，补了人偏左时清晰区会跑到右边去。
-           */
-          /*
-           * 过渡带要整体落在「吃效果」的那一侧，不能骑在边界上。
-           *
-           * 原来是对称的 smoothstep(0.42, 0.58)，过渡带一半在人身上一半在背景上，
-           * 于是人的轮廓内侧半个羽化宽度里混着背景的效果 —— blocks 大的时候，
-           * 一整块糊斑贴在肩膀上，观感就是「抠错了」。
-           *
-           * 往哪边推取决于效果作用在谁身上，所以 maskBias 由 apply 决定：
-           *   outside（效果在背景）→ 判定放宽，人的区域涨一点，过渡带被挤到体外
-           *   inside （效果在人身上）→ 反过来收紧
-           * 蒙版本身不动 —— 腐蚀/膨胀蒙版会让「人在哪」这个事实跟着效果走，
-           * 下次加第三种 apply 就又得改一遍。
-           */
-          float m = smoothstep(0.42 - maskBias, 0.58 - maskBias, texture2D(maskTex, vec2(vMapUv.x, 1.0 - vMapUv.y)).r);
+          float m = maskAt( vMapUv );
           // m 在效果片段之前算好：马赛克要按人/背景加权取样，得先知道蒙版
           ${EFFECT_SNIPPETS[effect.kind]}
           ${

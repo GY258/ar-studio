@@ -18,9 +18,38 @@
  */
 
 export const EFFECT_SNIPPETS: Record<string, string> = {
+  /*
+   * 马赛克。块内 2×2 取样，按「属不属于吃效果的那一侧」加权。
+   *
+   * 原来是块中心一个点采到底。块很大时（blocks 56 → 1080p 下每块约 34px）
+   * 边界上的块一半是人一半是背景，中心点落在人身上就整块用人的颜色 ——
+   * 于是人体轮廓外面浮着一圈肤色/发色的方块，看着像人溢出来了。
+   * 这跟蒙版准不准无关，是取样本身跨了边界。
+   *
+   * 加权而不是直接排除：权重连续，块从「全背景」过渡到「全人」时颜色也连续，
+   * 硬排除会在某个块上突然跳一下。
+   *
+   * 为什么只有 2×2：这是全屏每像素都要跑的，4 次画面取样 + 4 次蒙版取样已经是
+   * 移动端能接受的上限。真要块内均值应该走 mipmap 或者单独一个降采样 pass，
+   * 那是另一笔基建。
+   */
   pixelate: `
-    vec2 gridUv = (floor(vMapUv * blocks) + 0.5) / blocks;
-    vec4 effectTexel = srcTexel( gridUv );`,
+    vec2 cellSize = 1.0 / blocks;
+    vec2 cellUv = floor(vMapUv * blocks) * cellSize;
+    vec4 blockAcc = vec4( 0.0 );
+    float blockW = 0.0;
+    for (int by = 0; by < 2; by++) {
+      for (int bx = 0; bx < 2; bx++) {
+        vec2 sampleUv = cellUv + cellSize * (vec2(float(bx), float(by)) + 0.5) * 0.5;
+        float sampleMask = maskAt( sampleUv );
+        // outside 时背景权重高，inside 时反过来
+        float wgt = applyOutside > 0.5 ? 1.0 - sampleMask : sampleMask;
+        blockAcc += srcTexel( sampleUv ) * wgt;
+        blockW += wgt;
+      }
+    }
+    // 整块都在「不该取样」的那一侧时退回块中心，避免除零后一片黑
+    vec4 effectTexel = blockW > 0.01 ? blockAcc / blockW : srcTexel( cellUv + cellSize * 0.5 );`,
 
   blur: `
     // 3x3 二项式核（1 2 1 的外积）。九次采样，比等权平均干净，成本一样。
