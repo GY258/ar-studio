@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { expandGenerators } from "../src/engine/generators";
+import { applyEase, evaluateAnimations } from "../src/engine/animations";
 import { migrateElements } from "../src/lib/migrate";
 import {
   launchHarness,
@@ -351,4 +352,168 @@ test("生成器 id 确定：同一模板重复展开产出同一串 id", async (
   const b = expandGenerators(raw.elements).map((e) => e.id);
   expect(a).toEqual(b);
   expect(new Set(a).size).toBe(a.length);
+});
+
+/**
+ * 混合模式。
+ *
+ * 验的是「方向对不对」和「透明区有没有被污染」，不是像素级外观：
+ * multiply 只许压暗、screen 只许提亮，两者在元素范围外都必须逐像素不变
+ * —— 后者是 multiply 最容易翻车的地方（透明区 rgb=0 会把整块背景乘成黑的）。
+ */
+for (const [blend, dir] of [
+  ["multiply", "darker"],
+  ["screen", "brighter"],
+] as const) {
+  test(`混合模式：${blend} 只${dir === "darker" ? "压暗" : "提亮"}，且不污染元素范围外`, async () => {
+    const base = await baseFrame("front");
+
+    const file = path.join(ARTIFACTS, `__blend-${blend}.json`);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        slug: `blend-${blend}`,
+        name: { zh: "混合" },
+        category: "test",
+        price_cents: 0,
+        template_type: "overlay",
+        perception: [],
+        elements: [
+          {
+            id: "patch",
+            // gradient 是程序化画的，中心不透明、边缘全透明，
+            // 一个元素同时覆盖「实心区」和「透明区」两种情况
+            asset: { kind: "gradient", shape: "ellipse", color: "#8899AA" },
+            anchor: { space: "screen", nx: 0.5, ny: 0.5 },
+            size: { ref: "vw", scale: 0.3 },
+            blend,
+          },
+        ],
+      }),
+    );
+    await loadTemplate(harness.page, file, "front");
+    const shot = decode(await capture(harness.page, 0));
+
+    let changed = 0;
+    let wrongWay = 0;
+    for (let i = 0; i < base.data.length; i += 4) {
+      const x = (i / 4) % base.width;
+      const y = Math.floor(i / 4 / base.width);
+      // 元素是 0.3W 宽、aspect 0.5，即半宽 0.15W、半高 0.075W。留一点富余
+      const inside =
+        Math.abs(x - base.width / 2) < base.width * 0.17 && Math.abs(y - base.height / 2) < base.width * 0.09;
+      for (let c = 0; c < 3; c++) {
+        const d = shot.data[i + c] - base.data[i + c];
+        if (Math.abs(d) <= 1) continue; // 抗锯齿和量化的容差
+        if (!inside) {
+          wrongWay++; // 元素范围外任何变化都算污染
+          continue;
+        }
+        changed++;
+        if (dir === "darker" ? d > 0 : d < 0) wrongWay++;
+      }
+    }
+
+    expect(changed, "元素得真的画上去了").toBeGreaterThan(1000);
+    expect(wrongWay / changed, `${blend} 走反了方向或污染了范围外`).toBeLessThan(0.02);
+  });
+}
+
+test("混合模式：screen 元素的 opacity 仍然有效", async () => {
+  // three 的 opacity 只作用在 alpha 上，而 screen 的混合因子里没有 srcAlpha。
+  // 不开 premultipliedAlpha 的话，这个元素淡出时完全不会变淡 ——
+  // emit-fall-fade 的眼泪会一直亮到消失那一帧。
+  const base = await baseFrame("front");
+  const shoot = async (opacity: number) => {
+    const file = path.join(ARTIFACTS, `__blend-opacity-${opacity}.json`);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        slug: `blend-opacity-${opacity}`,
+        name: { zh: "混合" },
+        category: "test",
+        price_cents: 0,
+        template_type: "overlay",
+        perception: [],
+        elements: [
+          {
+            id: "patch",
+            asset: { kind: "gradient", shape: "ellipse", color: "#8899AA" },
+            anchor: { space: "screen", nx: 0.5, ny: 0.5 },
+            size: { ref: "vw", scale: 0.3 },
+            blend: "screen",
+            opacity,
+          },
+        ],
+      }),
+    );
+    await loadTemplate(harness.page, file, "front");
+    const shot = decode(await capture(harness.page, 0));
+    let sum = 0;
+    for (let i = 0; i < base.data.length; i += 4) {
+      for (let c = 0; c < 3; c++) sum += shot.data[i + c] - base.data[i + c];
+    }
+    return sum;
+  };
+
+  const full = await shoot(1);
+  const faded = await shoot(0.2);
+  expect(full, "screen 应该提亮").toBeGreaterThan(0);
+  expect(faded, "opacity 0.2 的提亮量应该明显小于 opacity 1").toBeLessThan(full * 0.5);
+});
+
+/* ============================================================
+ * 缓动 / 抖动。纯函数，不进浏览器。
+ *
+ * 这两条钉的是「观感能力没有被优化回去」：EFFECT-QUALITY X-2 说的
+ * 「调一个参数把效果调难看了 CI 全绿」，缓动被改回线性正是其中一例。
+ * ============================================================ */
+
+test("缓动：gravity 前半段走得比线性少，两端仍然钉在 0 和 1", () => {
+  expect(applyEase(0.5, "gravity")).toBeLessThan(applyEase(0.5, "linear"));
+  for (const ease of ["linear", "in", "out", "inout", "gravity", "bounce"] as const) {
+    // f(0)=0、f(1)=1 是周期闭合断言成立的前提，任何新曲线都必须满足
+    expect(applyEase(0, ease)).toBeCloseTo(0, 6);
+    expect(applyEase(1, ease)).toBeCloseTo(1, 6);
+  }
+});
+
+test("缓动：不写 ease 时 emit-fall-fade 的输出与线性逐位相同", () => {
+  const base = { preset: "emit-fall-fade", distance: 1.2, period: 2.8 } as const;
+  for (let t = 0; t < 2.8; t += 0.07) {
+    const noEase = evaluateAnimations([{ ...base }], t, 720, 100);
+    const linear = evaluateAnimations([{ ...base, ease: "linear" }], t, 720, 100);
+    expect(noEase).toEqual(linear);
+  }
+});
+
+test("生成器抖动：带 seed 的 jitter 重复展开逐元素相同，且确实打散了", () => {
+  const trail = (jitter?: unknown) => [
+    {
+      generate: "trail",
+      count: 4,
+      step: 0,
+      decay: 1,
+      phaseShift: 0.9,
+      anchor: { space: "screen", nx: 0.5, ny: 0.5 },
+      item: {
+        asset: { kind: "svg-lib", key: "tear-drop" },
+        size: { ref: "iod", scale: 0.16 },
+        animations: [{ preset: "emit-fall-fade", distance: 1.2, period: 2.8 }],
+        ...(jitter ? { jitter } : {}),
+      },
+    },
+  ];
+
+  const jitter = { size: 0.25, phase: 0.2, offset: [0.05, 0.05], seed: 7 };
+  const a = expandGenerators(trail(jitter) as never);
+  const b = expandGenerators(trail(jitter) as never);
+  expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+
+  // 不写 jitter 时 rng 的存在不许改变任何输出，包括 id 分配顺序
+  const plain = expandGenerators(trail() as never);
+  expect(plain.map((e) => e.id)).toEqual(a.map((e) => e.id));
+  // trail 的 step:0 + decay:1 本来让四滴尺寸完全相同，抖动之后必须不同
+  expect(new Set(plain.map((e) => e.size.scale)).size).toBe(1);
+  expect(new Set(a.map((e) => e.size.scale)).size).toBeGreaterThan(1);
 });

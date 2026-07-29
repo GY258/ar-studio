@@ -2,19 +2,61 @@
  * 动画原语。overlay 与 facetrack 共用一套，参数化不写死。
  */
 
+/**
+ * 进度曲线。默认 linear，输出与没有这个字段时逐位相同。
+ *
+ * 只有「0→1 走一趟」的原语（fall / emit-fall-fade）支持它。
+ * float / pulse / spin 是周期性的，把 ease 套在相位上会在每个周期的
+ * 接缝处留一个速度拐折 —— 转一圈然后顿一下，比匀速更假。
+ * 它们要非匀速的话得换一条路（多段关键帧），不是这个字段能表达的，
+ * 所以校验器直接拒收，而不是收下来悄悄不生效。
+ */
+export type Ease = "linear" | "in" | "out" | "inout" | "gravity" | "bounce";
+
 export type AnimationV2 =
   | { preset: "float";  amplitude: number; period: number; phase?: number }
-  | { preset: "fall";   period: number; phase?: number }
+  | { preset: "fall";   period: number; phase?: number; ease?: Ease }
   | { preset: "pulse";  scaleRange: [number, number]; period: number; phase?: number }
   | { preset: "spin";   period: number; phase?: number }
   | { preset: "emit-fall-fade";
       distance: number;
       period: number;
       phase?: number;
+      ease?: Ease;
       outwardDrift?: number;
       shrink?: number;
       emitPortion?: number;
       fadePortion?: number };
+
+/**
+ * 0..1 的线性进度 → 缓动后的进度。两端必须钉死 f(0)=0、f(1)=1，
+ * 否则 L2 的「t=P 与 t0 差异≈0」周期闭合断言就不成立了。
+ */
+export function applyEase(p: number, ease: Ease = "linear"): number {
+  switch (ease) {
+    case "in":
+      return p * p;
+    case "out":
+      return 1 - (1 - p) * (1 - p);
+    case "inout":
+      return p < 0.5 ? 2 * p * p : 1 - 2 * (1 - p) * (1 - p);
+    // gravity 与 in 同曲线：自由落体位移是 ½gt²。语义不同所以保留两个名字，
+    // 「眼泪是重力下落」比「眼泪是 ease-in」好读，将来要换成带初速的曲线也只改这一支。
+    case "gravity":
+      return p * p;
+    case "bounce": {
+      // 标准 bounce-out。四段抛物线，落地三次反弹一次比一次低。
+      const n = 7.5625;
+      const d = 2.75;
+      if (p < 1 / d) return n * p * p;
+      if (p < 2 / d) return n * (p -= 1.5 / d) * p + 0.75;
+      if (p < 2.5 / d) return n * (p -= 2.25 / d) * p + 0.9375;
+      return n * (p -= 2.625 / d) * p + 0.984375;
+    }
+    default:
+      return p;
+  }
+}
 
 export interface AnimState {
   /** 相对锚点的 y 位移，px */
@@ -64,7 +106,9 @@ export function evaluateAnimations(
         const progress = ((t / anim.period + phase) % 1);
         const topY = baseH / 2 + baseH * 0.15;
         const botY = -baseH / 2 - baseH * 0.15;
-        state.positionYAbsolute = topY + (botY - topY) * progress;
+        state.positionYAbsolute = topY + (botY - topY) * applyEase(progress, anim.ease);
+        // 淡入淡出用**原始** progress：跟着缓动走的话头尾两段时长会不对称，
+        // 一头刚冒出来就到位、另一头拖很久，读起来是「卡了一下」。
         if (progress < 0.08) state.opacity = progress / 0.08;
         else if (progress > 0.88) state.opacity = (1 - progress) / 0.12;
         else state.opacity = 0.95;
@@ -92,7 +136,9 @@ export function evaluateAnimations(
           state.scaleY *= p;
           state.opacity = p;
         } else if (progress < 1 - fadeP) {
-          const p = (progress - emitP) / (1 - emitP - fadeP);
+          // 缓动只作用于中段的位移/缩放。冒出段和淡出段是纯透明度渐变，
+          // 给它们加速会让那两段看起来在闪。
+          const p = applyEase((progress - emitP) / (1 - emitP - fadeP), anim.ease);
           const shrinkFactor = 1 - (anim.shrink ?? 0.3) * p;
           state.scaleX *= shrinkFactor;
           state.scaleY *= shrinkFactor;

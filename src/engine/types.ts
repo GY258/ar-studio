@@ -100,6 +100,18 @@ export type SizeRef = "vw" | "iod" | "eye_width" | "face_width";
  */
 export type SizeFit = "width" | "font";
 
+/**
+ * 元素与背后画面的混合方式。
+ *
+ * 默认 normal —— 一块不透明的色块糊在脸上。真实的眼泪是折射的，颜色主要来自
+ * 它背后的皮肤；腮红是长在皮肤上的红，不是浮在脸前面的一层雾。
+ *
+ *   multiply  压暗底色。腮红、纹身、脸彩这类「长在皮肤上」的
+ *   screen    提亮底色，保留底下的明暗。眼泪、水光
+ *   add       发光。星星、光斑
+ */
+export type ElementBlend = "normal" | "add" | "screen" | "multiply";
+
 export type ElementAsset =
   /** 素材库贴纸，key 来自 svg-assets.ts */
   | { kind: "svg-lib"; key: string }
@@ -127,6 +139,8 @@ export interface ElementV2 {
   anchor: ElementAnchor;
   /** fit 缺省时：text 按 font，其余按 width */
   size: { ref: SizeRef; scale: number; fit?: SizeFit };
+  /** 与背后画面的混合方式。缺省 normal，行为与没有这个字段时完全一致 */
+  blend?: ElementBlend;
   /** 度。正数顺时针 */
   rotation?: number;
   /** 是否跟随头部 roll。face 空间默认 true，screen 空间恒 false */

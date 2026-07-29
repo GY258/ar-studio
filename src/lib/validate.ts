@@ -154,10 +154,16 @@ export function checkWiring(cfg: TemplateConfig): string[] {
 const ANCHOR_NAMES = Object.keys(FACE_ANCHORS);
 const PAIR_NAMES = Object.keys(ANCHOR_PAIRS);
 const ANIM_PRESETS = ["float", "fall", "pulse", "spin", "emit-fall-fade"];
+const EASES = ["linear", "in", "out", "inout", "gravity", "bounce"];
+/** 只有「0→1 走一趟」的原语能缓动。周期性原语套 ease 会在接缝处顿一下，见 animations.ts */
+const EASE_PRESETS = ["fall", "emit-fall-fade"];
 const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient"];
 const SIZE_REFS = ["vw", "iod", "eye_width", "face_width"];
 const SIZE_FITS = ["width", "font"];
+const BLENDS = ["normal", "add", "screen", "multiply"];
 const GENERATORS = ["mirrorPair", "trail", "columns", "scatter", "ring", "spread"];
+/** 支持 item.jitter 的生成器。columns 是版式（标签逐个对齐），抖了就歪 */
+const JITTER_GENERATORS = ["mirrorPair", "trail", "ring", "spread"];
 const MASK_PROVIDERS = ["person", "face-ellipse", "none"];
 const EFFECT_KINDS = ["pixelate", "blur", "posterize", "pixel-art"];
 
@@ -202,6 +208,16 @@ function validateAnimations(anims: unknown[], at: string, p: string[]) {
     }
     if (aa.phase !== undefined && !num(aa.phase)) {
       p.push(`${path}.phase 必须是数字，归一化到一个周期（0~1）`);
+    }
+    if (aa.ease !== undefined) {
+      if (!EASES.includes(aa.ease as string)) {
+        p.push(`${path}.ease "${aa.ease}" 无效，可选：${EASES.join(" / ")}`);
+      } else if (!EASE_PRESETS.includes(aa.preset as string)) {
+        p.push(
+          `${path}.ease 对 ${aa.preset} 无效 —— 只有 ${EASE_PRESETS.join(" / ")} 支持缓动。` +
+            `float / pulse / spin 是周期性的，缓动会在每个周期的接缝处留一个速度拐折`,
+        );
+      }
     }
     if (aa.preset === "pulse" && !pair(aa.scaleRange)) {
       p.push(`${path}.scaleRange 必须是 [最小, 最大] 两个数字`);
@@ -349,9 +365,47 @@ function validateElement(e: Raw, at: string, p: string[], ids: Set<string>) {
     }
   }
   if (e.rotation !== undefined && !num(e.rotation)) p.push(`${at}.rotation 必须是数字（度）`);
+  validateBlend(e.blend, at, p);
   if (e.animations !== undefined) {
     if (!Array.isArray(e.animations)) p.push(`${at}.animations 必须是数组`);
     else validateAnimations(e.animations, at, p);
+  }
+}
+
+function validateBlend(b: unknown, at: string, p: string[]) {
+  if (b === undefined) return;
+  if (!BLENDS.includes(b as string)) {
+    p.push(
+      `${at}.blend "${b}" 无效，可选：${BLENDS.join(" / ")}` +
+        `（multiply 让腮红贴到皮肤上，screen 让眼泪透出底色，add 用来发光）`,
+    );
+  }
+}
+
+/** 逐实例抖动。scatter 自己有 seed，不走这条。 */
+function validateJitter(j: unknown, at: string, generator: string, p: string[]) {
+  if (typeof j !== "object" || j === null || Array.isArray(j)) {
+    p.push(`${at}.jitter 必须是对象，形如 { "size": 0.2, "phase": 0.15, "seed": 7 }`);
+    return;
+  }
+  if (!JITTER_GENERATORS.includes(generator)) {
+    p.push(
+      `${at}.jitter 对 ${generator} 无效，只有 ${JITTER_GENERATORS.join(" / ")} 支持。` +
+        `scatter 本来就是随机的，用它自己的 seed / sizeRange`,
+    );
+  }
+  const jj = j as Raw;
+  if (!num(jj.seed)) {
+    p.push(`${at}.jitter.seed 必填。没有 seed 每次展开抖出来的都不一样，渲染回归的 golden 对比就不成立`);
+  }
+  for (const k of ["size", "phase"] as const) {
+    if (jj[k] !== undefined && !num(jj[k])) p.push(`${at}.jitter.${k} 必须是数字（随机范围的半宽，0.2 = ±20%）`);
+  }
+  if (jj.offset !== undefined && !pair(jj.offset)) {
+    p.push(`${at}.jitter.offset 必须是 [x, y]，单位 IOD`);
+  }
+  if (jj.size === undefined && jj.phase === undefined && jj.offset === undefined) {
+    p.push(`${at}.jitter 至少要给 size / phase / offset 中的一个，否则它什么都不做`);
   }
 }
 
@@ -376,6 +430,8 @@ function validateGenerator(g: Raw, at: string, p: string[]) {
     }
     if (item.id !== undefined) p.push(`${at}.item.id 不要写，生成器负责发 id`);
     if (item.anchor !== undefined) p.push(`${at}.item.anchor 不要写，生成器负责填 anchor`);
+    validateBlend(item.blend, `${at}.item`, p);
+    if (item.jitter !== undefined) validateJitter(item.jitter, `${at}.item`, kind, p);
   }
 
   switch (kind) {
