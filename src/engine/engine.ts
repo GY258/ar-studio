@@ -361,7 +361,24 @@ export class ArEngine {
           // shader 里再翻蒙版就翻反了 —— 人在画面偏左时，清晰区会跑到右边去。
           // OccupancyField.at() 里那个 u = 0.5 - wx/w 是「世界坐标 → 场」的映射，
           // 和这里的「uv → 纹理」是两回事，别把两条规则混在一起。
-          float m = smoothstep(0.42, 0.58, texture2D(maskTex, vMapUv).r);
+          /*
+           * 蒙版要上下翻一次再采。
+           *
+           * 画面源是 HTMLImageElement / video，three 给它 flipY = true，上传时翻了一次；
+           * 蒙版是 DataTexture，three 给 DataTexture 的默认是 flipY = false，没翻。
+           * 于是同一个 vMapUv 在两张纹理上指的是上下相反的两行 —— 人像蒙版整体倒过来。
+           *
+           * 为什么一直没人发现：lowres-life 的躯干是一整块平的深蓝，打没打码看不出来；
+           * 倒过来的躯干落在顶部的棋盘格上，「清晰 vs 马赛克」也很微妙。
+           * 换成 desaturate（「只有我是彩色的」）立刻就露馅了 —— 彩色的是头顶那片背景。
+           *
+           * 翻在 shader 里而不是给 DataTexture 设 flipY：WebGL 的 UNPACK_FLIP_Y_WEBGL
+           * 对 ArrayBufferView 上传的行为在各家实现上不一致，翻在这里是确定的。
+           *
+           * 注意这和水平镜像是两回事：背景平面的 scale.x = -1 已经把画面和蒙版一起翻了，
+           * x 这一路**不要**再补，补了人偏左时清晰区会跑到右边去。
+           */
+          float m = smoothstep(0.42, 0.58, texture2D(maskTex, vec2(vMapUv.x, 1.0 - vMapUv.y)).r);
           // outside: 人保持原样、背景吃效果；inside: 反过来
           diffuseColor *= applyOutside > 0.5 ? mix(effectTexel, sharpTexel, m) : mix(sharpTexel, effectTexel, m);
           `,
