@@ -128,6 +128,18 @@ export async function loadTemplate(page: Page, templatePath: string, fixture: Fi
   return page.evaluate((r) => window.harness.loadTemplate(r), raw);
 }
 
+/**
+ * 在**同一个引擎实例**上换模板，不重建。
+ *
+ * loadTemplate 每次都 setup() 一个新引擎，于是「切模板」这条路径在测试里从来没被走过。
+ * 而 three 的 program 缓存正是只在切模板时才出问题的 —— 新引擎新材质，
+ * 第一个编译的永远是对的。
+ */
+export async function switchTemplate(page: Page, templatePath: string) {
+  const raw = JSON.parse(fs.readFileSync(templatePath, "utf8"));
+  return page.evaluate((r) => window.harness.loadTemplate(r), raw);
+}
+
 /** 渲染指定时刻并返回 PNG buffer。 */
 export async function capture(page: Page, t: number): Promise<Buffer> {
   const dataUrl = await page.evaluate((tt) => {

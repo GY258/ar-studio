@@ -1,12 +1,13 @@
 {
-  "slug": "colorful-me",
+  "slug": "mask-debug",
   "name": {
-    "zh": "只有我是彩色的",
-    "en": "Only I Am in Color"
+    "zh": "蒙版调试",
+    "en": "Mask Debug"
   },
-  "category": "fun",
-  "sort_order": 91,
+  "category": "debug",
+  "sort_order": 999,
   "price_cents": 0,
+  "hidden": true,
   "schema_version": 2,
   "template_type": "overlay",
   "perception": [
@@ -21,8 +22,7 @@
     },
     "apply": "outside",
     "effect": {
-      "kind": "desaturate",
-      "amount": 1
+      "kind": "mask-debug"
     }
   },
   "elements": []

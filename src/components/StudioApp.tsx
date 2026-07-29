@@ -40,6 +40,13 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     const engine = new ArEngine({ canvas, video, onStats: setStats });
     engineRef.current = engine;
 
+    // 开发期把引擎挂到 window 上，控制台里能直接问它状态：
+    //   __engine.debugMaskStats()
+    // 生产环境不挂 —— 那是给排查用的，不是 API。
+    if (process.env.NODE_ENV !== "production") {
+      (window as unknown as { __engine?: ArEngine }).__engine = engine;
+    }
+
     engine
       .loadPerception()
       .then(() => setPhase("ready"))
@@ -61,7 +68,8 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
 
   const loadConfig = useCallback(async (slug: string) => {
     const res = await fetch(`/api/templates/${slug}/config`);
-    if (res.status === 403) return null;
+    // 403 = 没解锁，404 = 没这个 slug。两种都退回上层去挑别的模板，不是异常
+    if (res.status === 403 || res.status === 404) return null;
     if (!res.ok) throw new Error(`config ${res.status}`);
     const { config } = (await res.json()) as { config: TemplateConfig };
     return config;
@@ -94,11 +102,24 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
       if (!alive) return;
       setListing(items);
 
-      const wanted =
-        items.find((it) => it.slug === initialSlug && !it.locked) ?? items.find((it) => !it.locked);
-      if (!wanted) return;
-      const cfg = await loadConfig(wanted.slug);
-      if (alive && cfg) applyTemplate(cfg);
+      /*
+       * 先按 URL 里的 slug 试一次，试不成再回落到第一个可用模板。
+       *
+       * 不能只在 items 里找：hidden 模板（调试视图、没做完的）刻意不进列表，
+       * 但 /studio/<slug> 直接访问必须能用 —— hidden 是列表过滤，不是权限。
+       * 只查列表的话这类模板永远打不开，而且会静默跳到 cloud，看着像路由坏了。
+       */
+      const listed = items.find((it) => it.slug === initialSlug && !it.locked);
+      const cfg = (await loadConfig(listed?.slug ?? initialSlug)) ?? null;
+      if (alive && cfg) {
+        applyTemplate(cfg);
+        return;
+      }
+
+      const fallback = items.find((it) => !it.locked);
+      if (!fallback) return;
+      const fallbackCfg = await loadConfig(fallback.slug);
+      if (alive && fallbackCfg) applyTemplate(fallbackCfg);
     })().catch((e: Error) => setProblem(e.message));
     return () => {
       alive = false;

@@ -27,6 +27,7 @@ export function buildSchemaReference(): string {
   "category": "face | sticker | fun | ...",
   "sort_order": 60,                     // 列表排序，小的在前
   "price_cents": 0,
+  "hidden": false,                      // 可选。true = 不进模板库列表，但 /studio/<slug> 仍可直接访问
   "schema_version": 2,
   "template_type": "facetrack | overlay",
   "perception": ["face"],               // 用到什么感知能力就写什么
@@ -194,8 +195,17 @@ ${Object.entries(ANCHOR_PAIRS)
   effect: { kind: "pixelate";   blocks: number }   // blocks ∈ [4, 200]，短边格数
         | { kind: "blur";       radius: number }   // [0.001, 0.1]，长边的比例
         | { kind: "desaturate"; amount: number }   // [0, 1]，1 = 全灰
+        | { kind: "mask-debug" }                   // 调试视图，见下
 }
 \`\`\`
+
+\`feather\` 现在默认给 0.004 就够。蒙版吃的是模型的连续置信度，软边是真实的，
+不需要再用宽模糊去凑 —— 羽化开大的副作用是头发糊成一顶头盔。
+
+**抠图看着不对时，先开 \`{ "kind": "mask-debug" }\`**：它不做任何效果，直接把蒙版画出来
+（红 = 判为人，绿 = 过渡带，背景是压暗的原图）。不这么做的话你是在透过马赛克看蒙版，
+蒙版的边界和效果自己的块状边缘两个未知量叠在一起，调哪个都像没用。
+调试模板记得配 \`"hidden": true\`，别让它出现在模板库里。
 
 \`provider: "person"\` 时 \`perception\` 必须包含 \`"segmentation"\`，否则分割模型不会被加载。
 \`blocks\` 是真实参数，和菜单文案上写的「240p」没有换算关系。
