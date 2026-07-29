@@ -590,6 +590,19 @@ function validateSource(raw: Raw, p: string[]) {
         p.push('source.mask.provider 是 "person" 时，perception 必须包含 "segmentation"，否则分割模型不会被加载');
       }
     }
+    if (mask.exclude !== undefined) {
+      if (mask.exclude !== "face") {
+        p.push(`source.mask.exclude "${mask.exclude}" 无效，目前只支持 "face"（用人脸 landmark 的包围椭圆保护脸部）`);
+      } else {
+        const perception = raw.perception;
+        if (!Array.isArray(perception) || !perception.includes("face")) {
+          p.push('source.mask.exclude 是 "face" 时，perception 必须包含 "face"，否则人脸模型不会被加载');
+        }
+      }
+    }
+    if (mask.excludePadding !== undefined && !inRange(mask.excludePadding, 0.5, 2)) {
+      p.push("source.mask.excludePadding 应在 [0.5, 2]。1 = 刚好包住 landmark（只覆盖皮肤，不含头发）");
+    }
     if (mask.feather !== undefined && !inRange(mask.feather, 0, 0.1)) {
       p.push("source.mask.feather 应在 [0, 0.1]");
     }

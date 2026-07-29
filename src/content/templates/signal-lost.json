@@ -10,12 +10,15 @@
   "schema_version": 2,
   "template_type": "overlay",
   "perception": [
-    "segmentation"
+    "segmentation",
+    "face"
   ],
   "preview": {},
   "source": {
     "mask": {
       "provider": "person",
+      "exclude": "face",
+      "excludePadding": 1.05,
       "feather": 0.004,
       "onLost": "clear"
     },

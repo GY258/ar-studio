@@ -178,6 +178,18 @@ export type MaskProvider = "person" | "face-ellipse" | "none";
 export interface SourceEffect {
   mask: {
     provider: MaskProvider;
+    /**
+     * 从蒙版里挖掉一块。目前只有 "face" —— 用人脸 landmark 的包围椭圆保护脸部。
+     *
+     * 放在 mask 上而不是某个 effect 的参数里：mask 管「作用在哪」、
+     * effect 管「作用成什么样」，两个轴本来就是正交的。放这儿的话
+     * blur / pixelate / desaturate 全都白捡这个能力。
+     *
+     * 需要 perception 里有 "face"，校验器会拦。
+     */
+    exclude?: "face";
+    /** exclude 椭圆的缩放，1 = 刚好包住 478 个 landmark（只覆盖皮肤，不含头发） */
+    excludePadding?: number;
     /** face-ellipse 专用，本轮未实现 */
     padding?: number;
     /** 边缘羽化宽度，归一化 */

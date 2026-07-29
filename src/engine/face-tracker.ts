@@ -83,6 +83,32 @@ export interface FaceFrame {
   roll: number;
 }
 
+/**
+ * 478 个 landmark 的包围椭圆，归一化到画面，y 向下。
+ *
+ * 用整套 landmark 的包围盒而不是专门的脸型轮廓子集：这套点覆盖的正好是
+ * 额头到下巴、太阳穴到太阳穴的**皮肤**范围，**不含头发**。
+ * 拿它当保护区，脸是干净的而头发照样碎 —— 正好是想要的分工。
+ */
+export function faceOval(f: FaceFrame, padding = 1): { cx: number; cy: number; rx: number; ry: number } {
+  let minX = 1;
+  let maxX = 0;
+  let minY = 1;
+  let maxY = 0;
+  for (const p of f.landmarks) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return {
+    cx: (minX + maxX) / 2,
+    cy: (minY + maxY) / 2,
+    rx: ((maxX - minX) / 2) * padding,
+    ry: ((maxY - minY) / 2) * padding,
+  };
+}
+
 /** 丢脸容忍：短暂检测失败时保持上一帧，超过这个时长才判定为没有人。 */
 const FACE_GRACE_MS = 500;
 
