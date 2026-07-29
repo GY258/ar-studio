@@ -28,6 +28,9 @@ class Recorder {
   private face: MediaPipeLandmarkProvider | null = null;
   private seg: MediaPipeSegmentationProvider | null = null;
 
+  /** 会话级单调时钟，毫秒。见 record() 里的注释 */
+  private clock = 0;
+
   async load() {
     this.face = new MediaPipeLandmarkProvider();
     this.seg = new MediaPipeSegmentationProvider();
@@ -37,15 +40,20 @@ class Recorder {
   async record(src: string): Promise<Recorded> {
     const img = await loadImage(src);
 
-    // VIDEO 模式要求时间戳单调递增，静态图连喂几帧让检测稳定下来
+    /*
+     * VIDEO 模式要求时间戳单调递增，而且是**整个会话内**递增，不是每张图各数各的。
+     * 原来这里写的是 i * 33，于是第一张 fixture 喂到 132ms，第二张又从 0 开始，
+     * MediaPipe 直接抛 "Packet timestamp mismatch ... expected 132001 but received 0"。
+     * 一次只录一张时看不出来，录一批必炸 —— 而批量正是它的默认用法。
+     */
     let landmarks: Recorded["landmarks"] = null;
     for (let i = 0; i < 5; i++) {
-      landmarks = this.face!.detect(img, i * 33) ?? landmarks;
+      landmarks = this.face!.detect(img, (this.clock += 33)) ?? landmarks;
     }
 
     let mask: Recorded["mask"] = null;
     for (let i = 0; i < 5; i++) {
-      this.seg!.segment(img, i * 33, (data, w, h) => {
+      this.seg!.segment(img, (this.clock += 33), (data, w, h) => {
         mask = { data: Array.from(data), w, h };
       });
     }

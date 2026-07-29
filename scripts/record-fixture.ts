@@ -9,6 +9,7 @@
  * 先把真人照片放成 test/fixtures/front.png / side.png / far.png / noface.png，
  * 再跑这个脚本覆盖同名的 .landmarks.json 和 .mask.png。
  * 没有真人照片时用 scripts/make-fixtures.ts 生成的合成脸，链路一样能跑通。
+ * 现在仓库里的是图库照片派生的真人 fixture，来源和裁法见 test/fixtures/CREDITS.md。
  *
  * 用法：npm run record:fixture [-- front side]
  */

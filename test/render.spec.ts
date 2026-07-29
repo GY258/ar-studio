@@ -15,6 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
+import type { PNG } from "pngjs";
 import { expandGenerators } from "../src/engine/generators";
 import { applyEase, evaluateAnimations } from "../src/engine/animations";
 import { migrateElements } from "../src/lib/migrate";
@@ -60,6 +61,33 @@ const CLOSURE_MAX = 0.002;
  * 一个 50px 宽的贴纸挪两像素也就百来个像素变色。
  */
 const MOTION_MIN = 0.0001;
+
+/**
+ * 框内的高频能量：相邻像素亮度差的均值。
+ *
+ * 「细节被抹掉了没有」不能用「和原帧相同的像素比例」来量 —— 那个判据是按合成
+ * fixture 的高对比棋盘格调的。真实照片本身就低对比，一个马赛克块内的像素本来
+ * 就都在块均值 ±6 以内，于是「相同比例」永远很高，断言变成在验背景有多平。
+ *
+ * 高频能量直接对应「细节」：马赛克和模糊都会把块内/邻域内的差异抹平，
+ * 只在块边界留下跳变，整体能量必然大幅下降。灰度化则不影响它 —— 正好，
+ * 那条该验的是彩度。
+ */
+function highFreq(p: PNG, x0: number, y0: number, w: number, h: number): number {
+  let sum = 0;
+  let n = 0;
+  for (let y = y0; y < y0 + h; y++) {
+    for (let x = x0; x < x0 + w - 1; x++) {
+      const a = (y * p.width + x) << 2;
+      const b = a + 4;
+      const la = 0.2126 * p.data[a] + 0.7152 * p.data[a + 1] + 0.0722 * p.data[a + 2];
+      const lb = 0.2126 * p.data[b] + 0.7152 * p.data[b + 1] + 0.0722 * p.data[b + 2];
+      sum += Math.abs(la - lb);
+      n++;
+    }
+  }
+  return n ? sum / n : 0;
+}
 
 /** 展开后有没有动画。静态模板不该被「动画在动」那条断言卡住。 */
 function hasAnimations(templatePath: string): boolean {
@@ -239,10 +267,22 @@ test("lowres-life：蒙版内与原帧逐像素相同，蒙版外被真正抹掉
     return n / t;
   };
 
-  // 人脸中心（蒙版内）：应该原样保留
-  expect(ratioIn((W * 0.44) | 0, (H * 0.32) | 0, 60, 60), "蒙版内应与原帧逐像素相同").toBeGreaterThan(0.97);
-  // 左上角背景（蒙版外，菜单在右下角够不着）：马赛克应该把细节抹掉
-  expect(ratioIn((W * 0.05) | 0, (H * 0.08) | 0, 120, 120), "蒙版外应被马赛克改写").toBeLessThan(0.25);
+  // 人身上（蒙版内）：应该原样保留。坐标按 front fixture 实测的人体范围取，
+  // 换 fixture 时要跟着重新对位 —— 采样框落到背景上的话这条断言会静默变成永远通过
+  expect(ratioIn((W * 0.52) | 0, (H * 0.39) | 0, 60, 60), "蒙版内应与原帧逐像素相同").toBeGreaterThan(0.97);
+  /*
+   * 背景（蒙版外）的细节应该被抹掉。
+   *
+   * 取样框落在**有花纹**的背景上（按亮度方差扫出来的格栅那一带，避开右下角的
+   * 画质菜单）：取到平墙上的话，打不打码都一样，断言就变成在验墙有多平。
+   */
+  const bx = (W * 0.854) | 0;
+  const by = (H * 0.13) | 0;
+  const before = highFreq(base, bx, by, 120, 120);
+  const after = highFreq(frame, bx, by, 120, 120);
+  expect(after / before, `蒙版外的高频能量应该被马赛克抹掉（${before.toFixed(1)} → ${after.toFixed(1)}）`).toBeLessThan(
+    0.5,
+  );
 });
 
 /**
@@ -302,14 +342,26 @@ for (const [kind, effect] of [
       return { sameRatio: same / total, chroma: chroma / total };
     };
 
-    // 人脸中心（蒙版内）：apply "outside" 不该动它
-    expect(stats((W * 0.44) | 0, (H * 0.32) | 0, 60, 60).sameRatio, "蒙版内应与原帧逐像素相同").toBeGreaterThan(
+    // 人身上（蒙版内）：apply "outside" 不该动它
+    expect(stats((W * 0.52) | 0, (H * 0.39) | 0, 60, 60).sameRatio, "蒙版内应与原帧逐像素相同").toBeGreaterThan(
       0.97,
     );
-    // 左上角背景（蒙版外）：效果必须真的落下去
-    const outside = stats((W * 0.05) | 0, (H * 0.08) | 0, 120, 120);
-    expect(outside.sameRatio, `蒙版外应被 ${kind} 改写`).toBeLessThan(0.35);
-    if (kind === "desaturate") {
+    /*
+     * 背景（蒙版外）：效果必须真的落下去。两种效果得用各自对得上的判据 ——
+     * blur 抹的是细节（高频能量），desaturate 抹的是彩度，
+     * 拿一个通用的「像素变了多少」去量两者，在低对比的真实照片上都会失灵。
+     * 取样框同样落在有花纹的地方，理由见 lowres-life 那条。
+     */
+    const bx = (W * 0.854) | 0;
+    const by = (H * 0.13) | 0;
+    const outside = stats(bx, by, 120, 120);
+    if (kind === "blur") {
+      const before = highFreq(base, bx, by, 120, 120);
+      const after = highFreq(frame, bx, by, 120, 120);
+      expect(after / before, `蒙版外的高频能量应该被模糊抹掉（${before.toFixed(1)} → ${after.toFixed(1)}）`).toBeLessThan(
+        0.6,
+      );
+    } else {
       expect(outside.chroma, "amount=1 时蒙版外应该没有彩度了").toBeLessThan(2);
     }
   });
@@ -371,17 +423,20 @@ test("切模板换效果：不能复用上一个效果的 shader", async () => {
   expect(afterPixelate.chroma, "pixelate 不该把背景变灰").toBeGreaterThan(10);
 });
 
-test("蒙版左右不反向：清晰区必须落在人身上（偏心画面才验得出来）", async () => {
-  // 这条断言是为了抓一个真实发生过的 bug：shader 里给蒙版多补了一次镜像，
-  // 于是人越靠画面边缘，清晰区偏得越远。人站正中间时几乎看不出来——
-  // 所以必须用偏心的 side fixture，front 对这个 bug 免疫。
-  const tpl = path.join(TEMPLATES, "lowres-life.json");
-  await loadTemplate(harness.page, tpl, "side");
+test("蒙版左右不反向：人偏左时，判为人的区域必须落在屏幕右侧", async () => {
+  /*
+   * 这条断言是为了抓一个真实发生过的 bug：shader 里给蒙版多补了一次镜像，
+   * 于是人越靠画面边缘，判定偏得越远。人站正中间时几乎看不出来 ——
+   * 所以必须用偏心的 side fixture，front 对这个 bug 免疫。
+   *
+   * 直接量 mask-debug 画出来的蒙版，不要透过效果去反推。
+   * 原来的判据是「和原帧逐像素相同的区域 = 清晰区 = 人」，那在**低纹理背景**上会崩：
+   * side fixture 的背景是一面平墙，打没打码几乎一样，整片墙都会被算成「清晰区」，
+   * 质心被拖到画面中间，断言随机红。判据依赖背景有没有花纹，本身就是错的。
+   */
+  await loadTemplate(harness.page, path.join(TEMPLATES, "mask-debug.json"), "side");
   const frame = decode(await capture(harness.page, 0));
-  const base = await baseFrame("side");
 
-  // 「和原帧逐像素相同」的区域就是没被马赛克的区域。
-  // 菜单画在原帧没有的位置，自然不会被算进去，不用手动排除。
   const W = frame.width;
   const H = frame.height;
   let sx = 0;
@@ -389,23 +444,19 @@ test("蒙版左右不反向：清晰区必须落在人身上（偏心画面才�
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const o = (y * W + x) << 2;
-      const d =
-        Math.abs(frame.data[o] - base.data[o]) +
-        Math.abs(frame.data[o + 1] - base.data[o + 1]) +
-        Math.abs(frame.data[o + 2] - base.data[o + 2]);
-      if (d <= 6) {
+      // 调试视图把判为人的区域染成红色，背景是压暗的原图
+      if (frame.data[o] - Math.max(frame.data[o + 1], frame.data[o + 2]) > 40) {
         sx += x / W;
         n++;
       }
     }
   }
-  expect(n / (W * H), "应该存在成规模的清晰区").toBeGreaterThan(0.05);
+  expect(n / (W * H), "应该存在成规模的人体区域").toBeGreaterThan(0.05);
 
-  // side fixture 的人在视频空间 cx=0.38，画面是镜像的，所以屏幕上在 0.62 附近
-  const sharpCx = sx / n;
-  expect(sharpCx, `清晰区质心 x=${sharpCx.toFixed(3)}，应落在人身上（约 0.62）而不是镜像位置（约 0.38）`).toBeGreaterThan(
-    0.55,
-  );
+  // side fixture 的人在视频空间 cx≈0.42，画面是镜像的，所以屏幕上应该在 0.58 附近。
+  // 少翻一次的话会落在 0.42 —— 0.53 这个阈值两边都留了 0.05 的余量。
+  const cx = sx / n;
+  expect(cx, `人体区域质心 x=${cx.toFixed(3)}，应落在 0.58 附近而不是镜像位置 0.42`).toBeGreaterThan(0.53);
 });
 
 test("noface 下 onLost:clear 生效：背景恢复清晰，不崩溃", async () => {
