@@ -7,7 +7,13 @@ import {
 } from "./segmentation";
 import { ParticleSystem } from "./particles";
 import { ElementRenderer } from "./element-renderer";
-import { FaceTracker, MediaPipeLandmarkProvider, type FrameSource, type LandmarkProvider } from "./face-tracker";
+import {
+  FaceTracker,
+  MediaPipeLandmarkProvider,
+  faceOval,
+  type FrameSource,
+  type LandmarkProvider,
+} from "./face-tracker";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
 import { EFFECT_COMBINE, EFFECT_SNIPPETS } from "./source-effects";
@@ -71,6 +77,9 @@ export class ArEngine {
   private blocks = 0;
   /** source.effect.radius，归一化到长边。resize 时要按新比例重算 uv 步长 */
   private blurRadius = 0;
+  /** source.mask.exclude === "face" */
+  private excludeFace = false;
+  private excludePadding = 1;
   /** 注入进背景材质的 uniform 引用，onBeforeCompile 时拿到 */
   private bgUniforms: Record<string, { value: unknown }> | null = null;
   private raf = 0;
@@ -233,6 +242,10 @@ export class ArEngine {
     if (cfg.elements?.some((e) => e.anchor.space === "face") && !this.perception.includes("face")) {
       this.perception.push("face");
     }
+    // 脸部保护也要人脸。校验器会要求 JSON 显式声明，这里是拿数据库模板兜底
+    if (cfg.source?.mask.exclude === "face" && !this.perception.includes("face")) {
+      this.perception.push("face");
+    }
 
     // 清理其他类型的渲染状态
     this.elements.clear();
@@ -279,11 +292,14 @@ export class ArEngine {
       this.bgUniforms = null;
       this.blocks = 0;
       this.blurRadius = 0;
+      this.excludeFace = false;
       this.maskTex?.dispose();
       this.maskTex = null;
       return;
     }
     this.onLost = source.mask.onLost ?? "clear";
+    this.excludeFace = source.mask.exclude === "face";
+    this.excludePadding = source.mask.excludePadding ?? 1;
     this.maskField.setFeather(source.mask.feather ?? 0);
     this.maskField.reset();
     // 纹理尺寸跟 maskField 走，而 maskField 的尺寸要等第一帧 mask 才知道，
@@ -339,6 +355,18 @@ export class ArEngine {
       shader.uniforms.applyOutside = { value: applyOutside ? 1.0 : 0.0 };
       // 过渡带往哪边推。0.12 ≈ 把整条过渡带挪出人体轮廓，见下面的注释
       shader.uniforms.maskBias = { value: applyOutside ? 0.12 : -0.12 };
+      shader.uniforms.uTime = { value: 0 };
+      shader.uniforms.faceOval = { value: new THREE.Vector4(0.5, 0.5, 0, 0) };
+      shader.uniforms.faceProtect = { value: 0 };
+      const g = effect.kind === "glitch" ? effect : null;
+      shader.uniforms.gBlocks = { value: g?.blocks ?? 48 };
+      shader.uniforms.gDisplace = { value: g?.displace ?? 0 };
+      shader.uniforms.gChannelSplit = { value: g?.channelSplit ?? 0 };
+      shader.uniforms.gScanline = { value: g?.scanline ?? 0 };
+      shader.uniforms.gColorNoise = { value: g?.colorNoise ?? 0 };
+      shader.uniforms.gDarkBias = { value: g?.darkBias ?? 0 };
+      shader.uniforms.gSpeed = { value: g?.speed ?? 1 };
+      shader.uniforms.gSeed = { value: g?.seed ?? 0 };
 
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -349,7 +377,29 @@ export class ArEngine {
           uniform vec2 blurStep;
           uniform float amount;
           uniform float applyOutside;
-          uniform float maskBias;`,
+          uniform float maskBias;
+          // 时间。由 renderAt(t) / loop() 传的同一个 t 驱动，不读挂钟 ——
+          // 读挂钟的话「同一份输入渲染多少次都是同一张图」就不成立了
+          uniform float uTime;
+          uniform float gBlocks;
+          uniform float gDisplace;
+          uniform float gChannelSplit;
+          uniform float gScanline;
+          uniform float gColorNoise;
+          uniform float gDarkBias;
+          uniform float gSpeed;
+          uniform float gSeed;
+          /** 脸部保护椭圆，蒙版空间（y 向下）。xy = 中心，zw = 半径 */
+          uniform vec4 faceOval;
+          /** 0 = 不保护。丢脸时也置 0，让效果照常作用而不是整片突然恢复 */
+          uniform float faceProtect;
+
+          /** 确定性 hash。glitch 的每一处随机都走它，不许出现真随机数 */
+          float arHash(vec2 p, float seed) {
+            p = fract(p * vec2(123.34, 456.21) + seed * 0.017);
+            p += dot(p, p + 45.32);
+            return fract(p.x * p.y);
+          }`,
         )
         /*
          * 辅助函数挂在 <map_pars_fragment> 后面，不能挂在 <common> 后面：
@@ -384,7 +434,26 @@ export class ArEngine {
            * 一整块糊斑贴在肩膀上。
            */
           float maskAt(vec2 uv) {
-            return smoothstep(0.42 - maskBias, 0.58 - maskBias, texture2D(maskTex, vec2(uv.x, 1.0 - uv.y)).r);
+            vec2 mUv = vec2(uv.x, 1.0 - uv.y);
+            float mv = smoothstep(0.42 - maskBias, 0.58 - maskBias, texture2D(maskTex, mUv).r);
+
+            /*
+             * 脸部保护：把脸从「效果作用的区域」里挖掉。
+             *
+             * 挖的是**效果强度**不是原始蒙版值，所以两种 apply 的极性是相反的：
+             *   inside （效果在人身上）→ 脸上要 m = 0
+             *   outside（效果在背景）  → 脸上要 m = 1（1 才是「保持原样」）
+             * 写成一个 max/min 而不是各写一份，是为了以后加第三种 apply 时不用再改这里。
+             *
+             * 边缘用 smoothstep 羽化：硬边会在脸的轮廓上留一圈明显的分界，
+             * 比脸上有点花还难看。
+             */
+            if (faceProtect > 0.5) {
+              vec2 d = (mUv - faceOval.xy) / max(vec2(1e-4), faceOval.zw);
+              float inFace = 1.0 - smoothstep(0.78, 1.0, length(d));
+              mv = applyOutside > 0.5 ? max(mv, inFace) : mv * (1.0 - inFace);
+            }
+            return mv;
           }
 
           vec4 srcTexel(vec2 uv) {
@@ -709,6 +778,8 @@ export class ArEngine {
   renderAt(t: number, nowMs = t * 1000) {
     this.perceive(nowMs);
     this.updateMask();
+    this.setEffectTime(t);
+    this.setFaceProtect(nowMs);
     this.elements.update(t, this.faceTracker, this.faceTracker.frame(nowMs));
     this.renderer.render(this.scene, this.camera);
   }
@@ -764,6 +835,29 @@ export class ArEngine {
     this.maskTex.needsUpdate = true;
   }
 
+  /** 把时间喂给帧效果。t 由调用方给，引擎自己不读挂钟 —— 见 uTime 的注释。 */
+  private setEffectTime(t: number) {
+    if (this.bgUniforms?.uTime) this.bgUniforms.uTime.value = t;
+  }
+
+  /**
+   * 把脸部保护椭圆喂给帧效果。
+   *
+   * 丢脸时置 0（不保护）而不是保持上一帧：脸没了还护着一块，
+   * 那块会挂在空气里跟着画面走，比不护更怪。
+   */
+  private setFaceProtect(nowMs: number) {
+    if (!this.bgUniforms?.faceProtect || !this.bgUniforms.faceOval) return;
+    const f = this.excludeFace ? this.faceTracker.frame(nowMs) : null;
+    if (!f) {
+      this.bgUniforms.faceProtect.value = 0;
+      return;
+    }
+    const o = faceOval(f, this.excludePadding);
+    (this.bgUniforms.faceOval.value as THREE.Vector4).set(o.cx, o.cy, o.rx, o.ry);
+    this.bgUniforms.faceProtect.value = 1;
+  }
+
   private loop = (now: number) => {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.loop);
@@ -783,6 +877,8 @@ export class ArEngine {
     }
 
     this.updateMask();
+    this.setEffectTime(t);
+    this.setFaceProtect(now);
 
     if (this.cfg?.elements?.length) {
       this.elements.update(t, this.faceTracker, this.faceTracker.frame(now));

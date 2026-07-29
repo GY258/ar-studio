@@ -166,7 +166,19 @@ export function templatePeriod(templatePath: string): { period: number; closes: 
   const periods = elements.flatMap((e) =>
     (e.animations ?? []).map((a) => (a as { period?: number }).period ?? 0).filter((p) => p > 0),
   );
-  if (periods.length === 0) return { period: 1, closes: true };
+
+  /*
+   * 帧效果也可能随时间变，而且不一定和元素动画同周期。
+   *
+   * glitch 的损坏图案是 hash(块, floor(t * speed), seed) —— 帧号一直往上走，
+   * 永不重复，所以整个模板根本没有闭合周期。只看元素动画的话会算出一个
+   * 「1.6 秒」然后断言 t=1.6 要和 t=0 重合，必红。
+   *
+   * 这不是缺陷，是这类效果的本性。诚实地说「不适用」比挑一个数字假装闭合好。
+   */
+  const timeVarying = ["glitch"].includes((raw.source as { effect?: { kind?: string } })?.effect?.kind ?? "");
+
+  if (periods.length === 0) return { period: 1, closes: !timeVarying };
 
   const uniq = [...new Set(periods)];
   const longest = Math.max(...uniq);
@@ -180,7 +192,7 @@ export function templatePeriod(templatePath: string): { period: number; closes: 
       return { period: longest, closes: false };
     }
   }
-  return { period: lcm / scale, closes: true };
+  return { period: lcm / scale, closes: !timeVarying };
 }
 
 declare global {
