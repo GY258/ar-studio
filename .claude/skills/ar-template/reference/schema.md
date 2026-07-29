@@ -176,12 +176,16 @@ jitter?: {
 ```ts
 {
   mask: { provider: "person" | "none";     // face-ellipse 留了枚举没实现
+          exclude?: "face";                // 从蒙版里挖掉脸，见下
+          excludePadding?: number;         // [0.5, 2]，缺省 1
           feather?: number;                // [0, 0.1]
           onLost?: "clear" | "hold" | "full" },
   apply: "inside" | "outside",             // 效果作用在人身上 / 背景上
   effect: { kind: "pixelate";   blocks: number }   // blocks ∈ [4, 200]，短边格数
         | { kind: "blur";       radius: number }   // [0.001, 0.1]，长边的比例
         | { kind: "desaturate"; amount: number }   // [0, 1]，1 = 全灰
+        | { kind: "glitch"; blocks; displace; channelSplit;        // 数字信号损坏，见下
+                            scanline; colorNoise; darkBias; speed; seed }
         | { kind: "mask-debug" }                   // 调试视图，见下
 }
 ```
@@ -193,6 +197,51 @@ jitter?: {
 （红 = 判为人，绿 = 过渡带，背景是压暗的原图）。不这么做的话你是在透过马赛克看蒙版，
 蒙版的边界和效果自己的块状边缘两个未知量叠在一起，调哪个都像没用。
 调试模板记得配 `"hidden": true`，别让它出现在模板库里。
+
+### exclude: "face" —— 保护脸部
+
+```jsonc
+"mask": { "provider": "person", "exclude": "face", "excludePadding": 1.05 }
+```
+
+用人脸 478 个 landmark 的包围椭圆把脸从「效果作用的区域」里挖掉。
+那套点覆盖的正好是额头到下巴、太阳穴到太阳穴的**皮肤**范围，**不含头发** ——
+所以脸是干净的而头发照样吃效果，正好是「损坏 / 打码 / 虚化但别毁脸」想要的分工。
+
+写了它 `perception` 必须包含 `"face"`，否则人脸模型不会被加载，校验器会拦。
+
+挖的是**效果强度**不是原始蒙版值，所以 `apply` 两种都对：
+inside 时脸上不作用，outside 时脸上保持原样。丢脸时自动关掉保护 ——
+脸没了还护着一块，那块会挂在空气里跟着画面走，比不护更怪。
+
+**别拿亮度当「不是脸」的代理。** glitch 的 `darkBias` 只是让损坏偏向暗部，
+对深色皮肤、昏暗房间、浓妆阴影都会误伤；要真正保护脸就用这个字段。
+
+### glitch
+
+```jsonc
+{ "kind": "glitch",
+  "blocks": 56,          // [8, 200] 短边分几行，错位块的粒度
+  "displace": 0.05,      // [0, 0.5] 横向错位强度，画面宽度的比例
+  "channelSplit": 0.003, // [0, 0.05] RGB 通道分离
+  "scanline": 0.35,      // [0, 1] 扫描线
+  "colorNoise": 0.55,    // [0, 1] 色块乱码密度
+  "darkBias": 0.75,      // [0, 1] 噪声往暗部集中的程度
+  "speed": 8,            // [0.1, 60] 每秒变几次
+  "seed": 1337 }         // 必填
+```
+
+配 `apply: "inside"` 就是「只有人坏掉、背景干净」。
+
+**`darkBias` 是这个效果对不对味的关键**：真实的信号损坏几乎只出现在暗部，
+浅色皮肤是干净的。调到 0 的话脸上也会花，立刻变成廉价滤镜。
+
+`seed` 必填，理由同 scatter：损坏是 `hash(块, 帧号, seed)` 的纯函数，
+用随机数的话 `renderAt(t)` 不再确定，渲染回归就不成立。
+
+注意这**不是 datamosh**。真 datamosh 是时间域的（丢 I 帧 + 复用运动矢量），
+需要跨帧历史，而引擎是无历史的。这里是逐帧程序化损坏：静态几乎一样，
+快速运动时不会有「融化」的拖影。
 
 `provider: "person"` 时 `perception` 必须包含 `"segmentation"`，否则分割模型不会被加载。
 `blocks` 是真实参数，和菜单文案上写的「240p」没有换算关系。

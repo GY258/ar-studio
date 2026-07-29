@@ -8,6 +8,10 @@
  * 所以先用几何合成的脸把链路跑通，真 fixture 到位后覆盖同名文件即可，
  * 下游（harness / render.spec）一行都不用改。
  *
+ * **现在 test/fixtures 里已经是真人照片了**（图库授权，见 test/fixtures/CREDITS.md）。
+ * 这个脚本留着是为了两件事：链路坏了的时候能生成一份不依赖任何外部素材的输入；
+ * 以及新增 fixture 类型时先用合成的把结构跑通。跑它会覆盖掉真 fixture，注意。
+ *
  * 产物是确定的：同一份代码永远生成同一批字节，golden 才立得住。
  *
  * 用法：npx tsx scripts/make-fixtures.ts
