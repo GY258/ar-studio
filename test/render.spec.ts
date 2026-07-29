@@ -66,14 +66,21 @@ function hasAnimations(templatePath: string): boolean {
   return migrateElements(raw).elements.some((e) => (e.animations?.length ?? 0) > 0);
 }
 
-/** 有元素的模板才需要渲染回归；particle 模板走的是另一条线，本轮不碰。 */
+/**
+ * 有元素的模板才需要渲染回归；particle 模板走的是另一条线，本轮不碰。
+ *
+ * 「有元素」要看数组长度，不能只看字段在不在：只有帧效果的模板（colorful-me）
+ * 写的是 `elements: []`，字段存在但一个元素都没有，进了这条回归会卡在
+ * 「展开后应该有元素」上，而它根本就不该有元素。
+ */
 function templatesWithElements(): string[] {
   return fs
     .readdirSync(TEMPLATES)
     .filter((f) => f.endsWith(".json"))
     .filter((f) => {
       const raw = JSON.parse(fs.readFileSync(path.join(TEMPLATES, f), "utf8"));
-      return Boolean(raw.elements ?? raw.overlay_elements ?? raw.face_track_elements);
+      const els = raw.elements ?? raw.overlay_elements ?? raw.face_track_elements;
+      return Array.isArray(els) && els.length > 0;
     })
     .sort();
 }
@@ -236,6 +243,76 @@ test("lowres-life：蒙版内与原帧逐像素相同，蒙版外被真正抹掉
   // 左上角背景（蒙版外，菜单在右下角够不着）：马赛克应该把细节抹掉
   expect(ratioIn((W * 0.05) | 0, (H * 0.08) | 0, 120, 120), "蒙版外应被马赛克改写").toBeLessThan(0.25);
 });
+
+/**
+ * 帧效果必须真的作用。
+ *
+ * 这条挡的是一类静默失效：`blur` 曾经能过校验、能正常渲染、什么效果都没有、
+ * 也不报任何错 —— 校验器认识的 kind 和引擎实现了的 kind 是两份各写各的名单。
+ * 对 LLM 生成模板尤其致命：全套 gate 绿灯放行，产出一个「没效果」的模板。
+ * 所以每加一个 kind 都要在这里加一行，证明它确实改变了画面。
+ */
+for (const [kind, effect] of [
+  ["blur", { kind: "blur", radius: 0.02 }],
+  ["desaturate", { kind: "desaturate", amount: 1 }],
+] as const) {
+  test(`帧效果 ${kind}：蒙版外真的变了，蒙版内逐像素不变`, async () => {
+    const file = path.join(ARTIFACTS, `__effect-${kind}.json`);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        slug: `effect-${kind}`,
+        name: { zh: "帧效果" },
+        category: "test",
+        price_cents: 0,
+        template_type: "overlay",
+        perception: ["segmentation"],
+        source: {
+          mask: { provider: "person", feather: 0.015, onLost: "clear" },
+          apply: "outside",
+          effect,
+        },
+        elements: [],
+      }),
+    );
+    await loadTemplate(harness.page, file, "front");
+    const frame = decode(await capture(harness.page, 0));
+    const base = await baseFrame("front");
+
+    const W = frame.width;
+    const H = frame.height;
+    const stats = (x0: number, y0: number, w: number, h: number) => {
+      let same = 0;
+      let total = 0;
+      let chroma = 0;
+      for (let y = y0; y < y0 + h; y++) {
+        for (let x = x0; x < x0 + w; x++) {
+          const o = (y * W + x) << 2;
+          const [r, g, b] = [frame.data[o], frame.data[o + 1], frame.data[o + 2]];
+          if (
+            Math.abs(r - base.data[o]) + Math.abs(g - base.data[o + 1]) + Math.abs(b - base.data[o + 2]) <= 6
+          ) {
+            same++;
+          }
+          chroma += Math.max(r, g, b) - Math.min(r, g, b);
+          total++;
+        }
+      }
+      return { sameRatio: same / total, chroma: chroma / total };
+    };
+
+    // 人脸中心（蒙版内）：apply "outside" 不该动它
+    expect(stats((W * 0.44) | 0, (H * 0.32) | 0, 60, 60).sameRatio, "蒙版内应与原帧逐像素相同").toBeGreaterThan(
+      0.97,
+    );
+    // 左上角背景（蒙版外）：效果必须真的落下去
+    const outside = stats((W * 0.05) | 0, (H * 0.08) | 0, 120, 120);
+    expect(outside.sameRatio, `蒙版外应被 ${kind} 改写`).toBeLessThan(0.35);
+    if (kind === "desaturate") {
+      expect(outside.chroma, "amount=1 时蒙版外应该没有彩度了").toBeLessThan(2);
+    }
+  });
+}
 
 test("蒙版左右不反向：清晰区必须落在人身上（偏心画面才验得出来）", async () => {
   // 这条断言是为了抓一个真实发生过的 bug：shader 里给蒙版多补了一次镜像，

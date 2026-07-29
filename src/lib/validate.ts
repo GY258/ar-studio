@@ -2,6 +2,7 @@ import type { Control, TemplateConfig } from "@/engine/types";
 import { resolveControls } from "@/engine/resolve";
 import { FACE_ANCHORS, ANCHOR_PAIRS } from "@/engine/anchors";
 import { listSvgKeys } from "@/engine/svg-assets";
+import { IMPLEMENTED_EFFECTS } from "@/engine/source-effects";
 import { sanitizeSvg } from "@/engine/svg-sanitize";
 import { migrateElements } from "./migrate";
 
@@ -171,7 +172,8 @@ const GENERATORS = ["mirrorPair", "trail", "columns", "scatter", "ring", "spread
 /** 支持 item.jitter 的生成器。columns 是版式（标签逐个对齐），抖了就歪 */
 const JITTER_GENERATORS = ["mirrorPair", "trail", "ring", "spread"];
 const MASK_PROVIDERS = ["person", "face-ellipse", "none"];
-const EFFECT_KINDS = ["pixelate", "blur", "posterize", "pixel-art"];
+/** schema 认识的 kind。是不是**实现了**另说，见下面的 IMPLEMENTED_EFFECTS */
+const EFFECT_KINDS = ["pixelate", "blur", "desaturate", "posterize", "pixel-art"];
 
 /** 展开后的元素数硬上限。生成器很容易写出爆炸的数量。 */
 const MAX_ELEMENTS = 120;
@@ -489,8 +491,13 @@ function validateElementSection(raw: Raw, templateType: string, p: string[]) {
   const v2 = raw.elements;
   const v1 = raw.overlay_elements ?? raw.face_track_elements;
 
+  // 只有帧效果、没有贴纸是合法的：「只有我是彩色的」不需要任何元素。
+  // 这时空 elements 不是「什么都不会显示」，而是这个模板的全部内容都在 source 里。
+  const sourceOnly = Boolean(raw.source);
+
   if (!Array.isArray(v2)) {
     if (!Array.isArray(v1) || v1.length === 0) {
+      if (sourceOnly) return;
       p.push(
         `${templateType} 类型需要 elements 数组（v2）。` +
           `旧模板的 ${templateType === "overlay" ? "overlay_elements" : "face_track_elements"} 仍受支持，但会走兼容层并打警告`,
@@ -503,7 +510,8 @@ function validateElementSection(raw: Raw, templateType: string, p: string[]) {
   }
 
   if (v2.length === 0) {
-    p.push("elements 是空数组，这个模板什么都不会显示");
+    if (sourceOnly) return;
+    p.push("elements 是空数组，而且没有 source 帧效果，这个模板什么都不会显示");
     return;
   }
 
@@ -594,13 +602,27 @@ function validateSource(raw: Raw, p: string[]) {
     p.push(`source.effect.kind "${kind}" 无效，可选：${EFFECT_KINDS.join(" / ")}`);
     return;
   }
-  if (kind === "posterize" || kind === "pixel-art") {
-    p.push(`source.effect.kind "${kind}" 目前只留了接口没有实现，本轮只有 pixelate 能跑`);
+  /*
+   * 「引擎实现了没有」直接问引擎，不在这里手抄一份名单。
+   *
+   * 抄一份的下场已经发生过一次：blur 在这里是合法 kind、radius 也校验了，
+   * 但 setupSourceEffect 只认 pixelate，于是声明 blur 的模板能过校验、能正常渲染、
+   * 什么效果都没有、且不报任何错。对 LLM 生成模板尤其致命 —— 全套 gate 绿灯放行，
+   * 产出一个「没效果」的模板。
+   */
+  if (!IMPLEMENTED_EFFECTS.includes(kind)) {
+    p.push(
+      `source.effect.kind "${kind}" 只留了枚举值没有实现，装上去不会有任何效果。` +
+        `已实现的：${IMPLEMENTED_EFFECTS.join(" / ")}`,
+    );
   }
   if ((kind === "pixelate" || kind === "pixel-art") && !inRange(eff.blocks, 4, 200)) {
     p.push("source.effect.blocks 应在 [4, 200]（短边分几格）。注意它和菜单上写的 240p 没有换算关系");
   }
-  if (kind === "blur" && (!num(eff.radius) || (eff.radius as number) <= 0)) {
-    p.push("source.effect.radius 必须是正数");
+  if (kind === "blur" && !inRange(eff.radius, 0.001, 0.1)) {
+    p.push("source.effect.radius 应在 [0.001, 0.1]，单位是长边的比例（0.01 ≈ 长边的 1%）");
+  }
+  if (kind === "desaturate" && !inRange(eff.amount, 0, 1)) {
+    p.push("source.effect.amount 应在 [0, 1]，1 = 全灰");
   }
 }

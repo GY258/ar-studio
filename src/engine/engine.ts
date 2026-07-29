@@ -10,6 +10,7 @@ import { ElementRenderer } from "./element-renderer";
 import { FaceTracker, MediaPipeLandmarkProvider, type FrameSource, type LandmarkProvider } from "./face-tracker";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
+import { EFFECT_SNIPPETS } from "./source-effects";
 import type { ControlValues, TemplateConfig, TemplateType } from "./types";
 
 export interface EngineStats {
@@ -68,6 +69,8 @@ export class ArEngine {
   private applyOutside = true;
   /** source.effect.blocks，短边格数。resize 时要按新比例重算长边格数 */
   private blocks = 0;
+  /** source.effect.radius，归一化到长边。resize 时要按新比例重算 uv 步长 */
+  private blurRadius = 0;
   /** 注入进背景材质的 uniform 引用，onBeforeCompile 时拿到 */
   private bgUniforms: Record<string, { value: unknown }> | null = null;
   private raf = 0;
@@ -269,12 +272,13 @@ export class ArEngine {
   }
 
   private setupSourceEffect(source?: import("./types").SourceEffect) {
-    if (!source || source.effect.kind !== "pixelate") {
+    if (!source || !EFFECT_SNIPPETS[source.effect.kind]) {
       // 恢复普通视频材质
       this.bgMat = new THREE.MeshBasicMaterial({ map: this.sourceTex });
       this.bg.material = this.bgMat;
       this.bgUniforms = null;
       this.blocks = 0;
+      this.blurRadius = 0;
       this.maskTex?.dispose();
       this.maskTex = null;
       return;
@@ -286,10 +290,11 @@ export class ArEngine {
     // 所以这里先给一个 1x1 占位，updateMask 里发现尺寸对不上再重建。
     this.maskTex = makeMaskTexture(1, 1);
 
-    const blocks = source.effect.blocks;
+    const effect = source.effect;
     const applyOutside = source.apply === "outside";
     this.applyOutside = applyOutside;
-    this.blocks = blocks;
+    this.blocks = effect.kind === "pixelate" || effect.kind === "pixel-art" ? effect.blocks : 0;
+    this.blurRadius = effect.kind === "blur" ? effect.radius : 0;
 
     /*
      * 往内置 MeshBasicMaterial 里注入，而不是自己写一个裸 ShaderMaterial。
@@ -307,7 +312,9 @@ export class ArEngine {
       shader.uniforms.maskTex = { value: this.maskTex };
       // blocks 的定义是「短边分几格」，长边按比例给更多格，块才是正方形的。
       // 两个轴都用同一个数会得到被拉长的矩形块，一眼假。resize 时同步更新。
-      shader.uniforms.blocks = { value: this.blockGrid(blocks) };
+      shader.uniforms.blocks = { value: this.blockGrid(this.blocks) };
+      shader.uniforms.blurStep = { value: this.blurStep(this.blurRadius) };
+      shader.uniforms.amount = { value: effect.kind === "desaturate" ? effect.amount : 0 };
       shader.uniforms.applyOutside = { value: applyOutside ? 1.0 : 0.0 };
 
       shader.fragmentShader = shader.fragmentShader
@@ -316,30 +323,51 @@ export class ArEngine {
           `#include <common>
           uniform sampler2D maskTex;
           uniform vec2 blocks;
+          uniform vec2 blurStep;
+          uniform float amount;
           uniform float applyOutside;`,
+        )
+        /*
+         * 辅助函数挂在 <map_pars_fragment> 后面，不能挂在 <common> 后面：
+         * map 这个 sampler 是 <map_pars_fragment> 声明的，而它排在 <common> 之后。
+         * 挂错位置的表现是整个 shader 编译失败 → 材质变黑 → 一整帧全黑，
+         * 而 three 只在控制台打一行，测试里看到的现象是「清晰区面积为 0」。
+         */
+        .replace(
+          "#include <map_pars_fragment>",
+          `#include <map_pars_fragment>
+          /*
+           * 取一个纹素并补上 three 对视频纹理的 sRGB→线性 解码。
+           *
+           * 每个 kind 都要对自己那份纹素补这一下，漏一个的表现是「有效果的区域偏亮」，
+           * 而且**只在摄像头源上出现** —— 离线 harness 用的是图片源，走硬件解码，
+           * 逐像素断言全都照过。所以这件事必须收口成一个函数，不能靠每处手抄。
+           */
+          vec4 srcTexel(vec2 uv) {
+            vec4 c = texture2D( map, uv );
+            #ifdef DECODE_VIDEO_TEXTURE
+              c = vec4( mix( pow( c.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), c.rgb * 0.0773993808, vec3( lessThanEqual( c.rgb, vec3( 0.04045 ) ) ) ), c.w );
+            #endif
+            return c;
+          }`,
         )
         .replace(
           "#include <map_fragment>",
           `
-          vec2 gridUv = (floor(vMapUv * blocks) + 0.5) / blocks;
-          vec4 sharpTexel = texture2D( map, vMapUv );
-          vec4 blockTexel = texture2D( map, gridUv );
-          #ifdef DECODE_VIDEO_TEXTURE
-            sharpTexel = vec4( mix( pow( sharpTexel.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), sharpTexel.rgb * 0.0773993808, vec3( lessThanEqual( sharpTexel.rgb, vec3( 0.04045 ) ) ) ), sharpTexel.w );
-            blockTexel = vec4( mix( pow( blockTexel.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), blockTexel.rgb * 0.0773993808, vec3( lessThanEqual( blockTexel.rgb, vec3( 0.04045 ) ) ) ), blockTexel.w );
-          #endif
+          vec4 sharpTexel = srcTexel( vMapUv );
+          ${EFFECT_SNIPPETS[effect.kind]}
           // 蒙版和视频同在「视频空间」，用同一套 uv 取样。
           // 这里**不要**再补一次镜像：背景平面的 scale.x = -1 已经把两者一起翻了，
           // shader 里再翻蒙版就翻反了 —— 人在画面偏左时，清晰区会跑到右边去。
           // OccupancyField.at() 里那个 u = 0.5 - wx/w 是「世界坐标 → 场」的映射，
           // 和这里的「uv → 纹理」是两回事，别把两条规则混在一起。
           float m = smoothstep(0.42, 0.58, texture2D(maskTex, vMapUv).r);
-          // outside: 人清晰背景糊；inside: 人糊背景清晰
-          diffuseColor *= applyOutside > 0.5 ? mix(blockTexel, sharpTexel, m) : mix(sharpTexel, blockTexel, m);
+          // outside: 人保持原样、背景吃效果；inside: 反过来
+          diffuseColor *= applyOutside > 0.5 ? mix(effectTexel, sharpTexel, m) : mix(sharpTexel, effectTexel, m);
           `,
         );
 
-      // 留着引用，resize 要改 blocks，蒙版换尺寸要改 maskTex
+      // 留着引用，resize 要改 blocks / blurStep，蒙版换尺寸要改 maskTex
       this.bgUniforms = shader.uniforms as Record<string, { value: unknown }>;
     };
 
@@ -389,6 +417,18 @@ export class ArEngine {
   private blockGrid(n: number): THREE.Vector2 {
     const aspect = this.W / this.H;
     return aspect >= 1 ? new THREE.Vector2(Math.round(n * aspect), n) : new THREE.Vector2(n, Math.round(n / aspect));
+  }
+
+  /**
+   * 模糊半径（长边的比例）→ 两个轴各自的 uv 步长。
+   *
+   * uv 两个轴的物理长度不一样，直接把同一个数当步长会得到被拉长的模糊 ——
+   * 和 blocks 那个坑是同一个，所以同样要挂在 resize 上。
+   */
+  private blurStep(radius: number): THREE.Vector2 {
+    if (radius <= 0) return new THREE.Vector2(0, 0);
+    const long = Math.max(this.W, this.H);
+    return new THREE.Vector2((radius * long) / this.W, (radius * long) / this.H);
   }
 
   private propTexture(cfg: TemplateConfig): THREE.Texture | null {
@@ -448,9 +488,12 @@ export class ArEngine {
     // 分割遮罩覆盖整个视频帧，视频通过 cover 显示在 bgW×bgH 的区域内，
     // 粒子碰撞要对齐这个实际显示区域。
     this.field.setViewport(bgW, bgH);
-    // 视口比例变了，马赛克的长边格数要跟着变，否则块会被拉长
+    // 视口比例变了，马赛克的长边格数和模糊的 uv 步长都要跟着变，否则会被拉长
     if (this.blocks && this.bgUniforms?.blocks) {
       this.bgUniforms.blocks.value = this.blockGrid(this.blocks);
+    }
+    if (this.blurRadius && this.bgUniforms?.blurStep) {
+      this.bgUniforms.blurStep.value = this.blurStep(this.blurRadius);
     }
     this.particles.setPixelRatio(dpr);
     this.elements.setViewport(this.W, this.H);

@@ -182,7 +182,10 @@ export interface SourceEffect {
   apply: "inside" | "outside";
   effect:
     | { kind: "pixelate"; blocks: number }
+    /** radius 是长边的比例，0.01 ≈ 长边的 1% */
     | { kind: "blur"; radius: number }
+    /** amount 0~1，1 = 全灰。apply:"outside" 就是「只有我是彩色的」 */
+    | { kind: "desaturate"; amount: number }
     | { kind: "posterize"; levels: number }
     | { kind: "pixel-art"; blocks: number; levels: number; palette?: string; dither?: "none" | "bayer4" };
 }
