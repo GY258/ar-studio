@@ -17,7 +17,7 @@
   "source": {
     "mask": {
       "provider": "person",
-      "feather": 0.015,
+      "feather": 0.004,
       "onLost": "clear"
     },
     "apply": "outside",

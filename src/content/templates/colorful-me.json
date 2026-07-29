@@ -1,17 +1,29 @@
 {
   "slug": "colorful-me",
-  "name": { "zh": "只有我是彩色的", "en": "Only I Am in Color" },
+  "name": {
+    "zh": "只有我是彩色的",
+    "en": "Only I Am in Color"
+  },
   "category": "fun",
   "sort_order": 91,
   "price_cents": 0,
   "schema_version": 2,
   "template_type": "overlay",
-  "perception": ["segmentation"],
+  "perception": [
+    "segmentation"
+  ],
   "preview": {},
   "source": {
-    "mask": { "provider": "person", "feather": 0.015, "onLost": "clear" },
+    "mask": {
+      "provider": "person",
+      "feather": 0.004,
+      "onLost": "clear"
+    },
     "apply": "outside",
-    "effect": { "kind": "desaturate", "amount": 1 }
+    "effect": {
+      "kind": "desaturate",
+      "amount": 1
+    }
   },
   "elements": []
 }

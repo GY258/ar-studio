@@ -316,6 +316,8 @@ export class ArEngine {
       shader.uniforms.blurStep = { value: this.blurStep(this.blurRadius) };
       shader.uniforms.amount = { value: effect.kind === "desaturate" ? effect.amount : 0 };
       shader.uniforms.applyOutside = { value: applyOutside ? 1.0 : 0.0 };
+      // 过渡带往哪边推。0.12 ≈ 把整条过渡带挪出人体轮廓，见下面的注释
+      shader.uniforms.maskBias = { value: applyOutside ? 0.12 : -0.12 };
 
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -325,7 +327,8 @@ export class ArEngine {
           uniform vec2 blocks;
           uniform vec2 blurStep;
           uniform float amount;
-          uniform float applyOutside;`,
+          uniform float applyOutside;
+          uniform float maskBias;`,
         )
         /*
          * 辅助函数挂在 <map_pars_fragment> 后面，不能挂在 <common> 后面：
@@ -372,7 +375,20 @@ export class ArEngine {
            * 注意这和水平镜像是两回事：背景平面的 scale.x = -1 已经把画面和蒙版一起翻了，
            * x 这一路**不要**再补，补了人偏左时清晰区会跑到右边去。
            */
-          float m = smoothstep(0.42, 0.58, texture2D(maskTex, vec2(vMapUv.x, 1.0 - vMapUv.y)).r);
+          /*
+           * 过渡带要整体落在「吃效果」的那一侧，不能骑在边界上。
+           *
+           * 原来是对称的 smoothstep(0.42, 0.58)，过渡带一半在人身上一半在背景上，
+           * 于是人的轮廓内侧半个羽化宽度里混着背景的效果 —— blocks 大的时候，
+           * 一整块糊斑贴在肩膀上，观感就是「抠错了」。
+           *
+           * 往哪边推取决于效果作用在谁身上，所以 maskBias 由 apply 决定：
+           *   outside（效果在背景）→ 判定放宽，人的区域涨一点，过渡带被挤到体外
+           *   inside （效果在人身上）→ 反过来收紧
+           * 蒙版本身不动 —— 腐蚀/膨胀蒙版会让「人在哪」这个事实跟着效果走，
+           * 下次加第三种 apply 就又得改一遍。
+           */
+          float m = smoothstep(0.42 - maskBias, 0.58 - maskBias, texture2D(maskTex, vec2(vMapUv.x, 1.0 - vMapUv.y)).r);
           // m 在效果片段之前算好：马赛克要按人/背景加权取样，得先知道蒙版
           ${EFFECT_SNIPPETS[effect.kind]}
           ${
