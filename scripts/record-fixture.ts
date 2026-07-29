@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * 录制 fixture：对 test/fixtures/<name>.png 真跑一次 MediaPipe，
- * 把 478 点 landmark 和 categoryMask 固化成文件提交进仓库。
+ * 把 478 点 landmark 和分割置信度固化成文件提交进仓库。
  *
  * **只有开发者本地手动跑，绝不进 CI。** 它需要下载模型（走 jsdelivr，国内不通）
  * 和一块能跑 GPU delegate 的机器。CI 回放的是这一步的产物。
@@ -107,7 +107,9 @@ async function main() {
     if (rec.mask) {
       const png = new PNG({ width: rec.mask.w, height: rec.mask.h });
       for (let i = 0; i < rec.mask.data.length; i++) {
-        const v = rec.mask.data[i];
+        // provider 给的是 0~1 的置信度，存成 8bit 灰度。
+        // 忘了乘 255 的话整张蒙版会变成纯黑，而且是「跑完没报错、下游全静默失效」那种
+        const v = Math.round(Math.min(1, Math.max(0, rec.mask.data[i])) * 255);
         png.data[i * 4] = v;
         png.data[i * 4 + 1] = v;
         png.data[i * 4 + 2] = v;

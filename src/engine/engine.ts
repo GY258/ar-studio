@@ -10,7 +10,7 @@ import { ElementRenderer } from "./element-renderer";
 import { FaceTracker, MediaPipeLandmarkProvider, type FrameSource, type LandmarkProvider } from "./face-tracker";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
-import { EFFECT_SNIPPETS } from "./source-effects";
+import { EFFECT_COMBINE, EFFECT_SNIPPETS } from "./source-effects";
 import type { ControlValues, TemplateConfig, TemplateType } from "./types";
 
 export interface EngineStats {
@@ -308,6 +308,27 @@ export class ArEngine {
      * 有效果和没效果两条路的颜色就永远一致。
      */
     const mat = new THREE.MeshBasicMaterial({ map: this.sourceTex });
+
+    /*
+     * 必须给出 program 缓存 key，否则切模板时会拿到上一个效果的 shader。
+     *
+     * three 缓存编译好的 program，key 默认是 material.customProgramCacheKey()，
+     * 而它的默认实现是 onBeforeCompile.toString()。我们这个函数的**源码文本永远一样**
+     * —— 效果片段是 ${EFFECT_SNIPPETS[kind]} 在运行时插进模板字符串的，不出现在函数源码里。
+     * 于是 three 认为 pixelate 和 desaturate 是同一个 shader，直接复用先编译的那个。
+     *
+     * 表现极具迷惑性，而且方向取决于先开了哪个模板：
+     *   先 desaturate 后 pixelate → 跑 desaturate 的 shader，amount=0 → 画面完全不变，
+     *                                看着像「马赛克没开」
+     *   先 pixelate 后 desaturate → 跑 pixelate 的 shader，blocks=(0,0) → 1.0/0.0 → NaN uv
+     *                                → 整片背景变成一块死平色
+     * 两种都不报错。硬刷新之后「好了」，是因为刷新后第一个编译的恰好是它。
+     *
+     * 这个坑是加第二种 effect.kind 的那一刻才出现的 —— 在只有 pixelate 的年代，
+     * 所有模板本来就该共用同一个 program。
+     */
+    mat.customProgramCacheKey = () => `ar-source-effect:${effect.kind}`;
+
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.maskTex = { value: this.maskTex };
       // blocks 的定义是「短边分几格」，长边按比例给更多格，块才是正方形的。
@@ -316,6 +337,8 @@ export class ArEngine {
       shader.uniforms.blurStep = { value: this.blurStep(this.blurRadius) };
       shader.uniforms.amount = { value: effect.kind === "desaturate" ? effect.amount : 0 };
       shader.uniforms.applyOutside = { value: applyOutside ? 1.0 : 0.0 };
+      // 过渡带往哪边推。0.12 ≈ 把整条过渡带挪出人体轮廓，见下面的注释
+      shader.uniforms.maskBias = { value: applyOutside ? 0.12 : -0.12 };
 
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -325,7 +348,8 @@ export class ArEngine {
           uniform vec2 blocks;
           uniform vec2 blurStep;
           uniform float amount;
-          uniform float applyOutside;`,
+          uniform float applyOutside;
+          uniform float maskBias;`,
         )
         /*
          * 辅助函数挂在 <map_pars_fragment> 后面，不能挂在 <common> 后面：
@@ -343,6 +367,26 @@ export class ArEngine {
            * 而且**只在摄像头源上出现** —— 离线 harness 用的是图片源，走硬件解码，
            * 逐像素断言全都照过。所以这件事必须收口成一个函数，不能靠每处手抄。
            */
+          /*
+           * 采一次蒙版并做完阈值。收口成函数是因为马赛克要在块内多点采样，
+           * 每个采样点都得问一次「这里是不是人」—— 复制三遍那段翻转 + smoothstep
+           * 迟早会漏改一处，而漏改的表现是边界莫名其妙偏一点，最难查。
+           *
+           * 蒙版要上下翻一次再采：画面源是 image / video，three 给它 flipY = true，
+           * 上传时翻了一次；蒙版是 DataTexture，three 的默认是 flipY = false，没翻。
+           * 同一个 uv 在两张纹理上指的是上下相反的两行。
+           *
+           * 这和水平镜像是两回事：背景平面的 scale.x = -1 已经把画面和蒙版一起翻了，
+           * x 这一路**不要**再补，补了人偏左时清晰区会跑到右边去。
+           *
+           * 过渡带整体挪到吃效果的那一侧（maskBias），不能骑在边界上：
+           * 对称过渡意味着人的轮廓内侧混着背景的效果，blocks 大的时候
+           * 一整块糊斑贴在肩膀上。
+           */
+          float maskAt(vec2 uv) {
+            return smoothstep(0.42 - maskBias, 0.58 - maskBias, texture2D(maskTex, vec2(uv.x, 1.0 - uv.y)).r);
+          }
+
           vec4 srcTexel(vec2 uv) {
             vec4 c = texture2D( map, uv );
             #ifdef DECODE_VIDEO_TEXTURE
@@ -355,32 +399,14 @@ export class ArEngine {
           "#include <map_fragment>",
           `
           vec4 sharpTexel = srcTexel( vMapUv );
+          float m = maskAt( vMapUv );
+          // m 在效果片段之前算好：马赛克要按人/背景加权取样，得先知道蒙版
           ${EFFECT_SNIPPETS[effect.kind]}
-          // 蒙版和视频同在「视频空间」，用同一套 uv 取样。
-          // 这里**不要**再补一次镜像：背景平面的 scale.x = -1 已经把两者一起翻了，
-          // shader 里再翻蒙版就翻反了 —— 人在画面偏左时，清晰区会跑到右边去。
-          // OccupancyField.at() 里那个 u = 0.5 - wx/w 是「世界坐标 → 场」的映射，
-          // 和这里的「uv → 纹理」是两回事，别把两条规则混在一起。
-          /*
-           * 蒙版要上下翻一次再采。
-           *
-           * 画面源是 HTMLImageElement / video，three 给它 flipY = true，上传时翻了一次；
-           * 蒙版是 DataTexture，three 给 DataTexture 的默认是 flipY = false，没翻。
-           * 于是同一个 vMapUv 在两张纹理上指的是上下相反的两行 —— 人像蒙版整体倒过来。
-           *
-           * 为什么一直没人发现：lowres-life 的躯干是一整块平的深蓝，打没打码看不出来；
-           * 倒过来的躯干落在顶部的棋盘格上，「清晰 vs 马赛克」也很微妙。
-           * 换成 desaturate（「只有我是彩色的」）立刻就露馅了 —— 彩色的是头顶那片背景。
-           *
-           * 翻在 shader 里而不是给 DataTexture 设 flipY：WebGL 的 UNPACK_FLIP_Y_WEBGL
-           * 对 ArrayBufferView 上传的行为在各家实现上不一致，翻在这里是确定的。
-           *
-           * 注意这和水平镜像是两回事：背景平面的 scale.x = -1 已经把画面和蒙版一起翻了，
-           * x 这一路**不要**再补，补了人偏左时清晰区会跑到右边去。
-           */
-          float m = smoothstep(0.42, 0.58, texture2D(maskTex, vec2(vMapUv.x, 1.0 - vMapUv.y)).r);
-          // outside: 人保持原样、背景吃效果；inside: 反过来
-          diffuseColor *= applyOutside > 0.5 ? mix(effectTexel, sharpTexel, m) : mix(sharpTexel, effectTexel, m);
+          ${
+            EFFECT_COMBINE[effect.kind] ??
+            // outside: 人保持原样、背景吃效果；inside: 反过来
+            "diffuseColor *= applyOutside > 0.5 ? mix(effectTexel, sharpTexel, m) : mix(sharpTexel, effectTexel, m);"
+          }
           `,
         );
 
@@ -424,6 +450,42 @@ export class ArEngine {
    * 裸 shader 吃不到 three 的 DECODE_VIDEO_TEXTURE，摄像头源上颜色会整体偏亮，
    * 而离线 harness 用的是图片源，这个 bug 在测试里根本复现不出来。
    */
+  /**
+   * 蒙版这一路的实时状态。排查「效果没生效」时的第一手证据。
+   *
+   * 「整幅画面都没效果」和「效果作用错了地方」是两类完全不同的故障：
+   * 前者多半是 seen=false 走了 onLost 兜底（整张蒙版被填成「哪里都不作用」），
+   * 后者才是蒙版本身的问题。光看画面区分不了，看这几个数字一眼就知道。
+   */
+  debugMaskStats() {
+    const src = this.maskField.data;
+    let min = 255;
+    let max = 0;
+    let sum = 0;
+    if (src) {
+      for (let i = 0; i < src.length; i++) {
+        const v = src[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+        sum += v;
+      }
+    }
+    return {
+      seen: this.maskField.seen,
+      maskSize: `${this.maskField.width}x${this.maskField.height}`,
+      texSize: this.maskTex ? `${this.maskTex.image.width}x${this.maskTex.image.height}` : "无",
+      // 0~255。整张都是 255 且 seen=false 就是走了兜底，效果当然哪里都不作用
+      min,
+      max,
+      mean: src?.length ? +(sum / src.length).toFixed(1) : null,
+      onLost: this.onLost,
+      applyOutside: this.applyOutside,
+      blocks: this.bgUniforms?.blocks?.value ?? null,
+      effect: this.cfg?.source?.effect.kind ?? "无",
+      perception: this.perception.join(","),
+    };
+  }
+
   debugBgMaterialType(): string {
     return this.bgMat.type;
   }

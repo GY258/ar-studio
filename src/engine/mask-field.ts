@@ -10,7 +10,16 @@
  * 两个场各管各的，谁也不迁就谁。
  */
 
-/** 长边上限。960×540 → 512×288，每帧 15 万次运算，亚毫秒级。 */
+/**
+ * 长边上限。960×540 → 512×288，每帧 15 万次运算，亚毫秒级。
+ *
+ * 不往上提是权衡过的：1080p 输入下 512 长边意味着每格约 3.5 个屏幕像素，
+ * 配上面积平均降采样和纹理的线性放大，边缘本来就是 3~4px 的渐变 ——
+ * 和真实的头发边缘是一个量级。提到 1024 会让每帧的格子数翻四倍（约 4ms），
+ * 移动端吃不下，换来的锐度肉眼分不出来。
+ *
+ * 真正让边缘看着糙的是别的：以前是最近邻降采样 + 二值化 + 宽羽化，不是格子不够。
+ */
 const MAX_DIM = 512;
 
 /**
@@ -64,28 +73,50 @@ export class MaskField {
   }
 
   /**
-   * 吃一帧 categoryMask。
+   * 吃一帧置信度图（0~1）。
    *
-   * 背景值同样用四角采样定——不同 MediaPipe 版本里「人」编码成 0 还是非 0 不一致。
-   * 贴墙拍、四角也是人时这个假设会破，那时候把 bgVal 写死成实测值。
+   * **不做二值化。** 这是这个场和占据场最大的区别：模型给的连续值里
+   * 带着头发丝、耳廓、肩线的真实过渡，切成 0/1 就只剩一圈用盒式模糊硬凑出来的
+   * 均匀粗边 —— 头发糊成一顶头盔，那正是「抠得不准」最主要的观感来源。
+   *
+   * 原来这里还有一段四角采样定背景值的逻辑，那是 categoryMask 时代的产物
+   * （不同版本里「人」编码成 0 还是非 0 不一致）。置信度的语义是固定的，
+   * 1 = 人，不需要猜，顺带也就不怕「贴着墙拍、四角也是人」把假设打破。
    */
-  ingest(raw: Uint8Array, mw: number, mh: number) {
+  ingest(raw: Float32Array, mw: number, mh: number) {
     if (mw <= 0 || mh <= 0) return;
     this.resize(mw, mh);
     const { w, h, raw: cur, blurred, accum, out } = this;
     if (!cur || !blurred || !accum || !out) return;
 
-    const corners = [raw[0], raw[mw - 1], raw[(mh - 1) * mw], raw[mh * mw - 1]].sort((a, b) => a - b);
-    const bgVal = corners[1];
-
-    // 最近邻降采样成 0/1
+    /*
+     * 面积平均降采样，不是最近邻。
+     *
+     * 最近邻在 960→512 这种非整数倍缩放下，每个格子只取源图里的一个点，
+     * 边缘上取到哪个点纯看舍入 —— 于是边界逐格跳变，放大回全屏就是台阶。
+     * 面积平均则让「半个格子是人」自然落成 0.5，边缘的抗锯齿是算出来的而不是
+     * 事后用模糊糊出来的。代价只是把源图完整读一遍，和最近邻同量级。
+     */
     let occupied = 0;
     for (let y = 0; y < h; y++) {
-      const sy = ((y * mh) / h) | 0;
+      const sy0 = ((y * mh) / h) | 0;
+      const sy1 = Math.max(sy0 + 1, (((y + 1) * mh) / h) | 0);
       for (let x = 0; x < w; x++) {
-        const v = raw[sy * mw + (((x * mw) / w) | 0)] !== bgVal ? 1 : 0;
+        const sx0 = ((x * mw) / w) | 0;
+        const sx1 = Math.max(sx0 + 1, (((x + 1) * mw) / w) | 0);
+        let sum = 0;
+        let n = 0;
+        for (let sy = sy0; sy < sy1; sy++) {
+          const row = sy * mw;
+          for (let sx = sx0; sx < sx1; sx++) {
+            sum += raw[row + sx];
+            n++;
+          }
+        }
+        const v = sum / n;
         cur[y * w + x] = v;
-        occupied += v;
+        // 「见过人」按半数以上把握算，不把过渡带的半信半疑计进去
+        if (v > 0.5) occupied++;
       }
     }
     this.seen = occupied > w * h * 0.005;

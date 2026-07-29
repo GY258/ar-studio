@@ -32,8 +32,14 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/** 从灰度 PNG 取回 categoryMask。只用 R 通道，和 MediaPipe 的单通道输出对齐。 */
-async function loadMask(src: string): Promise<{ data: Uint8Array; w: number; h: number }> {
+/**
+ * 从灰度 PNG 取回置信度图。只用 R 通道，和 MediaPipe 的单通道输出对齐。
+ *
+ * 8bit 灰度 → 0~1 的 float。合成 fixture 是纯 0/255，换算过来就是 0/1，
+ * 和引擎改吃置信度之前逐位相同 —— 所以那条改动不动任何 golden。
+ * 真人 fixture 重录之后这里会自然带上软边，不用改代码。
+ */
+async function loadMask(src: string): Promise<{ data: Float32Array; w: number; h: number }> {
   const img = await loadImage(src);
   const c = document.createElement("canvas");
   c.width = img.naturalWidth;
@@ -41,8 +47,8 @@ async function loadMask(src: string): Promise<{ data: Uint8Array; w: number; h: 
   const ctx = c.getContext("2d", { willReadFrequently: true })!;
   ctx.drawImage(img, 0, 0);
   const px = ctx.getImageData(0, 0, c.width, c.height).data;
-  const data = new Uint8Array(c.width * c.height);
-  for (let i = 0; i < data.length; i++) data[i] = px[i * 4];
+  const data = new Float32Array(c.width * c.height);
+  for (let i = 0; i < data.length; i++) data[i] = px[i * 4] / 255;
   return { data, w: c.width, h: c.height };
 }
 
