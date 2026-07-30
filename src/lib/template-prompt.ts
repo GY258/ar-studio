@@ -67,6 +67,13 @@ type ElementAsset =
   | { kind: "gradient";   shape: "ellipse"; color: string; opacity?: number }
   | { kind: "trail";      color: string; seconds: number;   // 锚点走过的路，画成一条带
       leaf?: { key: string; spacing: number; scale: number; seed: number } }
+  | { kind: "stem";       color: string;                    // 从画面底边长到指尖的一根茎
+      finger: "thumb" | "index" | "middle" | "ring" | "pinky";  // 哪根手指的弯曲度驱动它
+      bow?: number;                                         // 弯曲程度，占画面宽度；0 = 笔直
+      segments?: number;                                    // 采样点数，默认 24
+      leaf?: { key: string; spacing: number; scale: number; seed: number };
+      flower?: { key: string; scale: number };              // 长在茎顶端，跟着生长的那头走
+      seed: number }                                        // 必填：定弯的方向和叶子的左右
   | { kind: "pinch-bloom"; key: string; seconds: number; grow: number }  // 捏合时开一朵
 
 type ElementAnchor =
@@ -102,17 +109,52 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 
 贴在脸上的半透明东西默认就该考虑 \`multiply\` 或 \`screen\`，别一律用 normal。
 
-### trail —— 锚点走过的路
+### trail vs stem —— 先分清要哪个
+
+两个都画成一条带，但**驱动它的东西完全不同**，选错了做出来不是那个效果：
+
+| | trail | stem |
+|---|---|---|
+| 画的是 | 锚点走过的路 | 画面底边到指尖的一条曲线 |
+| 长度由什么定 | 过去 \`seconds\` 秒走了多远 | **这根手指弯了多少** |
+| 用户要做什么 | 挥动，停下就开始淡出 | 弯一下手指，弯多少长多少 |
+| 状态 | 跨帧历史，离线渲染必须走 \`stepTo\` | 当前帧的纯函数，跳到任意 t 都对 |
+
+「弯一下手指从底部长一根花出来」是 **stem**。用 trail 做的话得一直挥手，
+手一停花就开始消失 —— 完全是另一个交互。
+
+### stem —— 弯手指长出来
 
 \`\`\`jsonc
 { "id": "stem-l-index",
+  "asset": { "kind": "stem", "color": "#4FAE52", "finger": "index",
+             "bow": 0.05, "segments": 26, "seed": 107,
+             "leaf":   { "key": "emoji-leaf", "spacing": 0.85, "scale": 0.3, "seed": 11 },
+             "flower": { "key": "emoji-sunflower", "scale": 0.62 } },
+  "anchor": { "space": "hand", "hand": "left", "landmark": "index_tip" },
+  "size": { "ref": "palm_width", "scale": 0.055 } }   // scale 是茎的宽度
+\`\`\`
+
+- \`finger\` 必填，是**驱动**这根茎的手指。一般和 anchor 的指尖对应，
+  但不强制 —— 不写茎永远不会长，所以校验器会拦
+- 必须锚在 \`space: "hand"\`。别的空间没有手指
+- 伸直时读到的弯曲度在 0.06 以下整根不画，免得指尖下面挂一小截毛刺
+- \`flower\` 长在**生长的那一头**，茎没长出来时它也不显示 ——
+  所以不用再单独写一个指尖贴纸元素，写了反而会在茎没长时孤零零挂着
+- \`bow\` 给一点弯是必要的：十根笔直的竖线读起来像条形码，不像植物。
+  方向由 \`seed\` 定，不由左右手定 —— 按左右手分会镜像般一起倒，像装饰边框
+
+### trail —— 锚点走过的路
+
+\`\`\`jsonc
+{ "id": "sparkle-tail",
   "asset": { "kind": "trail", "color": "#FFD54F", "seconds": 2.6,
              "leaf": { "key": "emoji-leaf", "spacing": 0.75, "scale": 0.24, "seed": 11 } },
   "anchor": { "space": "hand", "hand": "left", "landmark": "index_tip" },
   "size": { "ref": "palm_width", "scale": 0.035 } }   // scale 是带的宽度
 \`\`\`
 
-**这是唯一一个几何形状依赖时间历史的 asset。** 别的都是「当前帧」的纯函数，
+**几何形状依赖时间历史。** 别的 asset 都是「当前帧」的纯函数，
 它是「这一段时间里锚点去过哪」。所以：
 
 - 必须锚在**会动**的东西上（\`space\` 是 \`hand\` 或 \`face\`）。锚在 screen 上是

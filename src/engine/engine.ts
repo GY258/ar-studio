@@ -879,9 +879,36 @@ export class ArEngine {
    * 倒着走没有意义。TrailBuffer 里也有一层同样的保护。
    */
   stepTo(t: number, step = SIM_STEP) {
-    if (t < this.simT) this.resetSim();
-    // 首次调用时不从 0 补一整段：那会让「渲染 t=10s」变成 600 步的空转
-    let tt = this.simT < 0 ? t : this.simT;
+    /*
+     * 倒流之后必须**从 0 重积**，不能只把状态清掉。
+     *
+     * 这里踩过一次：resetSim() 把 simT 设成 -1，而 -1 又被下面「首次调用不补一整段」
+     * 那条优化当成了首次调用 —— 于是倒流回 t 只喂了一个采样点，轨迹是空的。
+     * 表现出来是「同一个 t，先渲染过更晚的时刻再回来，画面不一样」，
+     * 而这正好否定了整套离线验证的前提。加轨迹探针模板时才暴露出来：
+     * 它的 golden 在 t=2.0 录不出来，因为录 golden 的那次调用恰好走在倒流路径上。
+     *
+     * 用局部变量而不是让 resetSim 把 simT 设成 0：simT = 0 会让「首次调用」
+     * 和「倒流到 0」两种状态又混在一起，是同一个 bug 换个地方长出来。
+     */
+    let tt: number;
+    if (t < this.simT) {
+      this.resetSim();
+      /*
+       * 显式在 t=0 推进一次，然后再让循环从 0 走。
+       *
+       * 少了这一下的话第一个采样点落在 1/60 而不是 0 —— 因为循环是
+       * `while (tt + step < t) { tt += step; ... }`，它永远不会在起点上推进。
+       * 而顺着走的路径在装载模板时已经渲染过 t=0，起点是有采样的。
+       * 差一个采样点的表现极其轻微（实测 200 万个通道里差 166 个、最大差值 2），
+       * 靠肉眼和带容差的差异比对都发现不了，只有逐位比对才抓得到。
+       */
+      this.advance(0);
+      tt = 0;
+    } else {
+      // 首次调用时不从 0 补一整段：那会让「渲染 t=10s」变成 600 步的空转
+      tt = this.simT < 0 ? t : this.simT;
+    }
     /*
      * 循环停在 t **之前**，最后无条件在 t 上推进一次。
      *
@@ -897,6 +924,14 @@ export class ArEngine {
     }
     this.advance(t);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * 只给离线 harness 的 renderDirect 用：清干净状态，好让「直接跳到 t」
+   * 从一个确定的起点出发。生产代码不该调它 —— 切模板和时间倒流已经自动清了。
+   */
+  resetSimForTest() {
+    this.resetSim();
   }
 
   /** 清掉所有跨帧状态。切模板和时间倒流时都要调。 */

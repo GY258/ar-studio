@@ -1,0 +1,111 @@
+{
+  "slug": "hand-trail",
+  "name": {
+    "zh": "轨迹探针",
+    "en": "Trail Probe"
+  },
+  "category": "debug",
+  "sort_order": 998,
+  "price_cents": 0,
+  "hidden": true,
+  "schema_version": 2,
+  "template_type": "overlay",
+  "perception": [
+    "hands"
+  ],
+  "preview": {},
+  "elements": [
+    {
+      "id": "trail-l-wrist",
+      "asset": {
+        "kind": "trail",
+        "color": "#7FD1FF",
+        "seconds": 2.4,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.8,
+          "scale": 0.34,
+          "seed": 41
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "wrist"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.11
+      }
+    },
+    {
+      "id": "trail-l-middle_mcp",
+      "asset": {
+        "kind": "trail",
+        "color": "#7FD1FF",
+        "seconds": 2.4,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.8,
+          "scale": 0.34,
+          "seed": 77
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "middle_mcp"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.11
+      }
+    },
+    {
+      "id": "trail-r-wrist",
+      "asset": {
+        "kind": "trail",
+        "color": "#FFB3E6",
+        "seconds": 2.4,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.8,
+          "scale": 0.34,
+          "seed": 41
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "wrist"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.11
+      }
+    },
+    {
+      "id": "trail-r-middle_mcp",
+      "asset": {
+        "kind": "trail",
+        "color": "#FFB3E6",
+        "seconds": 2.4,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.8,
+          "scale": 0.34,
+          "seed": 77
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "middle_mcp"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.11
+      }
+    }
+  ]
+}

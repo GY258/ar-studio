@@ -168,7 +168,8 @@ const ANIM_PRESETS = ["float", "fall", "pulse", "spin", "emit-fall-fade"];
 const EASES = ["linear", "in", "out", "inout", "gravity", "bounce"];
 /** 只有「0→1 走一趟」的原语能缓动。周期性原语套 ease 会在接缝处顿一下，见 animations.ts */
 const EASE_PRESETS = ["fall", "emit-fall-fade"];
-const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "pinch-bloom"];
+const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "stem", "pinch-bloom"];
+const FINGER_NAMES = ["thumb", "index", "middle", "ring", "pinky"];
 const HAND_ANCHOR_NAMES = Object.keys(HAND_ANCHORS);
 const SIZE_REFS = ["vw", "iod", "eye_width", "face_width", "palm_width"];
 const SIZE_FITS = ["width", "font"];
@@ -244,6 +245,28 @@ function validateAnimations(anims: unknown[], at: string, p: string[]) {
   }
 }
 
+/** 沿途叶子。trail 和 stem 共用同一份 schema，别写两遍 */
+function validateLeaf(leaf: unknown, at: string, p: string[]) {
+  if (leaf === undefined) return;
+  const lf = leaf as Raw;
+  if (typeof lf !== "object" || lf === null) {
+    p.push(`${at}.asset.leaf 形如 { "key": "emoji-leaf", "spacing": 0.9, "scale": 0.34, "seed": 11 }`);
+    return;
+  }
+  const keys = svgKeys();
+  if (typeof lf.key !== "string" || (keys.length && !keys.includes(lf.key))) {
+    p.push(`${at}.asset.leaf.key "${lf.key}" 不在素材库里。相近的有：${nearest(String(lf.key), keys).join(", ")}`);
+  }
+  if (!inRange(lf.spacing, 0.05, 5)) p.push(`${at}.asset.leaf.spacing 应在 [0.05, 5]（相邻两片的间距，单位 size.ref）`);
+  if (!inRange(lf.scale, 0.02, 3)) p.push(`${at}.asset.leaf.scale 应在 [0.02, 3]`);
+  if (!num(lf.seed)) {
+    p.push(
+      `${at}.asset.leaf.seed 必填。叶子的位置和大小是 hash(第几片, seed) 的纯函数，` +
+        `没有 seed 每次长的地方都不一样，golden 对比就不成立`,
+    );
+  }
+}
+
 function validateAsset(a: unknown, at: string, p: string[]) {
   const asset = a as Raw | undefined;
   if (!asset || typeof asset !== "object") {
@@ -270,23 +293,37 @@ function validateAsset(a: unknown, at: string, p: string[]) {
     if (!inRange(asset.seconds, 0.2, 8)) {
       p.push(`${at}.asset.seconds 应在 [0.2, 8]（保留多久的历史，也就是这条带有多长）`);
     }
-    if (asset.leaf !== undefined) {
-      const lf = asset.leaf as Raw;
-      if (typeof lf !== "object" || lf === null) {
-        p.push(`${at}.asset.leaf 形如 { "key": "emoji-leaf", "spacing": 0.9, "scale": 0.34, "seed": 11 }`);
+    validateLeaf(asset.leaf, at, p);
+  }
+
+  if (kind === "stem") {
+    if (typeof asset.color !== "string") p.push(`${at}.asset.color 必填，茎的颜色`);
+    if (typeof asset.finger !== "string" || !FINGER_NAMES.includes(asset.finger)) {
+      p.push(
+        `${at}.asset.finger 必填，是驱动这根茎的手指。可选：${FINGER_NAMES.join(" / ")}。` +
+          `不写的话茎永远不会长 —— 长度完全由这根手指的弯曲度决定`,
+      );
+    }
+    if (asset.bow !== undefined && !inRange(asset.bow, 0, 0.4)) {
+      p.push(`${at}.asset.bow 应在 [0, 0.4]（弯曲程度，占画面宽度的比例；0 = 笔直的竖线）`);
+    }
+    if (asset.segments !== undefined && !inRange(asset.segments, 4, 64)) {
+      p.push(`${at}.asset.segments 应在 [4, 64]`);
+    }
+    if (!num(asset.seed)) {
+      p.push(`${at}.asset.seed 必填。它定弯的方向和叶子的左右，没它同一个模板每次加载都不一样`);
+    }
+    validateLeaf(asset.leaf, at, p);
+    if (asset.flower !== undefined) {
+      const fl = asset.flower as Raw;
+      if (typeof fl !== "object" || fl === null) {
+        p.push(`${at}.asset.flower 形如 { "key": "emoji-sunflower", "scale": 0.55 }`);
       } else {
         const keys = svgKeys();
-        if (typeof lf.key !== "string" || (keys.length && !keys.includes(lf.key))) {
-          p.push(`${at}.asset.leaf.key "${lf.key}" 不在素材库里。相近的有：${nearest(String(lf.key), keys).join(", ")}`);
+        if (typeof fl.key !== "string" || (keys.length && !keys.includes(fl.key))) {
+          p.push(`${at}.asset.flower.key "${fl.key}" 不在素材库里。相近的有：${nearest(String(fl.key), keys).join(", ")}`);
         }
-        if (!inRange(lf.spacing, 0.05, 5)) p.push(`${at}.asset.leaf.spacing 应在 [0.05, 5]（相邻两片的间距，单位 size.ref）`);
-        if (!inRange(lf.scale, 0.02, 3)) p.push(`${at}.asset.leaf.scale 应在 [0.02, 3]`);
-        if (!num(lf.seed)) {
-          p.push(
-            `${at}.asset.leaf.seed 必填。叶子的位置和大小是 hash(第几片, seed) 的纯函数，` +
-              `没有 seed 每次长的地方都不一样，golden 对比就不成立`,
-          );
-        }
+        if (!inRange(fl.scale, 0.02, 3)) p.push(`${at}.asset.flower.scale 应在 [0.02, 3]`);
       }
     }
   }
@@ -433,6 +470,12 @@ function validateElement(e: Raw, at: string, p: string[], ids: Set<string>) {
     p.push(
       `${at} 的 asset 是 pinch-bloom 但锚不在 hand 空间 —— 捏合是手的动作，` +
         `要靠拇指尖和食指尖的距离判定，别的空间没有这两个点`,
+    );
+  }
+  if (assetKind === "stem" && space !== "hand") {
+    p.push(
+      `${at} 的 asset 是 stem 但锚不在 hand 空间 —— 茎的长度由手指弯曲度决定，` +
+        `别的空间没有手指。要「从底边长到某个点」而不看手，用 trail 或者普通贴纸`,
     );
   }
   if (assetKind === "trail" && space === "screen") {

@@ -127,6 +127,19 @@ class Harness {
     this.engine.stepTo(t);
   }
 
+  /**
+   * 直接渲染 t 时刻，**不**按定步长积过去。
+   *
+   * 只给「证明某个机制是纯函数」用：茎的长度由当前帧的手指弯曲度决定，
+   * 所以直接跳到 t 必须和一步步积到 t 得到同一张图。轨迹、捏合那种有历史的
+   * 走这条会得到残缺的结果 —— 那正是这个方法想区分开的东西。
+   */
+  renderDirect(t: number) {
+    if (!this.engine) throw new Error("先调 setup()");
+    this.engine.resetSimForTest();
+    this.engine.renderAt(t);
+  }
+
   /** 背景材质类型名，测试用来钉住「帧效果不能用裸 ShaderMaterial」这个决定。 */
   bgMaterialType(): string {
     if (!this.engine) throw new Error("先调 setup()");

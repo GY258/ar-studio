@@ -33,11 +33,105 @@ const DROP = 0.55;
  * 但幅度大了茎会卷成钩子，看不出「茎」这个意思。0.014 是两者之间。
  */
 const SWAY = 0.014;
-/** 捏合发生在序列的这几段（占全程比例）。两段是为了验边沿触发而不是状态触发 */
+/**
+ * 捏合发生在序列的这几段（占全程比例）。两段是为了验边沿触发而不是状态触发。
+ *
+ * **必须和 CURL_WINDOW 错开。** 手指弯起来的时候拇指尖和食指尖天然就靠近了，
+ * 捏合判定看的正是「两指距离 / 掌宽」—— 两件事重叠的话弯手指会误触发捏合，
+ * 捏合的边沿测试就变成在测弯曲了。
+ */
 const PINCH_WINDOWS: [number, number][] = [
-  [0.3, 0.4],
-  [0.66, 0.74],
+  [0.12, 0.2],
+  [0.8, 0.88],
 ];
+
+/**
+ * 手指弯曲扫动的窗口。窗口内 0 → 1 → 0 走一趟（正弦），窗口外保持伸直。
+ *
+ * 为什么必须有：茎的长度**完全**由弯曲度决定，而 fixture 那张照片是伸开的手
+ * （用引擎自己的公式量出来是 0.00~0.01）。不合成弯曲的话，
+ * 离线和冒烟都会「全绿但一根茎都没画出来」—— 这种绿着的盲区比红着更危险。
+ *
+ * 落在两段捏合中间，见 PINCH_WINDOWS 的注释。
+ */
+const CURL_WINDOW: [number, number] = [0.32, 0.72];
+/** 每根手指的弯曲错开多少（占全程比例）。错开才能验「每根茎只吃自己那根手指」 */
+const CURL_STAGGER = 0.015;
+
+/** 每根手指的关节链和「完全握起」的弦长/展开长比值。必须和 hand-tracker.ts 里一致 */
+const FINGER_CHAINS: { name: string; joints: number[]; full: number }[] = [
+  { name: "thumb", joints: [2, 3, 4], full: 0.72 },
+  { name: "index", joints: [5, 6, 7, 8], full: 0.5 },
+  { name: "middle", joints: [9, 10, 11, 12], full: 0.5 },
+  { name: "ring", joints: [13, 14, 15, 16], full: 0.5 },
+  { name: "pinky", joints: [17, 18, 19, 20], full: 0.5 },
+];
+
+/** 绕 (ox, oy) 转 a 弧度 */
+function rot(q: Pt, ox: number, oy: number, a: number): Pt {
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  const dx = q.x - ox;
+  const dy = q.y - oy;
+  return { x: ox + dx * c - dy * s, y: oy + dx * s + dy * c, z: q.z };
+}
+
+/**
+ * 正向运动学地弯一根手指：从指根开始，每一节连着它后面所有的点一起转 a。
+ *
+ * 方向取「让指尖离手腕更近」的那一边 —— 我的弯曲度公式对旋转方向不敏感
+ * （弦长跟符号无关），但反着弯出来的手看着像断了，fixture 还是要像真的。
+ */
+function bendFinger(pts: Pt[], joints: number[], a: number, wrist: Pt) {
+  const tryBend = (sign: number) => {
+    const out = pts.map((q) => ({ ...q }));
+    for (let k = 0; k < joints.length - 1; k++) {
+      const o = out[joints[k]];
+      for (let m = k + 1; m < joints.length; m++) out[joints[m]] = rot(out[joints[m]], o.x, o.y, sign * a);
+    }
+    return out;
+  };
+  const plus = tryBend(1);
+  const minus = tryBend(-1);
+  const tip = joints[joints.length - 1];
+  const d = (arr: Pt[]) => Math.hypot(arr[tip].x - wrist.x, arr[tip].y - wrist.y);
+  return d(plus) <= d(minus) ? plus : minus;
+}
+
+/** 一根手指当前的弦长/展开长比值 */
+function ratioOf(pts: Pt[], joints: number[]) {
+  let ext = 0;
+  for (let k = 1; k < joints.length; k++) {
+    ext += Math.hypot(pts[joints[k]].x - pts[joints[k - 1]].x, pts[joints[k]].y - pts[joints[k - 1]].y);
+  }
+  if (ext < 1e-9) return 1;
+  const a = pts[joints[0]];
+  const b = pts[joints[joints.length - 1]];
+  return Math.hypot(b.x - a.x, b.y - a.y) / ext;
+}
+
+/**
+ * 弯到「引擎量出来正好是 target」为止，二分找角度。
+ *
+ * 不直接写死一个角度，是因为那样得靠猜 —— 而这里可以直接用引擎的同一个公式
+ * 反解。这样 fixture 就**保证**真的扫过 0→1 整个区间，而不是「大概弯了不少」。
+ */
+function bendToCurl(pts: Pt[], chain: { joints: number[]; full: number }, target: number, wrist: Pt): Pt[] {
+  if (target <= 1e-3) return pts;
+  const wantRatio = 1 - target * (1 - chain.full);
+  let lo = 0;
+  let hi = 2.6;
+  let best = pts;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    const cand = bendFinger(pts, chain.joints, mid, wrist);
+    const r = ratioOf(cand, chain.joints);
+    best = cand;
+    if (r > wantRatio) lo = mid;
+    else hi = mid;
+  }
+  return best;
+}
 
 type Pt = { x: number; y: number; z: number };
 type Hand = { hand: "left" | "right"; points: Pt[] };
@@ -65,11 +159,21 @@ function main() {
     const inPinch = PINCH_WINDOWS.some(([a, b]) => p >= a && p <= b);
     frames.push(
       base.map((h) => {
-        const pts = h.points.map((q) => ({
-          x: +(q.x + dx).toFixed(4),
-          y: +(q.y + dy).toFixed(4),
+        let pts: Pt[] = h.points.map((q) => ({
+          x: q.x + dx,
+          y: q.y + dy,
           z: q.z,
         }));
+
+        // 弯手指。每根错开一点，这样同一帧里五根的弯曲度都不同
+        const wrist = pts[0];
+        for (let fi = 0; fi < FINGER_CHAINS.length; fi++) {
+          const [w0, w1] = CURL_WINDOW;
+          const u = (p - w0 - fi * CURL_STAGGER) / (w1 - w0);
+          const target = u <= 0 || u >= 1 ? 0 : Math.sin(Math.PI * u);
+          pts = bendToCurl(pts, FINGER_CHAINS[fi], target, wrist);
+        }
+        pts = pts.map((q) => ({ x: +q.x.toFixed(4), y: +q.y.toFixed(4), z: q.z }));
         if (inPinch) {
           const [ti, ii] = [4, 8]; // thumb_tip / index_tip
           const cx = (pts[ti].x + pts[ii].x) / 2;
@@ -87,9 +191,25 @@ function main() {
   const kb = (fs.statSync(FILE).size / 1024) | 0;
   console.log(`${path.relative(process.cwd(), FILE)}  ${total} 帧 @ ${FPS}fps（${SECONDS}s），${kb}KB`);
   console.log(
-    `运动是合成的（下落 ${DROP} + 横向飘 ${SWAY} + ${PINCH_WINDOWS.length} 段捏合），` +
-      `几何是真模型录的。理由见脚本头部注释。`,
+    `运动是合成的（下落 ${DROP} + 横向飘 ${SWAY} + ${PINCH_WINDOWS.length} 段捏合 + ` +
+      `弯曲扫动 ${CURL_WINDOW[0]}~${CURL_WINDOW[1]}），几何是真模型录的。理由见脚本头部注释。`,
   );
+
+  // 把实际扫到的弯曲区间打出来。合成完不验一遍的话，「弯了但没弯够」
+  // 会表现成「茎只长了一小截」，而那看起来跟参数没调好一模一样
+  const span: Record<string, [number, number]> = {};
+  for (const ch of FINGER_CHAINS) {
+    let lo = 1;
+    let hi = 0;
+    for (const fr of frames) {
+      const r = ratioOf(fr[0].points, ch.joints);
+      const c = Math.max(0, Math.min(1, (1 - r) / (1 - ch.full)));
+      lo = Math.min(lo, c);
+      hi = Math.max(hi, c);
+    }
+    span[ch.name] = [+lo.toFixed(2), +hi.toFixed(2)];
+  }
+  console.log("实际弯曲区间:", JSON.stringify(span));
 }
 
 main();

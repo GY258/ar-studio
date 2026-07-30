@@ -115,6 +115,62 @@ const PINKY_MCP = HAND_ANCHORS.pinky_mcp;
 const WRIST = HAND_ANCHORS.wrist;
 const MIDDLE_MCP = HAND_ANCHORS.middle_mcp;
 
+export type FingerName = "thumb" | "index" | "middle" | "ring" | "pinky";
+
+/**
+ * 每根手指的关节链（从指根到指尖）和它「完全握起」时的弦长/展开长比值。
+ *
+ * `full` 是把原始比值拉到 0~1 的下界。四指是三节指节，握拳时指尖回到指根附近、
+ * 弦长约等于一节，比值落在 0.3~0.5，取上界 0.5 让「弯到一半」就读到接近 1 ——
+ * 取太小（比如 0.2）得把手攥到发白才长满，交互上很难受。
+ *
+ * ⚠️ 拇指只有两节而且解剖上弯不了那么多，所以单独给 0.72。**这个数是估的**，
+ * 手上只有一张伸开的手的 fixture，没有握起的。四指的 0.5 也同理。
+ * 真机上如果拇指那根茎长不满或者一碰就满，先调这两个数。
+ */
+const FINGER_CHAINS: Record<FingerName, { joints: readonly number[]; full: number }> = {
+  thumb: { joints: [HAND_ANCHORS.thumb_mcp, HAND_ANCHORS.thumb_ip, HAND_ANCHORS.thumb_tip], full: 0.72 },
+  index: {
+    joints: [HAND_ANCHORS.index_mcp, HAND_ANCHORS.index_pip, HAND_ANCHORS.index_dip, HAND_ANCHORS.index_tip],
+    full: 0.5,
+  },
+  middle: {
+    joints: [HAND_ANCHORS.middle_mcp, HAND_ANCHORS.middle_pip, HAND_ANCHORS.middle_dip, HAND_ANCHORS.middle_tip],
+    full: 0.5,
+  },
+  ring: {
+    joints: [HAND_ANCHORS.ring_mcp, HAND_ANCHORS.ring_pip, HAND_ANCHORS.ring_dip, HAND_ANCHORS.ring_tip],
+    full: 0.5,
+  },
+  pinky: {
+    joints: [HAND_ANCHORS.pinky_mcp, HAND_ANCHORS.pinky_pip, HAND_ANCHORS.pinky_dip, HAND_ANCHORS.pinky_tip],
+    full: 0.5,
+  },
+};
+
+/**
+ * 弯曲度：弦长 / 展开长，归一化到 0~1。
+ *
+ * 是**当前帧的纯函数**，不看历史。这一点是故意的：茎的长度直接由它决定，
+ * 所以「弯多少长多少」，`renderAt(t)` 仍然是无历史的纯函数，golden 回归照旧成立。
+ */
+function fingerCurl(px: (i: number) => { x: number; y: number }): Record<FingerName, number> {
+  const out = {} as Record<FingerName, number>;
+  for (const name of Object.keys(FINGER_CHAINS) as FingerName[]) {
+    const { joints, full } = FINGER_CHAINS[name];
+    const j = joints.map(px);
+    let extended = 0;
+    for (let i = 1; i < j.length; i++) extended += Math.hypot(j[i].x - j[i - 1].x, j[i].y - j[i - 1].y);
+    if (extended < 1e-4) {
+      out[name] = 0;
+      continue;
+    }
+    const chord = Math.hypot(j[j.length - 1].x - j[0].x, j[j.length - 1].y - j[0].y);
+    out[name] = Math.max(0, Math.min(1, (1 - chord / extended) / (1 - full)));
+  }
+  return out;
+}
+
 export interface HandFrame {
   hand: Handedness;
   points: Landmark[];
@@ -122,6 +178,18 @@ export interface HandFrame {
   palmWidth: number;
   /** 手腕到中指根的方向角，弧度。手转的时候贴纸要不要跟着转由模板决定 */
   roll: number;
+  /**
+   * 每根手指的弯曲度，0 = 完全伸直，1 = 完全握起。键是手指名（`index` 等）。
+   *
+   * 算法是「弦长 / 展开长」：指根到指尖的直线距离，除以三段指节长度之和。
+   * 伸直时两者相等（比值 1），握起时弦长塌到很短。**除以自己的展开长**
+   * 而不是掌宽，所以它对手的远近、大小、朝向都免疫 —— 不需要任何标定。
+   *
+   * 已知的局限：这是二维投影算的，手指**正对镜头**指过来时弦长也会变短，
+   * 会读成假的弯曲。用 MediaPipe 的 z 能修，但那个值抖得厉害，
+   * 换来的是茎在原地一跳一跳。宁可要「指着镜头时偶尔误触发」这个更温和的错。
+   */
+  curl: Record<FingerName, number>;
 }
 
 export class HandTracker {
@@ -171,6 +239,7 @@ export class HandTracker {
         points: h.points,
         palmWidth: Math.hypot(pm.x - im.x, pm.y - im.y),
         roll: Math.atan2(mm.y - wr.y, mm.x - wr.x),
+        curl: fingerCurl(px),
       };
     });
   }

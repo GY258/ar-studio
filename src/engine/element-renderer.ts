@@ -33,15 +33,23 @@ interface BloomParts {
   sprites: THREE.Mesh[];
 }
 
-/** 轨迹元素额外带的东西：历史缓冲、带的几何、沿途叶子的网格池 */
-interface TrailParts {
-  buffer: TrailBuffer;
+/**
+ * 一条带 + 沿途叶子。轨迹（trail）和茎（stem）共用。
+ *
+ * 两者的差别只在**点从哪来**：轨迹从历史缓冲里来，茎从「底边到指尖的曲线」算出来。
+ * 建带、写顶点、摆叶子这三件事完全一样，所以共用一套结构，别复制两份。
+ */
+interface RibbonParts {
+  /** 只有轨迹有。茎是当前帧的纯函数，不需要历史 */
+  buffer?: TrailBuffer;
   ribbon: THREE.Mesh;
   ribbonGeo: THREE.BufferGeometry;
-  /** 顶点缓冲。容量按 seconds × TRAIL_RATE 预留，运行时不再分配 */
+  /** 顶点缓冲。容量在建的时候定死，运行时不再分配 */
   positions: Float32Array;
   alphas: Float32Array;
   leaves: THREE.Mesh[];
+  /** 只有茎有：长在生长那一头的花 */
+  flower?: THREE.Mesh;
 }
 
 interface Item {
@@ -67,7 +75,7 @@ interface Item {
    * 这个 bug 我犯过一次：从「指尖开花」切到别的模板，叶子还挂在脸上。
    */
   owned: THREE.Object3D[];
-  trail?: TrailParts;
+  trail?: RibbonParts;
   bloom?: BloomParts;
 }
 
@@ -114,8 +122,9 @@ export class ElementRenderer {
     for (const elem of elements) {
       if (gen !== this.generation) return; // 已切模板，放弃这批
 
-      if (elem.asset.kind === "trail") {
-        const parts = await this.buildTrail(elem, elem.asset);
+      if (elem.asset.kind === "trail" || elem.asset.kind === "stem") {
+        const parts =
+          elem.asset.kind === "trail" ? await this.buildTrail(elem, elem.asset) : await this.buildStem(elem.asset);
         if (gen !== this.generation) return;
         if (parts) {
           this.items.push({
@@ -128,7 +137,7 @@ export class ElementRenderer {
             userScale: 1,
             lastW: 0,
             lastH: 0,
-            owned: [parts.ribbon, ...parts.leaves],
+            owned: [parts.ribbon, ...parts.leaves, ...(parts.flower ? [parts.flower] : [])],
             trail: parts,
           });
         }
@@ -208,9 +217,53 @@ export class ElementRenderer {
   private async buildTrail(
     elem: ElementV2,
     asset: Extract<ElementAsset, { kind: "trail" }>,
-  ): Promise<TrailParts | null> {
+  ): Promise<RibbonParts | null> {
     const maxPts = Math.max(2, Math.ceil(asset.seconds * TRAIL_RATE) + 2);
-    // 每个采样点两个顶点（带的两侧），三角带用索引连
+    const parts = this.buildRibbonMesh(maxPts, asset.color);
+    // 叶子池容量按「带最长时能放几片」算，够不到的隐藏
+    parts.leaves = asset.leaf ? await this.buildLeafPool(asset.leaf.key, Math.max(1, Math.ceil(asset.seconds * 4))) : [];
+    parts.buffer = new TrailBuffer(asset.seconds);
+    void elem;
+    return parts;
+  }
+
+  /**
+   * 茎：一条带 + 一池叶子 + 顶端一朵花。
+   *
+   * 顶点数是固定的（segments），因为茎的点不是采样出来的历史，而是每帧从
+   * 「底边 → 指尖」这条曲线上重新算的。长度变化靠改 drawRange，不改顶点数。
+   */
+  private async buildStem(asset: Extract<ElementAsset, { kind: "stem" }>): Promise<RibbonParts | null> {
+    const segs = Math.max(4, Math.min(64, asset.segments ?? 24));
+    const parts = this.buildRibbonMesh(segs, asset.color);
+
+    if (asset.leaf) {
+      /*
+       * 池子按「茎最长时能放几片」算，而不是按 segments。
+       *
+       * 茎满长时的弧长最多约一个画面高度，而 spacing 的单位是 size.ref（掌宽）。
+       * 画面高 / 掌宽 在正常取景下大约 3~4，所以 ceil(4 / spacing) 是上界，
+       * 再加 2 片余量。算多了只是几个隐藏的 mesh，算少了叶子会在中途断掉。
+       */
+      const count = Math.max(1, Math.min(40, Math.ceil(4 / Math.max(0.05, asset.leaf.spacing)) + 2));
+      parts.leaves = await this.buildLeafPool(asset.leaf.key, count);
+    } else {
+      parts.leaves = [];
+    }
+
+    if (asset.flower) {
+      const [flower] = await this.buildLeafPool(asset.flower.key, 1);
+      if (flower) {
+        flower.renderOrder = 5; // 花压在茎和叶子之上
+        parts.flower = flower;
+      }
+    }
+    return parts;
+  }
+
+  /** 带的几何 + 材质。顶点缓冲在这里一次分配满，运行时只改内容。 */
+  private buildRibbonMesh(maxPts: number, colorHex: string): RibbonParts {
+    // 每个点两个顶点（带的两侧），三角带用索引连
     const positions = new Float32Array(maxPts * 2 * 3);
     const alphas = new Float32Array(maxPts * 2);
     const index: number[] = [];
@@ -224,7 +277,7 @@ export class ElementRenderer {
     geo.setAttribute("aAlpha", new THREE.BufferAttribute(alphas, 1));
     geo.setIndex(index);
 
-    const color = new THREE.Color(asset.color);
+    const color = new THREE.Color(colorHex);
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -251,30 +304,34 @@ export class ElementRenderer {
     ribbon.renderOrder = 4; // 压在背景之上、贴纸之下：茎要被指尖的花盖住
     this.group.add(ribbon);
 
-    // 叶子池。容量按「带最长时能放几片」算，够不到的隐藏
-    const leaves: THREE.Mesh[] = [];
-    if (asset.leaf) {
-      const svg = getSvg(asset.leaf.key);
-      if (svg) {
-        const aspect = getSvgAspect(asset.leaf.key);
-        const canvas = await rasterizeSvg(svg, 128, Math.max(1, Math.round(128 * aspect)));
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        const count = Math.max(1, Math.ceil(asset.seconds * 4));
-        for (let i = 0; i < count; i++) {
-          const m = new THREE.Mesh(
-            new THREE.PlaneGeometry(1, 1),
-            new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }),
-          );
-          m.renderOrder = 4;
-          m.visible = false;
-          this.group.add(m);
-          leaves.push(m);
-        }
-      }
-    }
+    return { ribbon, ribbonGeo: geo, positions, alphas, leaves: [] };
+  }
 
-    return { buffer: new TrailBuffer(asset.seconds), ribbon, ribbonGeo: geo, positions, alphas, leaves };
+  /**
+   * 一池共用同一张贴图的 sprite。
+   *
+   * 贴图**只栅格化一次**给整池共用，所以 clear() 里 dispose 贴图必须去重 ——
+   * 对同一张 Texture 调两次 dispose 会炸。
+   */
+  private async buildLeafPool(key: string, count: number): Promise<THREE.Mesh[]> {
+    const svg = getSvg(key);
+    if (!svg) return [];
+    const aspect = getSvgAspect(key);
+    const canvas = await rasterizeSvg(svg, 128, Math.max(1, Math.round(128 * aspect)));
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const out: THREE.Mesh[] = [];
+    for (let i = 0; i < count; i++) {
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }),
+      );
+      m.renderOrder = 4;
+      m.visible = false;
+      this.group.add(m);
+      out.push(m);
+    }
+    return out;
   }
 
   /**
@@ -303,31 +360,131 @@ export class ElementRenderer {
     } else if (elem.anchor.space === "face" && face) {
       np = tracker.landmarkAt(face, elem.anchor.landmark);
     }
-    if (np) parts.buffer.sample(t, np.x, np.y);
+    if (np) parts.buffer!.sample(t, np.x, np.y);
 
-    const pts = parts.buffer.points();
+    const pts = parts.buffer!.points();
     if (pts.length < 2) {
-      parts.ribbon.visible = false;
-      for (const l of parts.leaves) l.visible = false;
+      this.hideRibbon(parts);
       return;
     }
-    parts.ribbon.visible = true;
 
     // 归一化 → 世界。和背景平面、人脸、手部守同一个镜像约定：0.5 - x
-    const wx = (p: { x: number; y: number }) => (0.5 - p.x) * this.W;
-    const wy = (p: { x: number; y: number }) => (0.5 - p.y) * this.H;
-
-    const halfW = (basePx * elem.size.scale) / 2;
+    const pw = pts.map((p) => ({ x: (0.5 - p.x) * this.W, y: (0.5 - p.y) * this.H }));
+    // 越老越淡。年龄按**时间**算而不是按下标：低帧率下点少，按下标算会让淡出速度变快
     const newest = pts[pts.length - 1].t;
+    const alpha = pts.map(
+      (p) => Math.max(0, 1 - (newest - p.t) / Math.max(1e-4, asset.seconds)) * (elem.opacity ?? 1),
+    );
+
+    this.writeRibbon(parts, pw, (basePx * elem.size.scale) / 2, alpha);
+    // 从最新的一端往老的方向摆叶子：新长出来的位置稳定，
+    // 不会因为尾巴被裁掉而整排跳一格
+    this.placeLeaves(parts, asset.leaf, basePx, pw, alpha, false);
+  }
+
+  /**
+   * 茎的一帧：按弯曲度截取「底边 → 指尖」这条曲线。
+   *
+   * **整个函数是当前帧的纯函数**，没有任何跨帧状态。这是它和 trail 的根本区别：
+   * 同一份 landmarks 渲染多少次都是同一张图，renderAt(t) 可以直接跳到任意 t。
+   */
+  private updateStem(item: Item, elem: ElementV2, basePx: number, hand: HandFrame | null, handTracker?: HandTracker) {
+    const parts = item.trail!;
+    const asset = elem.asset as Extract<ElementAsset, { kind: "stem" }>;
+
+    const tip =
+      elem.anchor.space === "hand" && hand && handTracker
+        ? handTracker.landmarkAt(hand, elem.anchor.landmark)
+        : null;
+    const curl = hand ? (hand.curl[asset.finger] ?? 0) : 0;
+    /*
+     * 阈值以下整根不画。
+     *
+     * 不设的话手伸直时读到的 0.02~0.05 会在指尖下面留一小截「毛刺」——
+     * 十根手指同时有，看起来像画面坏了。0.06 刚好在伸直的噪声之上
+     * （fixture 上伸开的手读 0.00~0.01）。
+     */
+    if (!tip || curl < 0.06) {
+      this.hideRibbon(parts);
+      return;
+    }
+
+    const segs = Math.max(4, Math.min(64, asset.segments ?? 24));
+    const tx = (0.5 - tip.x) * this.W;
+    const ty = (0.5 - tip.y) * this.H;
+    const baseY = -this.H / 2; // 画面底边
+    /*
+     * 弯的方向由 seed 定，不由手的左右定。
+     *
+     * 按左右手分的话两边会镜像般地一起倒，读起来像装饰边框；
+     * 按 seed 分则每根茎各有各的倒向，更像一片长出来的植物。
+     */
+    const dir = hash1(asset.seed, 7) > 0.5 ? 1 : -1;
+    const bow = (asset.bow ?? 0.06) * this.W * dir;
+
+    // 二次贝塞尔：底边起点 → 控制点（横向偏 bow）→ 指尖。s=0 在底边，s=1 在指尖
+    const p0x = tx - bow * 0.35;
+    const pw: { x: number; y: number }[] = [];
+    for (let i = 0; i < segs; i++) {
+      const u = i / (segs - 1);
+      // 只画前 curl 段：长度直接跟着手指弯曲度走
+      const s = u * curl;
+      const mx = (1 - s) * (1 - s) * p0x + 2 * (1 - s) * s * (p0x + bow) + s * s * tx;
+      const my = (1 - s) * (1 - s) * baseY + 2 * (1 - s) * s * ((baseY + ty) / 2) + s * s * ty;
+      pw.push({ x: mx, y: my });
+    }
+
+    /*
+     * 顶端两个点收细，底部不收。
+     *
+     * 等宽的茎末端是个平口，像根管子；顶端收尖才像植物。
+     * 底部不收是因为它被画面边缘切掉了，收了反而露出一个尖角。
+     */
+    const alpha = pw.map(() => elem.opacity ?? 1);
+    this.writeRibbon(parts, pw, (basePx * elem.size.scale) / 2, alpha, (i) => (i >= segs - 2 ? 0.45 : 1));
+    // 从底边往上摆叶子（fromStart）：茎在长的时候，已经摆好的叶子不该跟着挪
+    this.placeLeaves(parts, asset.leaf, basePx, pw, alpha, true);
+
+    if (parts.flower && asset.flower) {
+      const tipPt = pw[pw.length - 1];
+      const s = asset.flower.scale * basePx;
+      parts.flower.visible = true;
+      parts.flower.position.set(tipPt.x, tipPt.y, 6);
+      parts.flower.scale.set(s, s, 1);
+      // 花跟着茎尖的切向立起来，不然满长时会歪在一边
+      const prev = pw[Math.max(0, pw.length - 3)];
+      parts.flower.rotation.z = Math.atan2(tipPt.y - prev.y, tipPt.x - prev.x) - Math.PI / 2;
+      (parts.flower.material as THREE.MeshBasicMaterial).opacity = elem.opacity ?? 1;
+    }
+  }
+
+  private hideRibbon(parts: RibbonParts) {
+    parts.ribbon.visible = false;
+    for (const l of parts.leaves) l.visible = false;
+    if (parts.flower) parts.flower.visible = false;
+  }
+
+  /**
+   * 把一串世界坐标点写成一条带。轨迹和茎共用。
+   *
+   * taper 给每个点一个宽度倍率（茎用它把顶端收尖），不给就是等宽。
+   */
+  private writeRibbon(
+    parts: RibbonParts,
+    pw: readonly { x: number; y: number }[],
+    halfW: number,
+    alpha: readonly number[],
+    taper?: (i: number) => number,
+  ) {
+    parts.ribbon.visible = true;
     const { positions, alphas } = parts;
 
-    for (let i = 0; i < pts.length; i++) {
-      const p = pts[i];
+    for (let i = 0; i < pw.length; i++) {
       // 切向用中心差分，端点退化成单侧 —— 只看后一个点的话末端会突然歪
-      const prev = pts[Math.max(0, i - 1)];
-      const next = pts[Math.min(pts.length - 1, i + 1)];
-      let dx = wx(next) - wx(prev);
-      let dy = wy(next) - wy(prev);
+      const prev = pw[Math.max(0, i - 1)];
+      const next = pw[Math.min(pw.length - 1, i + 1)];
+      let dx = next.x - prev.x;
+      let dy = next.y - prev.y;
       const len = Math.hypot(dx, dy);
       if (len < 1e-4) {
         dx = 0;
@@ -337,28 +494,24 @@ export class ElementRenderer {
         dy /= len;
       }
       // 法向 = 切向转 90°
-      const px = -dy * halfW;
-      const py = dx * halfW;
-      const cx = wx(p);
-      const cy = wy(p);
+      const hw = halfW * (taper ? taper(i) : 1);
+      const px = -dy * hw;
+      const py = dx * hw;
       const o = i * 6;
-      positions[o] = cx + px;
-      positions[o + 1] = cy + py;
+      positions[o] = pw[i].x + px;
+      positions[o + 1] = pw[i].y + py;
       positions[o + 2] = 4;
-      positions[o + 3] = cx - px;
-      positions[o + 4] = cy - py;
+      positions[o + 3] = pw[i].x - px;
+      positions[o + 4] = pw[i].y - py;
       positions[o + 5] = 4;
 
-      // 越老越淡。年龄按时间算而不是按下标：低帧率下点少，按下标算会让淡出速度变快
-      const age = (newest - p.t) / Math.max(1e-4, asset.seconds);
-      const a = Math.max(0, 1 - age) * (elem.opacity ?? 1);
-      alphas[i * 2] = a;
-      alphas[i * 2 + 1] = a;
+      alphas[i * 2] = alpha[i];
+      alphas[i * 2 + 1] = alpha[i];
     }
 
     // 没用到的顶点塌到最后一个点上并置 0 透明度 —— 留着旧数据会拖出一条尾巴
-    const last = (pts.length - 1) * 6;
-    for (let i = pts.length; i * 6 + 5 < positions.length; i++) {
+    const last = (pw.length - 1) * 6;
+    for (let i = pw.length; i * 6 + 5 < positions.length; i++) {
       const o = i * 6;
       for (let k = 0; k < 6; k++) positions[o + k] = positions[last + k];
       alphas[i * 2] = 0;
@@ -367,64 +520,59 @@ export class ElementRenderer {
 
     parts.ribbonGeo.attributes.position.needsUpdate = true;
     parts.ribbonGeo.attributes.aAlpha.needsUpdate = true;
-    parts.ribbonGeo.setDrawRange(0, Math.max(0, (pts.length - 1) * 6));
-
-    this.placeLeaves(parts, asset, basePx, pts, wx, wy, newest);
+    parts.ribbonGeo.setDrawRange(0, Math.max(0, (pw.length - 1) * 6));
   }
 
   /**
    * 沿带的弧长摆叶子。
    *
    * 位置完全由 hash(第几片, seed) 和弧长决定 —— **不占额外状态**。
-   * 每片叶子存「什么时候长出来的」会把 append-only 的简单性搞没，
-   * 而且没必要：弧长本身就是单调增长的，用它当「第几片」的坐标即可。
+   * 每片叶子存「什么时候长出来的」会把纯函数的简单性搞没，而且没必要：
+   * 弧长本身就是单调的，用它当「第几片」的坐标即可。
+   *
+   * fromStart 决定从哪一头开始数：轨迹从最新的一端往回（新叶子位置稳定），
+   * 茎从底边往上（茎在长的时候，已经摆好的叶子不该跟着挪）。
    */
   private placeLeaves(
-    parts: TrailParts,
-    asset: Extract<ElementAsset, { kind: "trail" }>,
+    parts: RibbonParts,
+    leaf: { key: string; spacing: number; scale: number; seed: number } | undefined,
     basePx: number,
-    pts: readonly { x: number; y: number; t: number }[],
-    wx: (p: { x: number; y: number }) => number,
-    wy: (p: { x: number; y: number }) => number,
-    newest: number,
+    pw: readonly { x: number; y: number }[],
+    alpha: readonly number[],
+    fromStart: boolean,
   ) {
-    const leaf = asset.leaf;
     if (!leaf || !parts.leaves.length) return;
 
     const spacingPx = leaf.spacing * basePx;
     const sizePx = leaf.scale * basePx;
-    // 从最新的一端往老的方向走弧长，这样新长出来的叶子位置稳定，
-    // 不会因为尾巴被裁掉而整排跳一格
     let acc = 0;
     let leafIdx = 0;
-    for (let i = pts.length - 1; i > 0 && leafIdx < parts.leaves.length; i--) {
-      const ax = wx(pts[i]);
-      const ay = wy(pts[i]);
-      const bx = wx(pts[i - 1]);
-      const by = wy(pts[i - 1]);
-      const seg = Math.hypot(bx - ax, by - ay);
+    const n = pw.length;
+    for (let k = 0; k < n - 1 && leafIdx < parts.leaves.length; k++) {
+      // fromStart：0→n-1 顺着走；否则从末端往回走
+      const ai = fromStart ? k : n - 1 - k;
+      const bi = fromStart ? k + 1 : n - 2 - k;
+      const a = pw[ai];
+      const b = pw[bi];
+      const seg = Math.hypot(b.x - a.x, b.y - a.y);
       if (seg < 1e-4) continue;
       let need = spacingPx * (leafIdx + 1) - acc;
       while (need <= seg && leafIdx < parts.leaves.length) {
-        const f = need / seg;
         const m = parts.leaves[leafIdx];
         const h = hash1(leafIdx, leaf.seed);
         // 左右交替但不严格轮换：严格轮换看起来像装饰花边，不像长出来的
         const side = h > 0.5 ? 1 : -1;
-        const dirX = (bx - ax) / seg;
-        const dirY = (by - ay) / seg;
+        const dirX = (b.x - a.x) / seg;
+        const dirY = (b.y - a.y) / seg;
         const nx = -dirY * side;
         const ny = dirX * side;
         const off = sizePx * 0.42;
         m.visible = true;
-        m.position.set(ax + dirX * need + nx * off, ay + dirY * need + ny * off, 5);
+        m.position.set(a.x + dirX * need + nx * off, a.y + dirY * need + ny * off, 5);
         const s = sizePx * (0.75 + hash1(leafIdx + 31, leaf.seed) * 0.5);
         m.scale.set(s * side, s, 1);
         m.rotation.z = Math.atan2(dirY, dirX) + (side > 0 ? -0.6 : 0.6);
-        (m.material as THREE.MeshBasicMaterial).opacity = Math.max(
-          0,
-          1 - (newest - pts[i].t) / Math.max(1e-4, asset.seconds),
-        );
+        (m.material as THREE.MeshBasicMaterial).opacity = alpha[ai];
         leafIdx++;
         need = spacingPx * (leafIdx + 1) - acc;
       }
@@ -521,7 +669,8 @@ export class ElementRenderer {
   /** 清掉所有跨帧状态。切模板和时间倒流时调 —— 见 engine.stepTo。 */
   resetState() {
     for (const it of this.items) {
-      it.trail?.buffer.clear();
+      // 茎没有 buffer：它是当前帧的纯函数，没有要清的状态
+      it.trail?.buffer?.clear();
       it.bloom?.detector.clear();
     }
   }
@@ -625,7 +774,8 @@ export class ElementRenderer {
       mesh.visible = true;
 
       if (item.trail) {
-        this.updateTrail(item, elem, t, basePx, face, hand, tracker, handTracker);
+        if (elem.asset.kind === "stem") this.updateStem(item, elem, basePx, hand, handTracker);
+        else this.updateTrail(item, elem, t, basePx, face, hand, tracker, handTracker);
         continue;
       }
 
