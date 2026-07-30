@@ -23,7 +23,7 @@
     "apply": "outside",
     "effect": {
       "kind": "voxel",
-      "blocks": 44,
+      "blocks": 90,
       "palette": 0.8,
       "levels": 5,
       "saturate": 0.35,
@@ -31,7 +31,7 @@
       "outline": 0.28,
       "grain": 0.09,
       "seed": 11,
-      "smooth": 0.7
+      "smooth": 0.75
     }
   }
 }

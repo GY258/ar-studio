@@ -176,13 +176,25 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
      * 连续的色块区域是这么长出来的，不是靠更精细的量化。
      * 中心权重 4 / 边 2 / 角 1，保留一点局部特征，不至于糊成一片。
      */
+    /*
+     * 采样窗口的跨度**按块数自动放大**，不是固定的相邻一格。
+     *
+     * 窗口如果永远是 3×3 个块，块一调小窗口就跟着变小，噪声压不住 ——
+     * 椒盐点会随着「调细」一起回来，于是又被迫把块调大，绕回原地。
+     * 真正该保持不变的是「用画面上多大一片区域去估这块的颜色」，
+     * 那是个和块大小无关的量（这里取短边的 ~11%）。
+     *
+     * 仍然只采 9 次，只是撒得更开。
+     */
+    float vSpread = max( 1.0, floor( blocks.y * 0.055 ) );
+
     vec3 vAcc = vec3( 0.0 );
     float vWsum = 0.0;
     vec3 vCenter = vec3( 0.0 );
     for (int j = -1; j <= 1; j++) {
       for (int i = -1; i <= 1; i++) {
         // 块中心。用块中心而不是块内网格点：这里要的是「这一片大概什么颜色」
-        vec2 su = ( vId + vec2( float(i), float(j) ) + 0.5 ) * vCell;
+        vec2 su = ( vId + vec2( float(i), float(j) ) * vSpread + 0.5 ) * vCell;
         su = clamp( su, vec2( 0.001 ), vec2( 0.999 ) );
         float kw = ( i == 0 ? 2.0 : 1.0 ) * ( j == 0 ? 2.0 : 1.0 );
         /*
