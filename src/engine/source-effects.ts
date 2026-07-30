@@ -177,52 +177,50 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
      * 中心权重 4 / 边 2 / 角 1，保留一点局部特征，不至于糊成一片。
      */
     /*
-     * 采样窗口的跨度**按块数自动放大**，不是固定的相邻一格。
+     * 本块的颜色：块内 2×2 加权平均。
      *
-     * 窗口如果永远是 3×3 个块，块一调小窗口就跟着变小，噪声压不住 ——
-     * 椒盐点会随着「调细」一起回来，于是又被迫把块调大，绕回原地。
-     * 真正该保持不变的是「用画面上多大一片区域去估这块的颜色」，
-     * 那是个和块大小无关的量（这里取短边的 ~11%）。
-     *
-     * 仍然只采 9 次，只是撒得更开。
+     * 用块内均值而不是块中心一个点：块细的时候单点采样直接把传感器噪点
+     * 当成了块色。按蒙版加权的理由和 pixelate 那边一样 ——
+     * 边界上的块一半人一半背景，不加权的话人的轮廓外会浮一圈肉色方块。
      */
-    float vSpread = max( 1.0, floor( blocks.y * 0.055 ) );
+    vec3 vCAcc = vec3( 0.0 );
+    float vCW = 0.0;
+    for (int by = 0; by < 2; by++) {
+      for (int bx = 0; bx < 2; bx++) {
+        vec2 su = ( vId + ( vec2( float(bx), float(by) ) + 0.5 ) * 0.5 ) * vCell;
+        float sm = maskAt( su );
+        float w = applyOutside > 0.5 ? 1.0 - sm : sm;
+        vCAcc += srcTexel( su ).rgb * w;
+        vCW += w;
+      }
+    }
+    vec3 vCenter = vCW > 0.01 ? vCAcc / vCW : srcTexel( ( vId + 0.5 ) * vCell ).rgb;
 
+    /*
+     * 邻域均值：3×3 个**相邻**块的中心。
+     *
+     * 窗口跟着块走，不是固定占画面的百分之多少 —— 后者我试过，是错的：
+     * 窗口恒为短边的 11% 的话，把块调小根本不会带来细节，只会得到
+     * 一张「更细的模糊图」。绿植那种比窗口细的东西会被整片平均掉，
+     * 连颜色都没了。
+     *
+     * 连贯性该由 smooth（往邻域靠多少）来给，不该由「把窗口摊大」来给。
+     */
     vec3 vAcc = vec3( 0.0 );
     float vWsum = 0.0;
-    vec3 vCenter = vec3( 0.0 );
     for (int j = -1; j <= 1; j++) {
       for (int i = -1; i <= 1; i++) {
-        // 块中心。用块中心而不是块内网格点：这里要的是「这一片大概什么颜色」
-        vec2 su = ( vId + vec2( float(i), float(j) ) * vSpread + 0.5 ) * vCell;
-        su = clamp( su, vec2( 0.001 ), vec2( 0.999 ) );
+        vec2 su = clamp( ( vId + vec2( float(i), float(j) ) + 0.5 ) * vCell, vec2( 0.001 ), vec2( 0.999 ) );
         float kw = ( i == 0 ? 2.0 : 1.0 ) * ( j == 0 ? 2.0 : 1.0 );
-        /*
-         * 仍然按蒙版加权：不加的话人体轮廓周围的块会吸到皮肤和头发的颜色，
-         * 沿着人边上浮一圈肉色方块。块越大越明显。
-         */
         float sm = maskAt( su );
         float w = kw * ( applyOutside > 0.5 ? 1.0 - sm : sm );
-        vec3 sc = srcTexel( su ).rgb;
-        if (i == 0 && j == 0) vCenter = sc;
-        vAcc += sc * w;
+        vAcc += srcTexel( su ).rgb * w;
         vWsum += w;
       }
     }
-    // 整片都在「不该取样」的那一侧时退回本块中心，避免除零后一片黑
     vec3 vAvg = vWsum > 0.01 ? vAcc / vWsum : vCenter;
 
-    /*
-     * 平滑半径和**块大小解耦**。
-     *
-     * 这两件事我一开始绑在一起了：为了压掉椒盐点把块调大 —— 结果块一大，
-     * 背景里什么都认不出来了。但「块多大」和「用多大范围的颜色去填这块」
-     * 本来就是两个独立的选择：块小是为了保住细节，平滑是为了让相邻块
-     * 落到同一个调色板项上。
-     *
-     * 0 = 每块只看自己（细节最多，也最容易椒盐）
-     * 1 = 完全用 3×3 邻域（最连贯，也最糊）
-     */
+    // 0 = 每块只看自己（细节最多，也最容易椒盐）；1 = 完全用邻域（最连贯，也最糊）
     vec3 vCol = mix( vCenter, vAvg, vSmooth );
 
     /*
@@ -243,7 +241,21 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
      */
     float vLum = dot( vCol, vec3( 0.2126, 0.7152, 0.0722 ) );
     vCol = clamp( mix( vec3( vLum ), vCol, 1.0 + vSat ), 0.0, 1.0 );
-    vCol = floor( vCol * vLevels + 0.5 ) / vLevels;
+
+    /*
+     * **只量化亮度，色相原样保留。**
+     *
+     * 逐通道量化（floor(rgb * levels)）会移色相：R 和 B 分别取整到不同的档，
+     * 一面中性的米色墙会分裂成橄榄色和藕紫色的斑块 —— 块越细越明显，
+     * 因为色阶的边界变多了。Gary 说「颜色有一点不对」就是这个。
+     *
+     * 按亮度量化再等比缩放 RGB，色阶照样是平的（这是 MC 贴图的观感来源），
+     * 但色相一点不动。对「匹配原始光照」这个前提也更忠实：
+     * 量化的正是光照那一维，颜色那一维不该被动。
+     */
+    float vL = dot( vCol, vec3( 0.2126, 0.7152, 0.0722 ) );
+    float vLq = floor( vL * vLevels + 0.5 ) / vLevels;
+    vCol = clamp( vCol * ( vLq / max( vL, 0.004 ) ), 0.0, 1.0 );
 
     /*
      * 往最近的方块色靠，但**保住原来的亮度**。
