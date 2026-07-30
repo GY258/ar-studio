@@ -23,12 +23,12 @@
     "apply": "outside",
     "effect": {
       "kind": "voxel",
-      "blocks": 30,
-      "palette": 0.55,
-      "levels": 7,
-      "saturate": 0.5,
-      "faceShade": 0.4,
-      "outline": 0.26,
+      "blocks": 20,
+      "palette": 0.8,
+      "levels": 5,
+      "saturate": 0.35,
+      "faceShade": 0.42,
+      "outline": 0.28,
       "grain": 0.09,
       "seed": 11
     }

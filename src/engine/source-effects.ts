@@ -163,48 +163,58 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
   voxel: `
     vec2 vCell = 1.0 / blocks;
     vec2 vId = floor( vMapUv * blocks );
-    vec2 vBase = vId * vCell;
 
-    // 块内 2×2 加权取样。理由和 pixelate 那边一样：边界上的块一半人一半背景，
-    // 中心点落在人身上就整块用人的颜色，人的轮廓外会浮一圈肤色方块
-    vec4 vAcc = vec4( 0.0 );
+    /*
+     * 取 3×3 个方块的加权平均，不是只看自己这一块。
+     *
+     * **这是「像 Minecraft」和「像马赛克」的分界线，而我第一版判断错了。**
+     * 我以为辨识度来自「每块颜色量化」，于是逐块独立量化一张有噪点的照片 ——
+     * 出来必然是椒盐点：每块各自随机落到不同的调色板项上。
+     * 而真实的 MC 场景是**大片连续的同一种方块**：一整面石头墙、一片草地。
+     *
+     * 相邻块共享大部分采样窗口，于是它们大概率落到同一个调色板项上 ——
+     * 连续的色块区域是这么长出来的，不是靠更精细的量化。
+     * 中心权重 4 / 边 2 / 角 1，保留一点局部特征，不至于糊成一片。
+     */
+    vec3 vAcc = vec3( 0.0 );
     float vWsum = 0.0;
-    for (int by = 0; by < 2; by++) {
-      for (int bx = 0; bx < 2; bx++) {
-        vec2 su = vBase + vCell * (vec2(float(bx), float(by)) + 0.5) * 0.5;
+    for (int j = -1; j <= 1; j++) {
+      for (int i = -1; i <= 1; i++) {
+        // 块中心。用块中心而不是块内网格点：这里要的是「这一片大概什么颜色」
+        vec2 su = ( vId + vec2( float(i), float(j) ) + 0.5 ) * vCell;
+        su = clamp( su, vec2( 0.001 ), vec2( 0.999 ) );
+        float kw = ( i == 0 ? 2.0 : 1.0 ) * ( j == 0 ? 2.0 : 1.0 );
+        /*
+         * 仍然按蒙版加权：不加的话人体轮廓周围的块会吸到皮肤和头发的颜色，
+         * 沿着人边上浮一圈肉色方块。块越大越明显。
+         */
         float sm = maskAt( su );
-        float w = applyOutside > 0.5 ? 1.0 - sm : sm;
-        vAcc += srcTexel( su ) * w;
+        float w = kw * ( applyOutside > 0.5 ? 1.0 - sm : sm );
+        vAcc += srcTexel( su ).rgb * w;
         vWsum += w;
       }
     }
-    vec4 vSrc = vWsum > 0.01 ? vAcc / vWsum : srcTexel( vBase + vCell * 0.5 );
-    vec3 vCol = vSrc.rgb;
-    float vLum = dot( vCol, vec3( 0.2126, 0.7152, 0.0722 ) );
+    // 整片都在「不该取样」的那一侧时退回本块中心，避免除零后一片黑
+    vec3 vCol = vWsum > 0.01 ? vAcc / vWsum : srcTexel( ( vId + 0.5 ) * vCell ).rgb;
 
     /*
-     * 先把暗部抬起来。**这一步不能省。**
+     * 把暗部抬起来。MC 的世界里没有纯黑：天光是全局的。
+     * 真实房间的暗部是 0.02~0.05，被 levels 量化直接归零 ——
+     * 不抬的话半个背景死黑，读起来像渲染坏了。
      *
-     * MC 的世界里没有纯黑：天光是全局的，最暗的角落也还有底光。
-     * 而真实房间随便一拍暗部就是 0.02~0.05，接着被 levels 量化直接归零 ——
-     * 第一版就是这么翻的车：半个背景是死黑，只有零星几块有颜色，
-     * 读起来像渲染坏了而不是像方块世界。
-     *
-     * 抬地板 + 轻微 gamma 提亮，而不是整体加亮：整体加亮会把本来就亮的地方冲爆，
+     * 抬地板 + 轻微 gamma，而不是整体加亮：整体加亮会冲爆本来就亮的地方，
      * 而「保住原始光照」是这个效果的前提。
      */
     vCol = vAmbient + ( 1.0 - vAmbient ) * pow( max( vCol, 0.0 ), vec3( 0.8 ) );
 
     /*
-     * 再提饱和然后量化。
+     * 提饱和**必须在平均之后**。
      *
-     * 真实房间大多是灰扑扑的，直接量化只会得到一堆灰方块 —— 网格是对的，
-     * 但读不出「方块世界」，因为 MC 的方块色饱和度都很高。
+     * 放在平均之前的话提的是传感器噪点的彩度 —— 一面米色的墙会长出
+     * 淡紫、淡黄、淡蓝的杂色方块，正好是最毁效果的那种椒盐点。
      */
-    vLum = dot( vCol, vec3( 0.2126, 0.7152, 0.0722 ) );
+    float vLum = dot( vCol, vec3( 0.2126, 0.7152, 0.0722 ) );
     vCol = clamp( mix( vec3( vLum ), vCol, 1.0 + vSat ), 0.0, 1.0 );
-
-    // 每通道量化到 vLevels 级。MC 的贴图色阶很平，连续渐变一眼就不像
     vCol = floor( vCol * vLevels + 0.5 ) / vLevels;
 
     /*
@@ -244,20 +254,28 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
     vec3 vSnapped = clamp( vBest * ( vSrcLum / vPalLum ), 0.0, 1.0 );
     vCol = mix( vCol, vSnapped, vPalette );
 
-    // 块内颗粒。不含时间 —— 一含时间人不动画面也会自己沸腾
-    vCol *= 1.0 + ( arHash( vId, vSeed ) - 0.5 ) * vGrain;
+    /*
+     * 同材质的深浅变化，**离散三档**而不是连续噪声。
+     *
+     * MC 的方块贴图里同一种材质是有明暗颗粒的（石头就是几档灰点），
+     * 但它是离散的。连续噪声得到的是「脏」，离散档位得到的是「材质」——
+     * 一整面墙里深一格浅一格地跳，正是石头墙该有的样子。
+     *
+     * 不含时间：一含时间人不动画面也会自己沸腾，而且 renderAt(t) 就不再是纯函数。
+     */
+    float vStep = floor( arHash( vId, vSeed ) * 3.0 ) - 1.0;
+    vCol *= 1.0 + vStep * vGrain;
 
     /*
-     * 立方体的面。顶边一道亮线、底边一道暗线 ——
+     * 立方体的面。顶边亮线 / 底边暗线 / 左侧微亮 ——
      * 这是「这是个立方体」唯一真正读得出来的线索，没有它就只是彩色瓷砖。
+     *
+     * 占块的 22%。第一版给 16%、接缝只有 6%，在 14px 的块上不到 1 个像素，
+     * 被抗锯齿抹平，看起来就是「一张打了马赛克的照片」。
      */
     vec2 vF = fract( vMapUv * blocks );
-    // 亮边/暗边占块的 22%。第一版给的是 16% 而接缝只有 6% —— 在 14px 的块上
-    // 那是不到 1 个像素，被抗锯齿抹平，看起来就是「一张打了马赛克的照片」。
-    // 立方体的线索必须在块**内部**占到肉眼能读的比例，不能是发丝线
     float vTop = 1.0 - smoothstep( 0.0, 0.22, vF.y );
     float vBot = smoothstep( 0.78, 1.0, vF.y );
-    // 左边也提一点：MC 里方块有两个可见侧面，只做上下会读成横条纹
     float vLeft = 1.0 - smoothstep( 0.0, 0.18, vF.x );
     vCol *= 1.0 + vFaceShade * ( vTop * 0.9 + vLeft * 0.35 - vBot * 0.8 );
 
@@ -265,7 +283,7 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
     float vSeam = min( min( vF.x, vF.y ), min( 1.0 - vF.x, 1.0 - vF.y ) );
     vCol *= mix( 1.0 - vOutline, 1.0, smoothstep( 0.0, 0.14, vSeam ) );
 
-    vec4 effectTexel = vec4( clamp( vCol, 0.0, 1.0 ), vSrc.a );`,
+    vec4 effectTexel = vec4( clamp( vCol, 0.0, 1.0 ), 1.0 );`,
 
   /*
    * 调试用：把蒙版本身画出来，不做任何效果。
