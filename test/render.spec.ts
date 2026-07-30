@@ -570,6 +570,39 @@ test("手部感知：有手时元素显示，没手时隐藏", async () => {
   expect(coverage(noHands, frontBase), "没有手时手部元素必须全部隐藏").toBeLessThan(0.0005);
 });
 
+test("轨迹：状态层确定，且带真的在长", async () => {
+  /*
+   * 这条是整个跨帧状态层的验收条件。
+   *
+   * 加状态之前 renderAt(t) 是无历史的纯函数 —— golden 回归、CI 不用摄像头、
+   * LLM 能拿到反馈全建立在那上面。加了轨迹之后必须证明「同一份输入渲染多少次
+   * 都是同一张图」仍然成立，否则整套离线验证就废了。
+   *
+   * 三件事一起验：
+   *   长  —— 带确实随时间变长（不然「实现了」和「画了个空」分不开）
+   *   确定 —— 同一个 t 渲染两次逐位相同。第二次会触发时间倒流 → 清状态 → 从头重积，
+   *           这恰好是最容易出错的路径：只要有一点状态没清干净，两张图就不一样
+   *   非空 —— 带真的画出了像素，不是几何算对了但顶点全塌在一起
+   */
+  const tpl = path.join(TEMPLATES, "finger-flowers.json");
+  await loadTemplate(harness.page, tpl, "hands");
+  const base = await baseFrame("hands");
+  await loadTemplate(harness.page, tpl, "hands");
+
+  const early = decode(await capture(harness.page, 0.3));
+  const lateBuf = await capture(harness.page, 2.4);
+  const late = decode(lateBuf);
+
+  const covEarly = coverage(early, base);
+  const covLate = coverage(late, base);
+  expect(covLate, "带应该画出成规模的像素").toBeGreaterThan(0.01);
+  expect(covLate / covEarly, `带应该随时间变长（${covEarly.toFixed(4)} → ${covLate.toFixed(4)}）`).toBeGreaterThan(1.5);
+
+  // 再来一次同一个 t。走的是「时间倒流 → 清状态 → 重新按定步长积到 2.4」
+  const again = await capture(harness.page, 2.4);
+  expect(again.equals(lateBuf), "同一个 t 渲染两次必须逐位相同，否则状态没清干净或步长不定").toBe(true);
+});
+
 test("文字用的是内嵌字体，不是系统字体", async () => {
   /*
    * 这条钉的是「golden 必须跨机器成立」。

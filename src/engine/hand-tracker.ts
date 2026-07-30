@@ -71,12 +71,39 @@ export class MediaPipeHandProvider implements HandLandmarkProvider {
   }
 }
 
-/** 回放录好的手部 landmark。 */
-export class FixtureHandProvider implements HandLandmarkProvider {
-  constructor(private readonly hands: HandLandmarks[] | null) {}
+/** fixture 里手部数据的两种形态。数组 = 单帧（老格式），对象 = 序列。 */
+export type HandFixture = HandLandmarks[] | { fps: number; frames: HandLandmarks[][] };
 
-  detect(): HandLandmarks[] | null {
-    return this.hands;
+/**
+ * 回放录好的手部 landmark。
+ *
+ * 支持序列：轨迹类模板需要「手在动」，一帧静态数据画不出带。
+ * 按 nowMs 换算帧号并循环 —— 循环而不是停在最后一帧，是为了让
+ * 「渲染 t=5s」这种超出序列长度的请求也有合理的输入，而不是突然静止。
+ *
+ * 单帧格式继续支持：不是所有 fixture 都需要动，静态的那些没必要膨胀成序列。
+ */
+export class FixtureHandProvider implements HandLandmarkProvider {
+  private readonly fps: number;
+  private readonly frames: HandLandmarks[][];
+
+  constructor(fixture: HandFixture | null) {
+    if (!fixture) {
+      this.fps = 30;
+      this.frames = [];
+    } else if (Array.isArray(fixture)) {
+      this.fps = 30;
+      this.frames = [fixture];
+    } else {
+      this.fps = fixture.fps || 30;
+      this.frames = fixture.frames;
+    }
+  }
+
+  detect(_source: FrameSource, nowMs: number): HandLandmarks[] | null {
+    if (!this.frames.length) return null;
+    const i = Math.floor((Math.max(0, nowMs) / 1000) * this.fps) % this.frames.length;
+    return this.frames[i];
   }
 }
 

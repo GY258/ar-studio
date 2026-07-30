@@ -186,8 +186,23 @@ async function main() {
   for (const input of groups.keys()) {
     const src = path.join(FIXTURES, `${input}.png`);
     const dst = path.join(OUT, `${input}.y4m`);
-    const info = pngToY4m(src, dst);
-    console.log(`假摄像头 ${input}: ${info.w}x${info.h}, ${(info.bytes / 1024 / 1024).toFixed(1)}MB`);
+    /*
+     * 手部输入带纵向平移，别的静止。
+     *
+     * 轨迹（茎）画的是「锚点走过的路」—— 静态输入下指尖永远不动，
+     * 一条带都画不出来，冒烟会绿着放过一整个功能。
+     * 人脸/分割那些不依赖运动，静止就够，省下一堆帧的体积。
+     *
+     * 幅度只取 0.22：平移是靠「越界夹到边缘行」实现的，幅度大了画面顶部会拖出
+     * 明显的竖条拉丝，之后看冒烟截图时容易把那个当成效果的 bug。
+     * 0.22 屏在 0.75 秒里走完，对轨迹来说已经够长。
+     */
+    const pan = input === "hands" ? { frames: 45, panY: 0.22 } : { frames: 4 };
+    const info = pngToY4m(src, dst, pan);
+    console.log(
+      `假摄像头 ${input}: ${info.w}x${info.h} × ${info.frames} 帧` +
+        `${pan.panY ? `（纵向平移 ${pan.panY * 100}%）` : "（静止）"}, ${(info.bytes / 1024 / 1024).toFixed(1)}MB`,
+    );
   }
 
   const port = await freePort();

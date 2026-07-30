@@ -20,6 +20,14 @@ import { resolveControls } from "./resolve";
 import { EFFECT_COMBINE, EFFECT_SNIPPETS } from "./source-effects";
 import type { ControlValues, TemplateConfig, TemplateType } from "./types";
 
+/**
+ * 状态推进的定步长，秒。
+ *
+ * 1/60 而不是跟着真实帧率：轨迹这类跨帧状态一旦依赖 dt，
+ * 同一段输入在快机器和慢机器上就会算出不同结果，golden 立刻失效。
+ */
+const SIM_STEP = 1 / 60;
+
 export interface EngineStats {
   fps: number;
   tracking: boolean;
@@ -94,6 +102,8 @@ export class ArEngine {
   /** 注入进背景材质的 uniform 引用，onBeforeCompile 时拿到 */
   private bgUniforms: Record<string, { value: unknown }> | null = null;
   private raf = 0;
+  /** 模拟到了哪个时刻，秒。-1 = 还没开始 */
+  private simT = -1;
   private lastT = 0;
   private lastVideoTime = -1;
   private fpsAcc = 0;
@@ -277,6 +287,7 @@ export class ArEngine {
 
     // 清理其他类型的渲染状态
     this.elements.clear();
+    this.resetSim();
     this.faceTracker.reset();
     this.handTracker.reset();
     this.particles.clear();
@@ -824,12 +835,60 @@ export class ArEngine {
    * t 是秒，nowMs 是毫秒——两者独立传，因为丢脸容忍用的是 ms 时间轴。
    */
   renderAt(t: number, nowMs = t * 1000) {
+    this.advance(t, nowMs);
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * 推进到时刻 t，但不渲染。感知、蒙版、元素状态都在这里更新。
+   *
+   * 和 renderAt 分开是为了 stepTo：有跨帧状态之后，「渲染 t 时刻」不再等于
+   * 「把所有东西设成 t 时刻的值」，而是「从当前时刻一步步走到 t」。
+   */
+  private advance(t: number, nowMs = t * 1000) {
     this.perceive(nowMs);
     this.updateMask();
     this.setEffectTime(t);
     this.setFaceProtect(nowMs);
     this.elements.update(t, this.faceTracker, this.faceTracker.frame(nowMs), this.handTracker, nowMs);
+    this.simT = t;
+  }
+
+  /**
+   * 按定步长积到 t，然后渲染一帧。有轨迹这类跨帧状态的模板必须走这条。
+   *
+   * 为什么不能直接 renderAt(t)：轨迹是「锚点走过的路」，直接跳过去等于
+   * 只喂了一个点，画不出带。而且**步长必须是定的** —— 跟着真实帧率走的话
+   * 同一段手势在不同机器上生成不同的轨迹，golden 不成立。
+   *
+   * 时间倒流（先渲染 t=P 再渲染 t=0）时从头重算：状态是历史的函数，
+   * 倒着走没有意义。TrailBuffer 里也有一层同样的保护。
+   */
+  stepTo(t: number, step = SIM_STEP) {
+    if (t < this.simT) this.resetSim();
+    // 首次调用时不从 0 补一整段：那会让「渲染 t=10s」变成 600 步的空转
+    let tt = this.simT < 0 ? t : this.simT;
+    /*
+     * 循环停在 t **之前**，最后无条件在 t 上推进一次。
+     *
+     * 不这么写的话 t 和 simT 相等时一步都不推进 —— 而「同一个 t 再渲染一遍」
+     * 是个真实用例：用户拖了一下交互元素，位置变了但时间没变，
+     * 不推进的话画面纹丝不动。
+     * 让循环别正好落在 t 上，是为了避免最后那次推进变成重复推进 ——
+     * 重复喂同一个时间戳给 MediaPipe 的 VIDEO 模式会直接抛「时间戳不单调」。
+     */
+    while (tt + step < t) {
+      tt += step;
+      this.advance(tt);
+    }
+    this.advance(t);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** 清掉所有跨帧状态。切模板和时间倒流时都要调。 */
+  private resetSim() {
+    this.simT = -1;
+    this.elements.resetState();
   }
 
   /**

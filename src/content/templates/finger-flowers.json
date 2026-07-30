@@ -15,6 +15,236 @@
   "preview": {},
   "elements": [
     {
+      "id": "stem-l-thumb",
+      "asset": {
+        "kind": "trail",
+        "color": "#FF8A65",
+        "seconds": 2.6,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.75,
+          "scale": 0.24,
+          "seed": 11
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "thumb_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.035
+      }
+    },
+    {
+      "id": "stem-l-index",
+      "asset": {
+        "kind": "trail",
+        "color": "#FFD54F",
+        "seconds": 2.6,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.75,
+          "scale": 0.24,
+          "seed": 18
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "index_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.035
+      }
+    },
+    {
+      "id": "stem-l-middle",
+      "asset": {
+        "kind": "trail",
+        "color": "#F48FB1",
+        "seconds": 2.6,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.75,
+          "scale": 0.24,
+          "seed": 25
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "middle_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.035
+      }
+    },
+    {
+      "id": "stem-l-ring",
+      "asset": {
+        "kind": "trail",
+        "color": "#EF5350",
+        "seconds": 2.6,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.75,
+          "scale": 0.24,
+          "seed": 32
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "ring_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.035
+      }
+    },
+    {
+      "id": "stem-l-pinky",
+      "asset": {
+        "kind": "trail",
+        "color": "#4FC3F7",
+        "seconds": 2.6,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.75,
+          "scale": 0.24,
+          "seed": 39
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "pinky_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.035
+      }
+    },
+    {
+      "id": "stem-r-thumb",
+      "asset": {
+        "kind": "trail",
+        "color": "#4FC3F7",
+        "seconds": 2.6,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.75,
+          "scale": 0.24,
+          "seed": 46
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "thumb_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.035
+      }
+    },
+    {
+      "id": "stem-r-index",
+      "asset": {
+        "kind": "trail",
+        "color": "#BA68C8",
+        "seconds": 2.6,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.75,
+          "scale": 0.24,
+          "seed": 53
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "index_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.035
+      }
+    },
+    {
+      "id": "stem-r-middle",
+      "asset": {
+        "kind": "trail",
+        "color": "#81C784",
+        "seconds": 2.6,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.75,
+          "scale": 0.24,
+          "seed": 60
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "middle_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.035
+      }
+    },
+    {
+      "id": "stem-r-ring",
+      "asset": {
+        "kind": "trail",
+        "color": "#FFF176",
+        "seconds": 2.6,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.75,
+          "scale": 0.24,
+          "seed": 67
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "ring_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.035
+      }
+    },
+    {
+      "id": "stem-r-pinky",
+      "asset": {
+        "kind": "trail",
+        "color": "#FFB74D",
+        "seconds": 2.6,
+        "leaf": {
+          "key": "emoji-leaf",
+          "spacing": 0.75,
+          "scale": 0.24,
+          "seed": 74
+        }
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "pinky_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.035
+      }
+    },
+    {
       "id": "l-thumb",
       "asset": {
         "kind": "svg-lib",

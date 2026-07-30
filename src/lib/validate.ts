@@ -168,7 +168,7 @@ const ANIM_PRESETS = ["float", "fall", "pulse", "spin", "emit-fall-fade"];
 const EASES = ["linear", "in", "out", "inout", "gravity", "bounce"];
 /** 只有「0→1 走一趟」的原语能缓动。周期性原语套 ease 会在接缝处顿一下，见 animations.ts */
 const EASE_PRESETS = ["fall", "emit-fall-fade"];
-const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient"];
+const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail"];
 const HAND_ANCHOR_NAMES = Object.keys(HAND_ANCHORS);
 const SIZE_REFS = ["vw", "iod", "eye_width", "face_width", "palm_width"];
 const SIZE_FITS = ["width", "font"];
@@ -262,6 +262,32 @@ function validateAsset(a: unknown, at: string, p: string[]) {
       p.push(`${at}.asset.key 必填。素材库里有：${keys.join(", ")}`);
     } else if (keys.length && !keys.includes(asset.key)) {
       p.push(`${at}.asset.key "${asset.key}" 素材库里没有。相近的有：${nearest(asset.key, keys).join(", ")}`);
+    }
+  }
+
+  if (kind === "trail") {
+    if (typeof asset.color !== "string") p.push(`${at}.asset.color 必填，带的颜色`);
+    if (!inRange(asset.seconds, 0.2, 8)) {
+      p.push(`${at}.asset.seconds 应在 [0.2, 8]（保留多久的历史，也就是这条带有多长）`);
+    }
+    if (asset.leaf !== undefined) {
+      const lf = asset.leaf as Raw;
+      if (typeof lf !== "object" || lf === null) {
+        p.push(`${at}.asset.leaf 形如 { "key": "emoji-leaf", "spacing": 0.9, "scale": 0.34, "seed": 11 }`);
+      } else {
+        const keys = svgKeys();
+        if (typeof lf.key !== "string" || (keys.length && !keys.includes(lf.key))) {
+          p.push(`${at}.asset.leaf.key "${lf.key}" 不在素材库里。相近的有：${nearest(String(lf.key), keys).join(", ")}`);
+        }
+        if (!inRange(lf.spacing, 0.05, 5)) p.push(`${at}.asset.leaf.spacing 应在 [0.05, 5]（相邻两片的间距，单位 size.ref）`);
+        if (!inRange(lf.scale, 0.02, 3)) p.push(`${at}.asset.leaf.scale 应在 [0.02, 3]`);
+        if (!num(lf.seed)) {
+          p.push(
+            `${at}.asset.leaf.seed 必填。叶子的位置和大小是 hash(第几片, seed) 的纯函数，` +
+              `没有 seed 每次长的地方都不一样，golden 对比就不成立`,
+          );
+        }
+      }
     }
   }
 
@@ -392,6 +418,14 @@ function validateElement(e: Raw, at: string, p: string[], ids: Set<string>) {
   }
   validateAsset(e.asset, at, p);
   validateAnchor(e.anchor, at, p);
+  const assetKind = (e.asset as Raw | undefined)?.kind;
+  const space = (e.anchor as Raw | undefined)?.space;
+  if (assetKind === "trail" && space === "screen") {
+    p.push(
+      `${at} 的 asset 是 trail 但锚在 screen 空间 —— 屏幕上的固定点没有轨迹，画不出任何东西。` +
+        `轨迹要锚在会动的东西上（space "hand" 或 "face"）`,
+    );
+  }
   validateSize(e.size, at, p);
   if (e.opacity !== undefined && !inRange(e.opacity, 0, 1)) p.push(`${at}.opacity 应在 [0, 1]`);
   if (e.interactive !== undefined) {

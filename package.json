@@ -18,6 +18,7 @@
     "test:render": "playwright test",
     "smoke:live": "tsx scripts/smoke-live.ts",
     "record:fixture": "tsx scripts/record-fixture.ts",
+    "make:hand-seq": "tsx scripts/make-hand-sequence.ts",
     "gen:skill-reference": "tsx scripts/gen-skill-reference.ts",
     "gen:font": "tsx scripts/gen-font.ts"
   },

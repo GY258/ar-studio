@@ -65,6 +65,8 @@ type ElementAsset =
   | { kind: "svg-inline"; svg: string }        // 现写的 SVG，必须带 viewBox
   | { kind: "text";       text: string; color?: string; fontWeight?: number; shadow?: string }
   | { kind: "gradient";   shape: "ellipse"; color: string; opacity?: number }
+  | { kind: "trail";      color: string; seconds: number;   // 锚点走过的路，画成一条带
+      leaf?: { key: string; spacing: number; scale: number; seed: number } }
 
 type ElementAnchor =
   | { space: "screen"; nx: number; ny: number }   // 归一化屏幕坐标，[-0.2, 1.2]
@@ -98,6 +100,29 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 - \`add\` 发光 → 星星、光斑
 
 贴在脸上的半透明东西默认就该考虑 \`multiply\` 或 \`screen\`，别一律用 normal。
+
+### trail —— 锚点走过的路
+
+\`\`\`jsonc
+{ "id": "stem-l-index",
+  "asset": { "kind": "trail", "color": "#FFD54F", "seconds": 2.6,
+             "leaf": { "key": "emoji-leaf", "spacing": 0.75, "scale": 0.24, "seed": 11 } },
+  "anchor": { "space": "hand", "hand": "left", "landmark": "index_tip" },
+  "size": { "ref": "palm_width", "scale": 0.035 } }   // scale 是带的宽度
+\`\`\`
+
+**这是唯一一个几何形状依赖时间历史的 asset。** 别的都是「当前帧」的纯函数，
+它是「这一段时间里锚点去过哪」。所以：
+
+- 必须锚在**会动**的东西上（\`space\` 是 \`hand\` 或 \`face\`）。锚在 screen 上是
+  一个固定点，没有轨迹，校验器会拦
+- \`seconds\` 既是保留多久的历史，也就是这条带有多长
+- \`leaf.seed\` 必填。叶子的位置和大小是 \`hash(第几片, seed)\` 的纯函数，
+  不占额外状态，但没有 seed 每次长的地方都不一样，golden 对比不成立
+
+采样落在固定的 12Hz 时间网格上，不是每帧一次 —— 每帧一次的话同一段手势在
+60fps 和 20fps 下会生成不同的带。相邻采样点位移超过 0.18 屏会**断开重新起一条**：
+手划出画面再进来、检测短暂丢失重新锁定，都会瞬移，连起来就是一条横跨画面的假线。
 
 ### 手部锚点
 

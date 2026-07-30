@@ -137,7 +137,33 @@ export type ElementAsset =
   | { kind: "svg-inline"; svg: string }
   | { kind: "text"; text: string; fontWeight?: number; color?: string; shadow?: string }
   /** 程序化径向渐变椭圆，腮红这类不值得做成素材的东西 */
-  | { kind: "gradient"; shape: "ellipse"; color: string; opacity?: number };
+  | { kind: "gradient"; shape: "ellipse"; color: string; opacity?: number }
+  /**
+   * 轨迹：锚点走过的路，画成一条带。
+   *
+   * **这是第一个几何形状依赖时间历史的 asset。** 别的 asset 都是
+   * f(当前帧) 的纯函数，它是 f(这一段时间里锚点去过哪)。所以它要求
+   * 离线渲染走 stepTo(t) 逐步积过去，不能像别的模板那样直接跳到任意 t。
+   *
+   * size.scale 量的是带的宽度（相对 size.ref）。
+   */
+  | {
+      kind: "trail";
+      color: string;
+      /** 保留多久的历史，秒。也就是这条带有多长 */
+      seconds: number;
+      /** 沿途长叶子。位置由 hash(第几片, seed) 定，纯函数，不额外占状态 */
+      leaf?: {
+        /** svg-lib 的 key */
+        key: string;
+        /** 相邻两片的间距，单位是 size.ref */
+        spacing: number;
+        /** 叶子大小，相对 size.ref */
+        scale: number;
+        /** 必填。没有 seed 每次展开长的位置都不一样，golden 对比不成立 */
+        seed: number;
+      };
+    };
 
 export type ElementAnchor =
   | { space: "screen"; nx: number; ny: number }

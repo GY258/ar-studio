@@ -11,7 +11,7 @@
 import { ArEngine } from "@/engine/engine";
 import { FixtureLandmarkProvider, type Landmark } from "@/engine/face-tracker";
 import { FixtureSegmentationProvider } from "@/engine/segmentation";
-import { FixtureHandProvider, type HandLandmarks } from "@/engine/hand-tracker";
+import { FixtureHandProvider, type HandFixture } from "@/engine/hand-tracker";
 import { migrateElements } from "@/lib/migrate";
 import type { TemplateConfig } from "@/engine/types";
 
@@ -76,7 +76,7 @@ class Harness {
       fetch(`${base}.landmarks.json`).then((r) => r.json() as Promise<Landmark[] | null>),
       // 没有手的 fixture 不写这个文件，404 就当没有手 —— 空数组和「没录过」要分得开
       fetch(`${base}.hands.json`)
-        .then((r) => (r.ok ? (r.json() as Promise<HandLandmarks[]>) : null))
+        .then((r) => (r.ok ? (r.json() as Promise<HandFixture>) : null))
         .catch(() => null),
     ]);
 
@@ -115,10 +115,16 @@ class Harness {
     return elements.length;
   }
 
-  /** 渲染指定时刻。t 单位秒。 */
+  /**
+   * 渲染指定时刻。t 单位秒。
+   *
+   * 走 stepTo 而不是 renderAt：有轨迹这类跨帧状态的模板必须从当前时刻一步步积过去，
+   * 直接跳等于只喂一个采样点，画不出带。对无状态模板两者结果相同 ——
+   * stepTo 内部就是按定步长反复调同一套推进逻辑。
+   */
   render(t: number) {
     if (!this.engine) throw new Error("先调 setup()");
-    this.engine.renderAt(t);
+    this.engine.stepTo(t);
   }
 
   /** 背景材质类型名，测试用来钉住「帧效果不能用裸 ShaderMaterial」这个决定。 */

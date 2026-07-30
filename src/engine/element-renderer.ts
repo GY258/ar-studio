@@ -9,16 +9,34 @@
  */
 
 import * as THREE from "three";
-import type { ElementBlend, ElementV2, SizeRef } from "./types";
+import type { ElementAsset, ElementBlend, ElementV2, SizeRef } from "./types";
 import { getSvg, getSvgAspect, rasterizeSvg, rasterizeText } from "./svg-assets";
 import { ensureTextFont } from "./text-font";
 import { extractAspect } from "./svg-sanitize";
 import { evaluateAnimations } from "./animations";
+import { TRAIL_RATE, TrailBuffer } from "./trail";
 import type { FaceFrame, FaceTracker } from "./face-tracker";
 import type { HandFrame, HandTracker } from "./hand-tracker";
 
+/** 确定性 hash。叶子的位置和大小都走它，不许出现真随机数 */
+function hash1(i: number, seed: number): number {
+  const x = Math.sin(i * 127.1 + seed * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
 /** 文字统一按这个字号栅格化一次，再按 size 缩放 mesh。避免人一动就重新栅格化。 */
 const TEXT_RASTER_PX = 64;
+
+/** 轨迹元素额外带的东西：历史缓冲、带的几何、沿途叶子的网格池 */
+interface TrailParts {
+  buffer: TrailBuffer;
+  ribbon: THREE.Mesh;
+  ribbonGeo: THREE.BufferGeometry;
+  /** 顶点缓冲。容量按 seconds × TRAIL_RATE 预留，运行时不再分配 */
+  positions: Float32Array;
+  alphas: Float32Array;
+  leaves: THREE.Mesh[];
+}
 
 interface Item {
   mesh: THREE.Mesh;
@@ -35,6 +53,7 @@ interface Item {
   /** 上一帧算出来的屏幕尺寸，命中测试用 */
   lastW: number;
   lastH: number;
+  trail?: TrailParts;
 }
 
 export class ElementRenderer {
@@ -78,6 +97,26 @@ export class ElementRenderer {
     for (const elem of elements) {
       if (gen !== this.generation) return; // 已切模板，放弃这批
 
+      if (elem.asset.kind === "trail") {
+        const parts = await this.buildTrail(elem, elem.asset);
+        if (gen !== this.generation) return;
+        if (parts) {
+          this.items.push({
+            mesh: parts.ribbon,
+            elem,
+            aspect: 1,
+            textPxWidth: 0,
+            userDx: 0,
+            userDy: 0,
+            userScale: 1,
+            lastW: 0,
+            lastH: 0,
+            trail: parts,
+          });
+        }
+        continue;
+      }
+
       const built = await this.buildTexture(elem);
       if (gen !== this.generation) return;
       if (!built) continue;
@@ -106,6 +145,245 @@ export class ElementRenderer {
       });
       this.group.add(mesh);
     }
+  }
+
+  /**
+   * 轨迹元素：一条带 + 一池叶子。
+   *
+   * 顶点缓冲按 seconds × TRAIL_RATE 预留满，运行时只改内容不重新分配 ——
+   * 每帧 new 一个 BufferGeometry 会让 GC 在录制时抖。
+   */
+  private async buildTrail(
+    elem: ElementV2,
+    asset: Extract<ElementAsset, { kind: "trail" }>,
+  ): Promise<TrailParts | null> {
+    const maxPts = Math.max(2, Math.ceil(asset.seconds * TRAIL_RATE) + 2);
+    // 每个采样点两个顶点（带的两侧），三角带用索引连
+    const positions = new Float32Array(maxPts * 2 * 3);
+    const alphas = new Float32Array(maxPts * 2);
+    const index: number[] = [];
+    for (let i = 0; i < maxPts - 1; i++) {
+      const a = i * 2;
+      index.push(a, a + 1, a + 2, a + 2, a + 1, a + 3);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute("aAlpha", new THREE.BufferAttribute(alphas, 1));
+    geo.setIndex(index);
+
+    const color = new THREE.Color(asset.color);
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      side: THREE.DoubleSide,
+      uniforms: { uColor: { value: color } },
+      vertexShader: `
+        attribute float aAlpha;
+        varying float vA;
+        void main(){
+          vA = aAlpha;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        uniform vec3 uColor; varying float vA;
+        void main(){
+          if (vA < 0.004) discard;
+          gl_FragColor = vec4(uColor, vA);
+        }`,
+    });
+
+    const ribbon = new THREE.Mesh(geo, mat);
+    ribbon.frustumCulled = false;
+    ribbon.renderOrder = 4; // 压在背景之上、贴纸之下：茎要被指尖的花盖住
+    this.group.add(ribbon);
+
+    // 叶子池。容量按「带最长时能放几片」算，够不到的隐藏
+    const leaves: THREE.Mesh[] = [];
+    if (asset.leaf) {
+      const svg = getSvg(asset.leaf.key);
+      if (svg) {
+        const aspect = getSvgAspect(asset.leaf.key);
+        const canvas = await rasterizeSvg(svg, 128, Math.max(1, Math.round(128 * aspect)));
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const count = Math.max(1, Math.ceil(asset.seconds * 4));
+        for (let i = 0; i < count; i++) {
+          const m = new THREE.Mesh(
+            new THREE.PlaneGeometry(1, 1),
+            new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }),
+          );
+          m.renderOrder = 4;
+          m.visible = false;
+          this.group.add(m);
+          leaves.push(m);
+        }
+      }
+    }
+
+    return { buffer: new TrailBuffer(asset.seconds), ribbon, ribbonGeo: geo, positions, alphas, leaves };
+  }
+
+  /**
+   * 轨迹的一帧：采样 → 重建带 → 摆叶子。
+   *
+   * 采样点存的是**归一化坐标**而不是世界坐标：视口会变（resize、手机转屏），
+   * 存世界坐标的话转一下屏整条带就错位了。
+   */
+  private updateTrail(
+    item: Item,
+    elem: ElementV2,
+    t: number,
+    basePx: number,
+    face: FaceFrame | null,
+    hand: HandFrame | null,
+    tracker: FaceTracker,
+    handTracker?: HandTracker,
+  ) {
+    const parts = item.trail!;
+    const asset = elem.asset as Extract<ElementAsset, { kind: "trail" }>;
+
+    // 锚点当前在哪（归一化，y 向下）
+    let np: { x: number; y: number } | null = null;
+    if (elem.anchor.space === "hand" && hand && handTracker) {
+      np = handTracker.landmarkAt(hand, elem.anchor.landmark);
+    } else if (elem.anchor.space === "face" && face) {
+      np = tracker.landmarkAt(face, elem.anchor.landmark);
+    }
+    if (np) parts.buffer.sample(t, np.x, np.y);
+
+    const pts = parts.buffer.points();
+    if (pts.length < 2) {
+      parts.ribbon.visible = false;
+      for (const l of parts.leaves) l.visible = false;
+      return;
+    }
+    parts.ribbon.visible = true;
+
+    // 归一化 → 世界。和背景平面、人脸、手部守同一个镜像约定：0.5 - x
+    const wx = (p: { x: number; y: number }) => (0.5 - p.x) * this.W;
+    const wy = (p: { x: number; y: number }) => (0.5 - p.y) * this.H;
+
+    const halfW = (basePx * elem.size.scale) / 2;
+    const newest = pts[pts.length - 1].t;
+    const { positions, alphas } = parts;
+
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      // 切向用中心差分，端点退化成单侧 —— 只看后一个点的话末端会突然歪
+      const prev = pts[Math.max(0, i - 1)];
+      const next = pts[Math.min(pts.length - 1, i + 1)];
+      let dx = wx(next) - wx(prev);
+      let dy = wy(next) - wy(prev);
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-4) {
+        dx = 0;
+        dy = 1;
+      } else {
+        dx /= len;
+        dy /= len;
+      }
+      // 法向 = 切向转 90°
+      const px = -dy * halfW;
+      const py = dx * halfW;
+      const cx = wx(p);
+      const cy = wy(p);
+      const o = i * 6;
+      positions[o] = cx + px;
+      positions[o + 1] = cy + py;
+      positions[o + 2] = 4;
+      positions[o + 3] = cx - px;
+      positions[o + 4] = cy - py;
+      positions[o + 5] = 4;
+
+      // 越老越淡。年龄按时间算而不是按下标：低帧率下点少，按下标算会让淡出速度变快
+      const age = (newest - p.t) / Math.max(1e-4, asset.seconds);
+      const a = Math.max(0, 1 - age) * (elem.opacity ?? 1);
+      alphas[i * 2] = a;
+      alphas[i * 2 + 1] = a;
+    }
+
+    // 没用到的顶点塌到最后一个点上并置 0 透明度 —— 留着旧数据会拖出一条尾巴
+    const last = (pts.length - 1) * 6;
+    for (let i = pts.length; i * 6 + 5 < positions.length; i++) {
+      const o = i * 6;
+      for (let k = 0; k < 6; k++) positions[o + k] = positions[last + k];
+      alphas[i * 2] = 0;
+      alphas[i * 2 + 1] = 0;
+    }
+
+    parts.ribbonGeo.attributes.position.needsUpdate = true;
+    parts.ribbonGeo.attributes.aAlpha.needsUpdate = true;
+    parts.ribbonGeo.setDrawRange(0, Math.max(0, (pts.length - 1) * 6));
+
+    this.placeLeaves(parts, asset, basePx, pts, wx, wy, newest);
+  }
+
+  /**
+   * 沿带的弧长摆叶子。
+   *
+   * 位置完全由 hash(第几片, seed) 和弧长决定 —— **不占额外状态**。
+   * 每片叶子存「什么时候长出来的」会把 append-only 的简单性搞没，
+   * 而且没必要：弧长本身就是单调增长的，用它当「第几片」的坐标即可。
+   */
+  private placeLeaves(
+    parts: TrailParts,
+    asset: Extract<ElementAsset, { kind: "trail" }>,
+    basePx: number,
+    pts: readonly { x: number; y: number; t: number }[],
+    wx: (p: { x: number; y: number }) => number,
+    wy: (p: { x: number; y: number }) => number,
+    newest: number,
+  ) {
+    const leaf = asset.leaf;
+    if (!leaf || !parts.leaves.length) return;
+
+    const spacingPx = leaf.spacing * basePx;
+    const sizePx = leaf.scale * basePx;
+    // 从最新的一端往老的方向走弧长，这样新长出来的叶子位置稳定，
+    // 不会因为尾巴被裁掉而整排跳一格
+    let acc = 0;
+    let leafIdx = 0;
+    for (let i = pts.length - 1; i > 0 && leafIdx < parts.leaves.length; i--) {
+      const ax = wx(pts[i]);
+      const ay = wy(pts[i]);
+      const bx = wx(pts[i - 1]);
+      const by = wy(pts[i - 1]);
+      const seg = Math.hypot(bx - ax, by - ay);
+      if (seg < 1e-4) continue;
+      let need = spacingPx * (leafIdx + 1) - acc;
+      while (need <= seg && leafIdx < parts.leaves.length) {
+        const f = need / seg;
+        const m = parts.leaves[leafIdx];
+        const h = hash1(leafIdx, leaf.seed);
+        // 左右交替但不严格轮换：严格轮换看起来像装饰花边，不像长出来的
+        const side = h > 0.5 ? 1 : -1;
+        const dirX = (bx - ax) / seg;
+        const dirY = (by - ay) / seg;
+        const nx = -dirY * side;
+        const ny = dirX * side;
+        const off = sizePx * 0.42;
+        m.visible = true;
+        m.position.set(ax + dirX * need + nx * off, ay + dirY * need + ny * off, 5);
+        const s = sizePx * (0.75 + hash1(leafIdx + 31, leaf.seed) * 0.5);
+        m.scale.set(s * side, s, 1);
+        m.rotation.z = Math.atan2(dirY, dirX) + (side > 0 ? -0.6 : 0.6);
+        (m.material as THREE.MeshBasicMaterial).opacity = Math.max(
+          0,
+          1 - (newest - pts[i].t) / Math.max(1e-4, asset.seconds),
+        );
+        leafIdx++;
+        need = spacingPx * (leafIdx + 1) - acc;
+      }
+      acc += seg;
+    }
+    for (let i = leafIdx; i < parts.leaves.length; i++) parts.leaves[i].visible = false;
+  }
+
+  /** 清掉所有跨帧状态。切模板和时间倒流时调 —— 见 engine.stepTo。 */
+  resetState() {
+    for (const it of this.items) it.trail?.buffer.clear();
   }
 
   /** 四种 asset.kind 各自的栅格化路径。返回 null 表示这个元素画不出来，跳过。 */
@@ -202,6 +480,11 @@ export class ElementRenderer {
         continue;
       }
       mesh.visible = true;
+
+      if (item.trail) {
+        this.updateTrail(item, elem, t, basePx, face, hand, tracker, handTracker);
+        continue;
+      }
 
       const base = basePx * elem.size.scale * item.userScale;
       // emit-fall-fade 的 distance 以 IOD 计（face）、掌宽计（hand）或屏幕宽度计（screen）
