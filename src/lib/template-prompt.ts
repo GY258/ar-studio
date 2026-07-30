@@ -212,8 +212,12 @@ type Ease = "linear" | "in" | "out" | "inout" | "gravity" | "bounce"   // 缺省
     item: Item; children?: Generator[] }
   // 左右各一个。右侧自动带 mirror: true 并翻转 x 偏移
 | { generate: "trail"; count: number; step: number; decay?: number;
-    direction?: "down" | "down-out"; phaseShift?: number; item: Item }
-  // 一串。step 是 y 间距（IOD），phaseShift 是相邻两个的起始时间差（秒）
+    landmark?: FaceAnchorName; direction?: "down" | "down-out";
+    phaseShift?: number; item: Item }
+  // 一串。step 是 y 间距（IOD），phaseShift 是相邻两个的起始时间差（秒）。
+  // 放在顶层必须写 landmark，不写会静默挂到 nose_bridge 上；
+  // 嵌在 mirrorPair 里则不用写，父生成器会把左右锚点分别传下来。
+  // step: 0 + phaseShift 就是「同一个点错峰连发」（眼泪、吐金币）
 | { generate: "columns"; rows: number; sides: "both" | "left" | "right";
     startOffset: [number, number]; stepY: number; driftX?: number;
     labels?: string[]; item: Item }

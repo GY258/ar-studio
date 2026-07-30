@@ -7,6 +7,7 @@
 
 | key | viewBox | 高/宽 |
 |---|---|---|
+| `coin-gold` | 0 0 100 100 | 1.000 |
 | `crayon-drop` | 0 0 120 170 | 1.417 |
 | `crayon-drop-solid` | 0 0 120 170 | 1.417 |
 | `crown-flame` | 0 0 204 288 | 1.412 |
