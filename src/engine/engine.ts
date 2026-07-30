@@ -24,6 +24,15 @@ export interface EngineStats {
   fps: number;
   tracking: boolean;
   degraded: boolean;
+  /**
+   * 这个模板需不需要追踪。
+   *
+   * 不需要感知的模板（raindrops 这种纯屏幕空间贴纸）**没有东西可追**，
+   * 而 tracking 只能是 true/false 两个值 —— 于是状态栏永远显示
+   * 「Looking for a person…」，看着像检测坏了。
+   * 把「不适用」和「没追上」分开，UI 才有可能说对话。
+   */
+  needsTracking: boolean;
 }
 
 export interface EngineOptions {
@@ -543,6 +552,21 @@ export class ArEngine {
    * 而离线 harness 用的是图片源，这个 bug 在测试里根本复现不出来。
    */
   /**
+   * 渲染循环的实时状态。smoke:live 靠它判断「起来了没、追踪上没」——
+   * 读状态栏文字太脆（文案一改就断），读引擎自己的数才是可靠的。
+   */
+  debugStats() {
+    return {
+      fps: this.fps,
+      needsTracking: this.perception.length > 0,
+      tracking: this.isTracking(performance.now()),
+      degraded: this.degraded,
+      perception: this.perception.join(","),
+      templateType: this.templateType,
+    };
+  }
+
+  /**
    * 蒙版这一路的实时状态。排查「效果没生效」时的第一手证据。
    *
    * 「整幅画面都没效果」和「效果作用错了地方」是两类完全不同的故障：
@@ -937,7 +961,12 @@ export class ArEngine {
       this.fps = Math.round(this.fpsAcc / this.fpsN);
       this.fpsAcc = 0;
       this.fpsN = 0;
-      this.onStats?.({ fps: this.fps, tracking: this.isTracking(now), degraded: this.degraded });
+      this.onStats?.({
+        fps: this.fps,
+        tracking: this.isTracking(now),
+        degraded: this.degraded,
+        needsTracking: this.perception.length > 0,
+      });
     }
   };
 }
