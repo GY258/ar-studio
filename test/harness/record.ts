@@ -8,11 +8,14 @@
 
 import { MediaPipeLandmarkProvider } from "@/engine/face-tracker";
 import { MediaPipeSegmentationProvider } from "@/engine/segmentation";
+import { MediaPipeHandProvider } from "@/engine/hand-tracker";
 
 interface Recorded {
   landmarks: { x: number; y: number; z: number }[] | null;
   /** 分割置信度 0~1，逐像素。写文件时再量化成 8bit 灰度 */
   mask: { data: number[]; w: number; h: number } | null;
+  /** 手部：每只手 21 点 + 是本人的左手还是右手 */
+  hands: { hand: "left" | "right"; points: { x: number; y: number; z: number }[] }[] | null;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -27,6 +30,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 class Recorder {
   private face: MediaPipeLandmarkProvider | null = null;
   private seg: MediaPipeSegmentationProvider | null = null;
+  private hands: MediaPipeHandProvider | null = null;
 
   /** 会话级单调时钟，毫秒。见 record() 里的注释 */
   private clock = 0;
@@ -34,7 +38,8 @@ class Recorder {
   async load() {
     this.face = new MediaPipeLandmarkProvider();
     this.seg = new MediaPipeSegmentationProvider();
-    await Promise.all([this.face.load(), this.seg.load()]);
+    this.hands = new MediaPipeHandProvider();
+    await Promise.all([this.face.load(), this.seg.load(), this.hands.load()]);
   }
 
   async record(src: string): Promise<Recorded> {
@@ -51,6 +56,12 @@ class Recorder {
       landmarks = this.face!.detect(img, (this.clock += 33)) ?? landmarks;
     }
 
+    let hands: Recorded["hands"] = null;
+    for (let i = 0; i < 5; i++) {
+      const h = this.hands!.detect(img, (this.clock += 33));
+      if (h && h.length) hands = h.map((x) => ({ hand: x.hand, points: x.points }));
+    }
+
     let mask: Recorded["mask"] = null;
     for (let i = 0; i < 5; i++) {
       this.seg!.segment(img, (this.clock += 33), (data, w, h) => {
@@ -63,6 +74,12 @@ class Recorder {
         ? landmarks.map((p) => ({ x: round(p.x), y: round(p.y), z: round(p.z) }))
         : null,
       mask,
+      hands: hands
+        ? hands.map((h) => ({
+            hand: h.hand,
+            points: h.points.map((p) => ({ x: round(p.x), y: round(p.y), z: round(p.z) })),
+          }))
+        : null,
     };
   }
 }

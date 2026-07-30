@@ -6,7 +6,7 @@
  * **只有开发者本地手动跑，绝不进 CI。** 它需要下载模型（走 jsdelivr，国内不通）
  * 和一块能跑 GPU delegate 的机器。CI 回放的是这一步的产物。
  *
- * 先把真人照片放成 test/fixtures/front.png / side.png / far.png / noface.png，
+ * 先把真人照片放成 test/fixtures/front.png / side.png / far.png / noface.png / hands.png，
  * 再跑这个脚本覆盖同名的 .landmarks.json 和 .mask.png。
  * 没有真人照片时用 scripts/make-fixtures.ts 生成的合成脸，链路一样能跑通。
  * 现在仓库里的是图库照片派生的真人 fixture，来源和裁法见 test/fixtures/CREDITS.md。
@@ -23,11 +23,12 @@ import { PNG } from "pngjs";
 
 const ROOT = process.cwd();
 const FIXTURES = path.join(ROOT, "test/fixtures");
-const DEFAULT_NAMES = ["front", "side", "far", "noface"];
+const DEFAULT_NAMES = ["front", "side", "far", "noface", "hands"];
 
 interface Recorded {
   landmarks: { x: number; y: number; z: number }[] | null;
   mask: { data: number[]; w: number; h: number } | null;
+  hands: { hand: "left" | "right"; points: { x: number; y: number; z: number }[] }[] | null;
 }
 
 async function main() {
@@ -119,9 +120,19 @@ async function main() {
       fs.writeFileSync(path.join(FIXTURES, `${name}.mask.png`), PNG.sync.write(png));
     }
 
+    // 手部单独一个文件。没检测到手就不写 —— 空文件和「这张 fixture 本来就没手」
+    // 分不开，而 harness 靠文件存不存在决定要不要注入 provider
+    const handsFile = path.join(FIXTURES, `${name}.hands.json`);
+    if (rec.hands?.length) {
+      fs.writeFileSync(handsFile, JSON.stringify(rec.hands));
+    } else if (fs.existsSync(handsFile)) {
+      fs.rmSync(handsFile);
+    }
+
     console.log(
       `✓ ${name}  landmark ${rec.landmarks ? `${rec.landmarks.length} 点` : "无"}，` +
         `mask ${rec.mask ? `${rec.mask.w}x${rec.mask.h}` : "无"}`,
+        `hands ${rec.hands?.length ? `${rec.hands.length} 只（${rec.hands.map((h) => h.hand).join("/")}）` : "无"}`,
     );
   }
 

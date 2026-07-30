@@ -99,10 +99,13 @@ export type TemplateType = "particle" | "overlay" | "facetrack";
  * 是合法且常用的组合。不要因为 anchor 是 face 就假定 size 一定是 iod。
  * ------------------------------------------------------------ */
 
-export type AnchorSpace = "screen" | "face";
+export type AnchorSpace = "screen" | "face" | "hand";
 
-/** 尺寸参照物。face_width / eye_width 由 landmark 实测，人退远会一起缩小；vw 不会。 */
-export type SizeRef = "vw" | "iod" | "eye_width" | "face_width";
+/**
+ * 尺寸参照物。face_width / eye_width / palm_width 由 landmark 实测，
+ * 人退远会一起缩小；vw 不会。
+ */
+export type SizeRef = "vw" | "iod" | "eye_width" | "face_width" | "palm_width";
 
 /**
  * scale 到底在量什么。
@@ -134,10 +137,67 @@ export type ElementAsset =
   | { kind: "svg-inline"; svg: string }
   | { kind: "text"; text: string; fontWeight?: number; color?: string; shadow?: string }
   /** 程序化径向渐变椭圆，腮红这类不值得做成素材的东西 */
-  | { kind: "gradient"; shape: "ellipse"; color: string; opacity?: number };
+  | { kind: "gradient"; shape: "ellipse"; color: string; opacity?: number }
+  /**
+   * 轨迹：锚点走过的路，画成一条带。
+   *
+   * **这是第一个几何形状依赖时间历史的 asset。** 别的 asset 都是
+   * f(当前帧) 的纯函数，它是 f(这一段时间里锚点去过哪)。所以它要求
+   * 离线渲染走 stepTo(t) 逐步积过去，不能像别的模板那样直接跳到任意 t。
+   *
+   * size.scale 量的是带的宽度（相对 size.ref）。
+   */
+  | {
+      kind: "trail";
+      color: string;
+      /** 保留多久的历史，秒。也就是这条带有多长 */
+      seconds: number;
+      /** 沿途长叶子。位置由 hash(第几片, seed) 定，纯函数，不额外占状态 */
+      leaf?: {
+        /** svg-lib 的 key */
+        key: string;
+        /** 相邻两片的间距，单位是 size.ref */
+        spacing: number;
+        /** 叶子大小，相对 size.ref */
+        scale: number;
+        /** 必填。没有 seed 每次展开长的位置都不一样，golden 对比不成立 */
+        seed: number;
+      };
+    }
+  /**
+   * 捏合绽放：拇指和食指捏在一起时，在捏合点冒出一朵，然后放大淡出。
+   *
+   * 和 trail 一样依赖跨帧状态（要知道「刚捏上」而不是「正捏着」），
+   * 所以同样要求离线渲染走 stepTo。锚点只需要 space "hand" + hand，
+   * 位置由拇指尖和食指尖的中点算，写哪个 landmark 都不影响结果。
+   */
+  | {
+      kind: "pinch-bloom";
+      /** svg-lib 的 key。开出来的是什么花 */
+      key: string;
+      /** 一朵活多久，秒 */
+      seconds: number;
+      /** 最终大小相对 size.ref 的倍数 */
+      grow: number;
+    };
 
 export type ElementAnchor =
   | { space: "screen"; nx: number; ny: number }
+  /**
+   * 手部锚点。hand 说的是**本人的**左右手，不是画面上的左右 ——
+   * 画面是镜像的，本人的左手出现在屏幕右侧。按「戴戒指的那只手」思考。
+   *
+   * 一个元素绑一只手的一个点。要「十根指尖各挂一个」就写十个元素；
+   * 这比引入一个「按手展开」的隐式复制要好，因为每根手指挂的东西通常不一样。
+   */
+  | {
+      space: "hand";
+      hand: "left" | "right";
+      /** 只写语义名，见 hand-anchors.ts */
+      landmark: string;
+      /** 相对锚点的偏移，单位是掌宽 */
+      offset?: [number, number];
+    }
   /** landmark 只写语义名。数字是 v1 兼容层的产物，新 JSON 会被校验拒收。 */
   | {
       space: "face";

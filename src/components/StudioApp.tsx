@@ -21,7 +21,12 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
   const [listing, setListing] = useState<TemplateListing[]>([]);
   const [config, setConfig] = useState<TemplateConfig | null>(null);
   const [values, setValues] = useState<ControlValues>({});
-  const [stats, setStats] = useState<EngineStats>({ fps: 0, tracking: false, degraded: false });
+  const [stats, setStats] = useState<EngineStats>({
+    fps: 0,
+    tracking: false,
+    degraded: false,
+    needsTracking: true,
+  });
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState<RecordingResult | null>(null);
@@ -274,8 +279,10 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
 
   const statusLine = useMemo(() => {
     if (phase !== "live") return "";
-    const track = stats.tracking ? COPY.studio.tracking : COPY.studio.waiting;
-    return `${track} · ${stats.fps} fps${stats.degraded ? ` · ${COPY.studio.degraded}` : ""}`;
+    // 不需要感知的模板没有东西可追，说「在找人」是假信息
+    const track = !stats.needsTracking ? "" : stats.tracking ? COPY.studio.tracking : COPY.studio.waiting;
+    const parts = [track, `${stats.fps} fps`, stats.degraded ? COPY.studio.degraded : ""].filter(Boolean);
+    return parts.join(" · ");
   }, [phase, stats]);
 
   /* ============================================================

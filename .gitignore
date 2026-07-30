@@ -16,3 +16,5 @@ public/vendor
 .preview
 test/.artifacts
 test-results
+.smoke
+.next-smoke

@@ -7,11 +7,24 @@
 
 | key | viewBox | 高/宽 |
 |---|---|---|
+| `coin-gold` | 0 0 100 100 | 1.000 |
 | `crayon-drop` | 0 0 120 170 | 1.417 |
 | `crayon-drop-solid` | 0 0 120 170 | 1.417 |
+| `crown-flame` | 0 0 204 288 | 1.412 |
 | `cursor-hand` | 0 0 32 32 | 1.000 |
+| `emoji-blossom` | 0 0 36 36 | 1.000 |
+| `emoji-cherry-blossom` | 0 0 36 36 | 1.000 |
+| `emoji-gem` | 0 0 36 36 | 1.000 |
+| `emoji-leaf` | 0 0 36 36 | 1.000 |
+| `emoji-lotus` | 0 0 36 36 | 1.000 |
+| `emoji-mushroom` | 0 0 36 36 | 1.000 |
+| `emoji-rose` | 0 0 36 36 | 1.000 |
+| `emoji-sparkles` | 0 0 36 36 | 1.000 |
+| `emoji-sunflower` | 0 0 36 36 | 1.000 |
+| `emoji-tulip` | 0 0 36 36 | 1.000 |
 | `folder` | 0 0 112 92 | 0.821 |
 | `quality-menu` | 0 0 340 300 | 0.882 |
+| `slot-machine` | 0 0 200 250 | 1.250 |
 | `tear-drop` | 0 0 24 34 | 1.417 |
 | `tear-splash` | 0 0 96 40 | 0.417 |
 | `tear-streak` | 0 0 52 28 | 0.538 |

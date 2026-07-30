@@ -18,6 +18,7 @@ import { test, expect } from "@playwright/test";
 import type { PNG } from "pngjs";
 import { expandGenerators } from "../src/engine/generators";
 import { applyEase, evaluateAnimations } from "../src/engine/animations";
+import { PinchDetector } from "../src/engine/trail";
 import { migrateElements } from "../src/lib/migrate";
 import {
   launchHarness,
@@ -89,6 +90,19 @@ function highFreq(p: PNG, x0: number, y0: number, w: number, h: number): number 
   return n ? sum / n : 0;
 }
 
+/**
+ * 这个模板该用哪张 fixture 跑回归。
+ *
+ * 默认 front，但手部模板必须用 hands —— front 那张照片里没有手，
+ * 手部锚点解不出来，元素全部隐藏，「元素覆盖的像素比例 > 0.001」直接红。
+ * 按 perception 选而不是让模板自己声明测试用哪张图：测试用哪张输入是测试的事，
+ * 不该污染产品 schema。
+ */
+function fixtureFor(templatePath: string): FixtureName {
+  const raw = JSON.parse(fs.readFileSync(templatePath, "utf8"));
+  return Array.isArray(raw.perception) && raw.perception.includes("hands") ? "hands" : "front";
+}
+
 /** 展开后有没有动画。静态模板不该被「动画在动」那条断言卡住。 */
 function hasAnimations(templatePath: string): boolean {
   const raw = JSON.parse(fs.readFileSync(templatePath, "utf8"));
@@ -151,7 +165,8 @@ for (const file of templatesWithElements()) {
 
   test(`${slug} · 渲染回归`, async () => {
     const { period: P, closes } = templatePeriod(templatePath);
-    const count = await loadTemplate(harness.page, templatePath, "front");
+    const fx = fixtureFor(templatePath);
+    const count = await loadTemplate(harness.page, templatePath, fx);
     expect(count, "展开后应该有元素").toBeGreaterThan(0);
 
     const t0 = decode(await capture(harness.page, 0));
@@ -175,9 +190,9 @@ for (const file of templatesWithElements()) {
     }
     expect(ratio, `整帧差异像素比例（差异图见 test/.artifacts/${slug}-diff.png）`).toBeLessThanOrEqual(DIFF_MAX);
 
-    const base = await baseFrame("front");
+    const base = await baseFrame(fx);
     // baseFrame 换过模板，要把待测模板装回来
-    await loadTemplate(harness.page, templatePath, "front");
+    await loadTemplate(harness.page, templatePath, fx);
 
     expect(maskIoU(t0, golden, base), "元素掩膜 IoU").toBeGreaterThanOrEqual(IOU_MIN);
 
@@ -529,6 +544,146 @@ test("帧效果必须挂在内置材质上，不能退回裸 ShaderMaterial", as
   // 也就是说这个 bug 只能靠真机发现 —— 所以在这里把选择本身钉死。
   await loadTemplate(harness.page, path.join(TEMPLATES, "lowres-life.json"), "front");
   expect(await harness.page.evaluate(() => window.harness.bgMaterialType())).toBe("MeshBasicMaterial");
+});
+
+test("手部感知：有手时元素显示，没手时隐藏", async () => {
+  /*
+   * 这条同时钉两件事。
+   *
+   * 一、`perception: ["hands"]` 真的接上了。它曾经是个**静默失效的枚举值** ——
+   *     types.ts 和 validate.ts 都认，而 engine.perceive() 没有对应分支，
+   *     模板写了能过校验、能渲染、什么都不发生、也不报错。和当初的 blur 一样。
+   *     有人把 perceive 里那行删掉，这条会立刻红。
+   *
+   * 二、丢手兜底。手部元素在没有手时必须隐藏，而不是画到画面角上或者 (0,0)。
+   */
+  const tpl = path.join(TEMPLATES, "finger-flowers.json");
+
+  await loadTemplate(harness.page, tpl, "hands");
+  const withHands = decode(await capture(harness.page, 0));
+  const handsBase = await baseFrame("hands");
+  expect(coverage(withHands, handsBase), "有手时指尖元素应该画出来").toBeGreaterThan(0.002);
+
+  // front 那张照片里没有手，fixture 也没录 hands.json
+  await loadTemplate(harness.page, tpl, "front");
+  const noHands = decode(await capture(harness.page, 0));
+  const frontBase = await baseFrame("front");
+  expect(coverage(noHands, frontBase), "没有手时手部元素必须全部隐藏").toBeLessThan(0.0005);
+});
+
+test("轨迹：状态层确定，且带真的在长", async () => {
+  /*
+   * 这条是整个跨帧状态层的验收条件。
+   *
+   * 加状态之前 renderAt(t) 是无历史的纯函数 —— golden 回归、CI 不用摄像头、
+   * LLM 能拿到反馈全建立在那上面。加了轨迹之后必须证明「同一份输入渲染多少次
+   * 都是同一张图」仍然成立，否则整套离线验证就废了。
+   *
+   * 三件事一起验：
+   *   长  —— 带确实随时间变长（不然「实现了」和「画了个空」分不开）
+   *   确定 —— 同一个 t 渲染两次逐位相同。第二次会触发时间倒流 → 清状态 → 从头重积，
+   *           这恰好是最容易出错的路径：只要有一点状态没清干净，两张图就不一样
+   *   非空 —— 带真的画出了像素，不是几何算对了但顶点全塌在一起
+   */
+  const tpl = path.join(TEMPLATES, "finger-flowers.json");
+  await loadTemplate(harness.page, tpl, "hands");
+  const base = await baseFrame("hands");
+  await loadTemplate(harness.page, tpl, "hands");
+
+  const early = decode(await capture(harness.page, 0.3));
+  const lateBuf = await capture(harness.page, 2.4);
+  const late = decode(lateBuf);
+
+  const covEarly = coverage(early, base);
+  const covLate = coverage(late, base);
+  expect(covLate, "带应该画出成规模的像素").toBeGreaterThan(0.01);
+  expect(covLate / covEarly, `带应该随时间变长（${covEarly.toFixed(4)} → ${covLate.toFixed(4)}）`).toBeGreaterThan(1.5);
+
+  // 再来一次同一个 t。走的是「时间倒流 → 清状态 → 重新按定步长积到 2.4」
+  const again = await capture(harness.page, 2.4);
+  expect(again.equals(lateBuf), "同一个 t 渲染两次必须逐位相同，否则状态没清干净或步长不定").toBe(true);
+});
+
+test("捏合是边沿触发，不是状态触发", () => {
+  /*
+   * 纯函数，不进浏览器。
+   *
+   * 这条钉的是「一次动作 = 一朵花」。用状态触发（每帧只看在不在捏）的话，
+   * 捏住一秒会蹦出十几朵 —— 而且这个 bug 在截图上看不出来，
+   * 因为叠在一起的花和一朵花长得差不多。
+   *
+   * 顺带钉住迟滞：单阈值会在临界点反复触发，手抖一下就是一串。
+   */
+  const d = new PinchDetector(2);
+  // 松开状态喂几帧，不该触发
+  expect(d.update(0.0, 0.9, 0.5, 0.5)).toBe(false);
+  expect(d.update(0.1, 0.6, 0.5, 0.5)).toBe(false);
+  // 越过 ON 阈值：触发一次
+  expect(d.update(0.2, 0.2, 0.5, 0.5)).toBe(true);
+  // 继续捏着：不该再触发
+  expect(d.update(0.3, 0.15, 0.5, 0.5)).toBe(false);
+  expect(d.update(0.4, 0.25, 0.5, 0.5)).toBe(false);
+  // 回到 ON 和 OFF 之间的迟滞带：仍然算捏着，不该重新触发
+  expect(d.update(0.5, 0.35, 0.5, 0.5)).toBe(false);
+  expect(d.live().length).toBe(1);
+  // 越过 OFF 阈值才算松开，之后再捏才是第二次
+  expect(d.update(0.6, 0.5, 0.5, 0.5)).toBe(false);
+  expect(d.update(0.7, 0.2, 0.5, 0.5)).toBe(true);
+  expect(d.live().length).toBe(2);
+  // 超过存活时长的事件要过期
+  d.update(3.0, 0.9, 0.5, 0.5);
+  expect(d.live().length).toBe(0);
+});
+
+test("捏合绽放：捏合窗口里真的开出花", async () => {
+  // fixture 序列的捏合窗口在全程 30%~40%，3 秒序列就是 0.9~1.2s
+  const tpl = path.join(TEMPLATES, "finger-flowers.json");
+  await loadTemplate(harness.page, tpl, "hands");
+  const base = await baseFrame("hands");
+  await loadTemplate(harness.page, tpl, "hands");
+
+  const before = coverage(decode(await capture(harness.page, 0.8)), base);
+  const during = coverage(decode(await capture(harness.page, 1.05)), base);
+  expect(during, `捏合时该多出一朵（${before.toFixed(4)} → ${during.toFixed(4)}）`).toBeGreaterThan(before * 1.15);
+});
+
+test("切模板不留残渣：池化的 mesh 也要拆干净", async () => {
+  /*
+   * 这条堵的是我真的犯过的一个 bug：trail 的叶子池和 pinch-bloom 的花池是单独
+   * add 到 group 里的，而 clear() 原来只移除 item.mesh —— 从「指尖开花」切走之后，
+   * 叶子还挂在脸上，永久不走。
+   *
+   * **断言必须是结构性的，不能看像素。** 我第一版写的是「切换后覆盖率应该接近底图」，
+   * 结果 bug 在的时候它照样绿：切换那一刻 131 个泄漏对象里只有 3 个恰好是可见的
+   * （叶子池里超出当前茎长的那些本来就隐藏着），像素上根本看不出来。
+   * 而在真机上它非常明显 —— 用户切换时手已经动了一阵，茎长、叶子多。
+   *
+   * 不可见的泄漏仍然是泄漏：内存在涨，而且换个时机就会露出来。
+   * 所以比的是「同一个模板，全新装载 vs 从别的模板切过来」的对象数。
+   * 这样也不用把「black-lodge 有几个 mesh」这种数字写死在测试里。
+   */
+  const objects = () =>
+    harness.page.evaluate(
+      () =>
+        (window as unknown as { harness: { engine: { debugStats(): { elementObjects: number } } } }).harness.engine
+          .debugStats().elementObjects,
+    );
+
+  const target = path.join(TEMPLATES, "black-lodge.json");
+
+  // 基准：全新装载 black-lodge 该有多少个对象
+  await loadTemplate(harness.page, target, "hands");
+  const fresh = await objects();
+  expect(fresh, "基准本身得非零，否则这条断言是空的").toBeGreaterThan(0);
+
+  // 装一个有池化 mesh 的模板，跑到轨迹和绽放都长出来，再在**同一个引擎上**切过去
+  await loadTemplate(harness.page, path.join(TEMPLATES, "finger-flowers.json"), "hands");
+  await capture(harness.page, 1.6);
+  const loaded = await objects();
+  expect(loaded, "指尖开花的对象数该远多于 black-lodge（有叶子池和花池）").toBeGreaterThan(fresh * 3);
+
+  await switchTemplate(harness.page, target);
+  expect(await objects(), "切过来之后的对象数必须和全新装载一致").toBe(fresh);
 });
 
 test("文字用的是内嵌字体，不是系统字体", async () => {

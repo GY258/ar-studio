@@ -14,7 +14,7 @@
   "hidden": false,                      // 可选。true = 不进模板库列表，但 /studio/<slug> 仍可直接访问
   "schema_version": 2,
   "template_type": "facetrack | overlay",
-  "perception": ["face"],               // 用到什么感知能力就写什么
+  "perception": ["face"],               // segmentation / face / hands，用到什么写什么
   "preview": {},
   "elements": [ /* ElementV2 或生成器 */ ],
   "source": { /* 可选，帧效果 */ }
@@ -47,14 +47,20 @@ type ElementAsset =
   | { kind: "svg-inline"; svg: string }        // 现写的 SVG，必须带 viewBox
   | { kind: "text";       text: string; color?: string; fontWeight?: number; shadow?: string }
   | { kind: "gradient";   shape: "ellipse"; color: string; opacity?: number }
+  | { kind: "trail";      color: string; seconds: number;   // 锚点走过的路，画成一条带
+      leaf?: { key: string; spacing: number; scale: number; seed: number } }
+  | { kind: "pinch-bloom"; key: string; seconds: number; grow: number }  // 捏合时开一朵
 
 type ElementAnchor =
   | { space: "screen"; nx: number; ny: number }   // 归一化屏幕坐标，[-0.2, 1.2]
   | { space: "face";   landmark: FaceAnchorName;  // 只写语义名，绝不写数字
       offset?: [number, number];                  // 单位 IOD（瞳距），y 正数向下
       mirror?: boolean }                          // 水平翻转
+  | { space: "hand";   hand: "left" | "right";    // **本人的**左右手，见下
+      landmark: HandAnchorName;
+      offset?: [number, number] }                 // 单位掌宽，y 正数向下
 
-type SizeRef = "vw" | "iod" | "eye_width" | "face_width"
+type SizeRef = "vw" | "iod" | "eye_width" | "face_width" | "palm_width"
 type SizeFit = "width" | "font"
 ```
 
@@ -77,6 +83,70 @@ svg 和 gradient 只有宽度一种含义，写 `fit: "font"` 也按宽度处理
 - `add` 发光 → 星星、光斑
 
 贴在脸上的半透明东西默认就该考虑 `multiply` 或 `screen`，别一律用 normal。
+
+### trail —— 锚点走过的路
+
+```jsonc
+{ "id": "stem-l-index",
+  "asset": { "kind": "trail", "color": "#FFD54F", "seconds": 2.6,
+             "leaf": { "key": "emoji-leaf", "spacing": 0.75, "scale": 0.24, "seed": 11 } },
+  "anchor": { "space": "hand", "hand": "left", "landmark": "index_tip" },
+  "size": { "ref": "palm_width", "scale": 0.035 } }   // scale 是带的宽度
+```
+
+**这是唯一一个几何形状依赖时间历史的 asset。** 别的都是「当前帧」的纯函数，
+它是「这一段时间里锚点去过哪」。所以：
+
+- 必须锚在**会动**的东西上（`space` 是 `hand` 或 `face`）。锚在 screen 上是
+  一个固定点，没有轨迹，校验器会拦
+- `seconds` 既是保留多久的历史，也就是这条带有多长
+- `leaf.seed` 必填。叶子的位置和大小是 `hash(第几片, seed)` 的纯函数，
+  不占额外状态，但没有 seed 每次长的地方都不一样，golden 对比不成立
+
+采样落在固定的 12Hz 时间网格上，不是每帧一次 —— 每帧一次的话同一段手势在
+60fps 和 20fps 下会生成不同的带。相邻采样点位移超过 0.18 屏会**断开重新起一条**：
+手划出画面再进来、检测短暂丢失重新锁定，都会瞬移，连起来就是一条横跨画面的假线。
+
+### pinch-bloom —— 捏合绽放
+
+```jsonc
+{ "id": "bloom-left",
+  "asset": { "kind": "pinch-bloom", "key": "emoji-cherry-blossom", "seconds": 1.1, "grow": 0.85 },
+  "anchor": { "space": "hand", "hand": "left", "landmark": "index_tip" },
+  "size": { "ref": "palm_width", "scale": 1 } }
+```
+
+拇指和食指捏在一起时，在**两指中点**冒出一朵，然后放大淡出。
+锚点必须是 `space: "hand"`（捏合要靠拇指尖和食指尖的距离判定）；
+写哪个 `landmark` 不影响结果，位置永远取两指中点。
+
+**边沿触发，不是状态触发**：一次捏合 = 一朵花。判定带迟滞（0.28 收 / 0.42 放），
+不然手在临界点抖一下就是一串。距离除以掌宽再判，否则人退远之后永远算捏合中。
+
+和 trail 一样依赖跨帧状态，所以同样要求离线渲染走 stepTo。
+
+### 手部锚点
+
+```jsonc
+{ "id": "l-index", "asset": { "kind": "svg-lib", "key": "emoji-sunflower" },
+  "anchor": { "space": "hand", "hand": "left", "landmark": "index_tip", "offset": [0, 0.18] },
+  "size": { "ref": "palm_width", "scale": 0.4 } }
+```
+
+**`hand` 说的是本人的左右手，不是画面上的左右。** 画面是镜像的，
+本人的左手出现在屏幕右侧。按「戴戒指的那只手」思考，别按屏幕位置思考。
+
+**一个元素绑一只手的一个点。** 要「十根指尖各挂一个」就写十个元素 ——
+没有「按手自动复制」的生成器，因为每根手指挂的东西通常不一样。
+
+`offset` 单位是**掌宽**（食指根到小指根），和人脸那边用 IOD 是一个道理：
+用像素的话人一退远偏移就不成比例了。`size.ref: "palm_width"` 同理。
+
+**手部元素默认不跟手转**（`followRoll` 缺省 false）：emoji 立着好看，
+而且手的 roll 抖动比头大得多。要跟就显式写 `followRoll: true`。
+
+用了手部锚点或 `palm_width` 就**必须** `perception: ["hands"]`，校验器会拦 ——
+忘了声明的话手部模型不加载，元素永远隐藏，而且不报错。
 
 **`interactive`** 让用户在画面上直接拖动元素、滚轮或双指缩放它。
 只对 `space: "screen"` 有意义——face 空间的位置由 landmark 决定，拖了下一帧就被拉回去。
@@ -124,8 +194,12 @@ type Ease = "linear" | "in" | "out" | "inout" | "gravity" | "bounce"   // 缺省
     item: Item; children?: Generator[] }
   // 左右各一个。右侧自动带 mirror: true 并翻转 x 偏移
 | { generate: "trail"; count: number; step: number; decay?: number;
-    direction?: "down" | "down-out"; phaseShift?: number; item: Item }
-  // 一串。step 是 y 间距（IOD），phaseShift 是相邻两个的起始时间差（秒）
+    landmark?: FaceAnchorName; direction?: "down" | "down-out";
+    phaseShift?: number; item: Item }
+  // 一串。step 是 y 间距（IOD），phaseShift 是相邻两个的起始时间差（秒）。
+  // 放在顶层必须写 landmark，不写会静默挂到 nose_bridge 上；
+  // 嵌在 mirrorPair 里则不用写，父生成器会把左右锚点分别传下来。
+  // step: 0 + phaseShift 就是「同一个点错峰连发」（眼泪、吐金币）
 | { generate: "columns"; rows: number; sides: "both" | "left" | "right";
     startOffset: [number, number]; stepY: number; driftX?: number;
     labels?: string[]; item: Item }
@@ -261,6 +335,13 @@ inside 时脸上不作用，outside 时脸上保持原样。丢脸时自动关�
 4. 单模板展开后 ≤ 120 个元素。
 5. 引擎里不允许出现 `if (slug === "...")`。需要新维度就扩 schema，不要开特例分支。
 
-## 可用锚点（24 个）
+## 可用人脸锚点（24 个）
 
 lower_eyelid_left, lower_eyelid_right, upper_eyelid_left, upper_eyelid_right, eye_outer_left, eye_outer_right, iris_left, iris_right, nose_bridge, nose_tip, forehead, head_top, chin, mouth_center, upper_lip, lower_lip, cheek_left, cheek_right, temple_left, temple_right, jaw_left, jaw_right, ear_left, ear_right
+
+## 可用手部锚点（20 个）
+
+wrist, thumb_mcp, thumb_ip, thumb_tip, index_mcp, index_pip, index_dip, index_tip, middle_mcp, middle_pip, middle_dip, middle_tip, ring_mcp, ring_pip, ring_dip, ring_tip, pinky_mcp, pinky_pip, pinky_dip, pinky_tip
+
+指尖是 `thumb_tip` / `index_tip` / `middle_tip` / `ring_tip` / `pinky_tip`；
+`_mcp` 是指根、`_pip` 和 `_dip` 是中间关节、`wrist` 是手腕。

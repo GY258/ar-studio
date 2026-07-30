@@ -32,11 +32,28 @@ export function sanitizeSvg(svg: string): string[] {
     problems.push("Event handler attributes (on*) are not allowed");
   }
 
-  // 检查外链（只允许 # 开头的内部引用）
+  /*
+   * 检查外链。允许两种：# 开头的内部引用，以及内联的**光栅** data URI。
+   *
+   * 放开 data URI 是因为这条规则的意图是「不许引用外部资源」，
+   * 而 data: 是自包含的 —— 它既不发请求，也不会让同一份素材在不同环境下变样。
+   * 画出来的火焰、拍出来的贴纸这类东西没法用路径表达，嵌一张位图是唯一的路。
+   *
+   * 但**只准光栅**：data:image/svg+xml 能套一层嵌套 SVG，而嵌套的那层不会被这个
+   * 清洗器看到 —— 里面塞 script 就绕过去了。png / jpeg / webp 没有这个问题。
+   */
+  const RASTER_DATA_URI = /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i;
   const hrefPattern = /(?:href|xlink:href)\s*=\s*["'](?!#)([^"']*)/gi;
   while ((match = hrefPattern.exec(svg)) !== null) {
-    if (match[1] && !match[1].startsWith("#")) {
-      problems.push(`External href not allowed: ${match[1].slice(0, 50)}`);
+    const v = match[1];
+    if (!v || v.startsWith("#") || RASTER_DATA_URI.test(v)) continue;
+    if (/^data:/i.test(v)) {
+      problems.push(
+        `Inline data URI must be a raster image (png/jpeg/webp/gif); ` +
+          `data:image/svg+xml is rejected because a nested SVG bypasses this sanitizer: ${v.slice(0, 40)}`,
+      );
+    } else {
+      problems.push(`External href not allowed: ${v.slice(0, 50)}`);
     }
   }
 

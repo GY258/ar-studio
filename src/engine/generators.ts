@@ -51,6 +51,14 @@ export type GeneratorV2 =
       generate: "trail";
       count: number;
       /**
+       * 挂在哪个人脸锚点上。只对**顶层** trail 有意义。
+       *
+       * 嵌在 mirrorPair 里的时候父生成器会把左右两侧的锚点分别传下来，那个优先 ——
+       * 不然右侧那串会跟着左侧的锚点跑，镜像就散了。
+       * 都没有才回落到 nose_bridge（眼泪那套的原始行为）。
+       */
+      landmark?: string;
+      /**
        * 整串的起点偏移 [x, y]，单位 IOD。
        * 不给的话第一个元素正好压在锚点上——眼泪这种「从泪痕下沿冒出来」的效果
        * 就会变成「从眼睑里穿出来」，水滴顶端戳到横条上面去。
@@ -257,7 +265,7 @@ function expand(
     }
 
     case "trail": {
-      const lm = parentLandmark ?? "nose_bridge";
+      const lm = parentLandmark ?? gen.landmark ?? "nose_bridge";
       const phaseShift = gen.phaseShift ?? 0;
       const [baseX, baseY] = gen.offset ?? [0, 0];
       for (let i = 0; i < gen.count; i++) {

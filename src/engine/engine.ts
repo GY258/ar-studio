@@ -14,15 +14,33 @@ import {
   type FrameSource,
   type LandmarkProvider,
 } from "./face-tracker";
+import { HandTracker, MediaPipeHandProvider, type HandLandmarkProvider } from "./hand-tracker";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
 import { EFFECT_COMBINE, EFFECT_SNIPPETS } from "./source-effects";
 import type { ControlValues, TemplateConfig, TemplateType } from "./types";
 
+/**
+ * 状态推进的定步长，秒。
+ *
+ * 1/60 而不是跟着真实帧率：轨迹这类跨帧状态一旦依赖 dt，
+ * 同一段输入在快机器和慢机器上就会算出不同结果，golden 立刻失效。
+ */
+const SIM_STEP = 1 / 60;
+
 export interface EngineStats {
   fps: number;
   tracking: boolean;
   degraded: boolean;
+  /**
+   * 这个模板需不需要追踪。
+   *
+   * 不需要感知的模板（raindrops 这种纯屏幕空间贴纸）**没有东西可追**，
+   * 而 tracking 只能是 true/false 两个值 —— 于是状态栏永远显示
+   * 「Looking for a person…」，看着像检测坏了。
+   * 把「不适用」和「没追上」分开，UI 才有可能说对话。
+   */
+  needsTracking: boolean;
 }
 
 export interface EngineOptions {
@@ -67,6 +85,7 @@ export class ArEngine {
   private emitPos = { x: 0, y: 0.34 };
   private readonly elements: ElementRenderer;
   private readonly faceTracker = new FaceTracker();
+  private readonly handTracker = new HandTracker();
   private templateType: TemplateType = "particle";
   private perception: string[] = ["segmentation"];
   private segProvider: SegmentationProvider | null = null;
@@ -83,6 +102,8 @@ export class ArEngine {
   /** 注入进背景材质的 uniform 引用，onBeforeCompile 时拿到 */
   private bgUniforms: Record<string, { value: unknown }> | null = null;
   private raf = 0;
+  /** 模拟到了哪个时刻，秒。-1 = 还没开始 */
+  private simT = -1;
   private lastT = 0;
   private lastVideoTime = -1;
   private fpsAcc = 0;
@@ -151,6 +172,11 @@ export class ArEngine {
     return this.elements.ready();
   }
 
+  /** 注入手部来源。不调用则用 MediaPipe，测试里注入 fixture 回放。 */
+  setHandProvider(p: HandLandmarkProvider) {
+    this.handTracker.setProvider(p);
+  }
+
   /** 注入分割来源。不调用则用 MediaPipe，测试里注入 fixture 回放。 */
   setSegmentationProvider(p: SegmentationProvider) {
     this.segProvider?.close?.();
@@ -164,6 +190,13 @@ export class ArEngine {
     const provider = new MediaPipeSegmentationProvider();
     await provider.load();
     this.segProvider = provider;
+  }
+
+  async loadHands(): Promise<void> {
+    if (this.handTracker.hasProvider()) return; // 已注入 fixture provider 就别再拉模型
+    const provider = new MediaPipeHandProvider();
+    await provider.load();
+    this.handTracker.setProvider(provider);
   }
 
   async loadFace(): Promise<void> {
@@ -216,6 +249,7 @@ export class ArEngine {
     this.particles.dispose();
     this.elements.dispose();
     this.faceTracker.dispose();
+    this.handTracker.dispose();
     this.sourceTex.dispose();
     this.propTextures.forEach((t) => t.dispose());
     this.renderer.dispose();
@@ -246,10 +280,16 @@ export class ArEngine {
     if (cfg.source?.mask.exclude === "face" && !this.perception.includes("face")) {
       this.perception.push("face");
     }
+    // 有 hand 空间元素就要手部感知，同样兜底
+    if (cfg.elements?.some((e) => e.anchor.space === "hand") && !this.perception.includes("hands")) {
+      this.perception.push("hands");
+    }
 
     // 清理其他类型的渲染状态
     this.elements.clear();
+    this.resetSim();
     this.faceTracker.reset();
+    this.handTracker.reset();
     this.particles.clear();
     this.particles.hide();
     this.prop.visible = false;
@@ -281,6 +321,9 @@ export class ArEngine {
     }
     if (this.perception.includes("face")) {
       this.loadFace().catch((e) => this.onError?.(e as Error));
+    }
+    if (this.perception.includes("hands")) {
+      this.loadHands().catch((e) => this.onError?.(e as Error));
     }
   }
 
@@ -520,6 +563,35 @@ export class ArEngine {
    * 而离线 harness 用的是图片源，这个 bug 在测试里根本复现不出来。
    */
   /**
+   * 渲染循环的实时状态。smoke:live 靠它判断「起来了没、追踪上没」——
+   * 读状态栏文字太脆（文案一改就断），读引擎自己的数才是可靠的。
+   */
+  debugStats() {
+    return {
+      fps: this.fps,
+      needsTracking: this.perception.length > 0,
+      tracking: this.isTracking(performance.now()),
+      degraded: this.degraded,
+      perception: this.perception.join(","),
+      templateType: this.templateType,
+      elementCount: this.elements.count(),
+      /**
+       * 元素组里实际有多少个 Object3D。
+       *
+       * 和 elementCount 分开报，因为一个元素可能拥有多个 mesh（轨迹的叶子池、
+       * 绽放的花池）。**切模板后这个数没回落就是泄漏了** ——
+       * 而泄漏出来的东西当时可能刚好是隐藏的，像素断言抓不到。
+       */
+      elementObjects: this.elements.objectCount(),
+      /**
+       * 解不出素材、被跳过的元素。**非空就是有东西没画出来**。
+       * smoke:live 据此判失败 —— 这个失效模式以前是完全静默的。
+       */
+      missingAssets: [...this.elements.missing()],
+    };
+  }
+
+  /**
    * 蒙版这一路的实时状态。排查「效果没生效」时的第一手证据。
    *
    * 「整幅画面都没效果」和「效果作用错了地方」是两类完全不同的故障：
@@ -646,6 +718,7 @@ export class ArEngine {
     this.particles.setPixelRatio(dpr);
     this.elements.setViewport(this.W, this.H);
     this.faceTracker.setViewport(this.W, this.H);
+    this.handTracker.setViewport(this.W, this.H);
     this.layoutProp();
   }
 
@@ -776,12 +849,60 @@ export class ArEngine {
    * t 是秒，nowMs 是毫秒——两者独立传，因为丢脸容忍用的是 ms 时间轴。
    */
   renderAt(t: number, nowMs = t * 1000) {
+    this.advance(t, nowMs);
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * 推进到时刻 t，但不渲染。感知、蒙版、元素状态都在这里更新。
+   *
+   * 和 renderAt 分开是为了 stepTo：有跨帧状态之后，「渲染 t 时刻」不再等于
+   * 「把所有东西设成 t 时刻的值」，而是「从当前时刻一步步走到 t」。
+   */
+  private advance(t: number, nowMs = t * 1000) {
     this.perceive(nowMs);
     this.updateMask();
     this.setEffectTime(t);
     this.setFaceProtect(nowMs);
-    this.elements.update(t, this.faceTracker, this.faceTracker.frame(nowMs));
+    this.elements.update(t, this.faceTracker, this.faceTracker.frame(nowMs), this.handTracker, nowMs);
+    this.simT = t;
+  }
+
+  /**
+   * 按定步长积到 t，然后渲染一帧。有轨迹这类跨帧状态的模板必须走这条。
+   *
+   * 为什么不能直接 renderAt(t)：轨迹是「锚点走过的路」，直接跳过去等于
+   * 只喂了一个点，画不出带。而且**步长必须是定的** —— 跟着真实帧率走的话
+   * 同一段手势在不同机器上生成不同的轨迹，golden 不成立。
+   *
+   * 时间倒流（先渲染 t=P 再渲染 t=0）时从头重算：状态是历史的函数，
+   * 倒着走没有意义。TrailBuffer 里也有一层同样的保护。
+   */
+  stepTo(t: number, step = SIM_STEP) {
+    if (t < this.simT) this.resetSim();
+    // 首次调用时不从 0 补一整段：那会让「渲染 t=10s」变成 600 步的空转
+    let tt = this.simT < 0 ? t : this.simT;
+    /*
+     * 循环停在 t **之前**，最后无条件在 t 上推进一次。
+     *
+     * 不这么写的话 t 和 simT 相等时一步都不推进 —— 而「同一个 t 再渲染一遍」
+     * 是个真实用例：用户拖了一下交互元素，位置变了但时间没变，
+     * 不推进的话画面纹丝不动。
+     * 让循环别正好落在 t 上，是为了避免最后那次推进变成重复推进 ——
+     * 重复喂同一个时间戳给 MediaPipe 的 VIDEO 模式会直接抛「时间戳不单调」。
+     */
+    while (tt + step < t) {
+      tt += step;
+      this.advance(tt);
+    }
+    this.advance(t);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** 清掉所有跨帧状态。切模板和时间倒流时都要调。 */
+  private resetSim() {
+    this.simT = -1;
+    this.elements.resetState();
   }
 
   /**
@@ -790,16 +911,18 @@ export class ArEngine {
    * 于是脸明明已经追上了，状态栏还写着「Looking for a person…」。
    */
   private isTracking(nowMs: number): boolean {
-    const face = this.perception.includes("face");
-    const seg = this.perception.includes("segmentation");
-    if (face && seg) return this.faceTracker.frame(nowMs) !== null || this.field.seen;
-    if (face) return this.faceTracker.frame(nowMs) !== null;
-    if (seg) return this.field.seen;
-    return false;
+    // 「追踪上了没」要问当前真正在跑的那些感知，任意一个命中就算。
+    // 一律问分割的老写法让 facetrack 模板永远显示「在找人」。
+    const checks: boolean[] = [];
+    if (this.perception.includes("face")) checks.push(this.faceTracker.frame(nowMs) !== null);
+    if (this.perception.includes("hands")) checks.push(this.handTracker.frames(nowMs).length > 0);
+    if (this.perception.includes("segmentation")) checks.push(this.field.seen);
+    return checks.some(Boolean);
   }
 
   private perceive(nowMs: number) {
     if (this.perception.includes("face")) this.faceTracker.detect(this.source, nowMs);
+    if (this.perception.includes("hands")) this.handTracker.detect(this.source, nowMs);
     if (this.perception.includes("segmentation")) this.runSegmentation(nowMs);
   }
 
@@ -881,7 +1004,7 @@ export class ArEngine {
     this.setFaceProtect(now);
 
     if (this.cfg?.elements?.length) {
-      this.elements.update(t, this.faceTracker, this.faceTracker.frame(now));
+      this.elements.update(t, this.faceTracker, this.faceTracker.frame(now), this.handTracker, now);
     }
 
     if (this.templateType === "particle" && this.cfg && this.cfg.emitter && this.cfg.substance) {
@@ -911,7 +1034,12 @@ export class ArEngine {
       this.fps = Math.round(this.fpsAcc / this.fpsN);
       this.fpsAcc = 0;
       this.fpsN = 0;
-      this.onStats?.({ fps: this.fps, tracking: this.isTracking(now), degraded: this.degraded });
+      this.onStats?.({
+        fps: this.fps,
+        tracking: this.isTracking(now),
+        degraded: this.degraded,
+        needsTracking: this.perception.length > 0,
+      });
     }
   };
 }

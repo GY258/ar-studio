@@ -1,0 +1,321 @@
+{
+  "slug": "black-lodge",
+  "name": {
+    "zh": "黑木屋",
+    "en": "Black Lodge"
+  },
+  "category": "face",
+  "sort_order": 45,
+  "price_cents": 0,
+  "schema_version": 2,
+  "template_type": "facetrack",
+  "perception": [
+    "face"
+  ],
+  "preview": {},
+  "elements": [
+    {
+      "id": "crown",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "crown-flame"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "head_top",
+        "offset": [
+          0,
+          -1.62
+        ]
+      },
+      "size": {
+        "ref": "iod",
+        "scale": 2.662
+      },
+      "blend": "add",
+      "animations": [
+        {
+          "preset": "pulse",
+          "scaleRange": [
+            0.94,
+            1.06
+          ],
+          "period": 0.9
+        },
+        {
+          "preset": "float",
+          "amplitude": 0.006,
+          "period": 1.7
+        }
+      ]
+    },
+    {
+      "id": "slot-l",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "slot-machine"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_left",
+        "offset": [
+          1.8,
+          -0.85
+        ]
+      },
+      "size": {
+        "ref": "iod",
+        "scale": 1.704
+      },
+      "rotation": -8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.3
+        }
+      ]
+    },
+    {
+      "id": "slot-l-lucky",
+      "asset": {
+        "kind": "text",
+        "text": "LUCKY",
+        "color": "#FFD86B",
+        "fontWeight": 800,
+        "shadow": "0 1 3 rgba(0,0,0,.8)"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_left",
+        "offset": [
+          1.7051,
+          -1.525
+        ]
+      },
+      "size": {
+        "ref": "iod",
+        "scale": 0.2236
+      },
+      "rotation": -8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.3
+        }
+      ]
+    },
+    {
+      "id": "slot-l-lodge",
+      "asset": {
+        "kind": "text",
+        "text": "BLACK LODGE",
+        "color": "#FFD86B",
+        "fontWeight": 800,
+        "shadow": "0 1 2 rgba(0,0,0,.8)"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_left",
+        "offset": [
+          1.8972,
+          -0.1582
+        ]
+      },
+      "size": {
+        "ref": "iod",
+        "scale": 0.1235
+      },
+      "rotation": -8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.3
+        }
+      ]
+    },
+    {
+      "id": "slot-r",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "slot-machine"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_right",
+        "offset": [
+          -1.8,
+          -0.85
+        ]
+      },
+      "size": {
+        "ref": "iod",
+        "scale": 1.704
+      },
+      "rotation": 8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.0
+        }
+      ]
+    },
+    {
+      "id": "slot-r-lucky",
+      "asset": {
+        "kind": "text",
+        "text": "LUCKY",
+        "color": "#FFD86B",
+        "fontWeight": 800,
+        "shadow": "0 1 3 rgba(0,0,0,.8)"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_right",
+        "offset": [
+          -1.7051,
+          -1.525
+        ]
+      },
+      "size": {
+        "ref": "iod",
+        "scale": 0.2236
+      },
+      "rotation": 8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.0
+        }
+      ]
+    },
+    {
+      "id": "slot-r-lodge",
+      "asset": {
+        "kind": "text",
+        "text": "BLACK LODGE",
+        "color": "#FFD86B",
+        "fontWeight": 800,
+        "shadow": "0 1 2 rgba(0,0,0,.8)"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_right",
+        "offset": [
+          -1.8972,
+          -0.1582
+        ]
+      },
+      "size": {
+        "ref": "iod",
+        "scale": 0.1235
+      },
+      "rotation": 8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.0
+        }
+      ]
+    },
+    {
+      "generate": "trail",
+      "landmark": "temple_left",
+      "count": 5,
+      "offset": [
+        1.9316,
+        0.0865
+      ],
+      "step": 0,
+      "decay": 1,
+      "phaseShift": 0.32,
+      "item": {
+        "asset": {
+          "kind": "svg-lib",
+          "key": "coin-gold"
+        },
+        "size": {
+          "ref": "iod",
+          "scale": 0.36
+        },
+        "jitter": {
+          "size": 0.25,
+          "phase": 0.1,
+          "offset": [
+            0.16,
+            0.05
+          ],
+          "seed": 907
+        },
+        "animations": [
+          {
+            "preset": "emit-fall-fade",
+            "period": 1.6,
+            "distance": 1.5,
+            "outwardDrift": 0.14,
+            "shrink": 0.15,
+            "emitPortion": 0.12,
+            "fadePortion": 0.22,
+            "ease": "gravity"
+          },
+          {
+            "preset": "spin",
+            "period": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "generate": "trail",
+      "landmark": "temple_right",
+      "count": 5,
+      "offset": [
+        -1.9316,
+        0.0865
+      ],
+      "step": 0,
+      "decay": 1,
+      "phaseShift": 0.32,
+      "item": {
+        "asset": {
+          "kind": "svg-lib",
+          "key": "coin-gold"
+        },
+        "size": {
+          "ref": "iod",
+          "scale": 0.36
+        },
+        "jitter": {
+          "size": 0.25,
+          "phase": 0.1,
+          "offset": [
+            0.16,
+            0.05
+          ],
+          "seed": 908
+        },
+        "animations": [
+          {
+            "preset": "emit-fall-fade",
+            "period": 1.6,
+            "distance": 1.5,
+            "outwardDrift": -0.14,
+            "shrink": 0.15,
+            "emitPortion": 0.12,
+            "fadePortion": 0.22,
+            "ease": "gravity"
+          },
+          {
+            "preset": "spin",
+            "period": 1.7
+          }
+        ]
+      }
+    }
+  ]
+}
