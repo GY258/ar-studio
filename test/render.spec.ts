@@ -323,6 +323,63 @@ test("lowres-life：蒙版内与原帧逐像素相同，蒙版外被真正抹掉
 });
 
 /**
+ * 「存在周期为 period 的竖直网格」有多强。
+ *
+ * 做法：逐列算和左邻列的平均差，然后按 period 做相位扫描，
+ * 取「落在网格线上的列」和「块内部的列」的平均差之比，选最好的相位。
+ * 有规则网格时接缝那几列的差远大于内部，比值会明显 > 1；
+ * 照片上无论怎么扫都找不到这样的相位，比值贴近 1。
+ *
+ * 为什么不用「横向同色能连多远」：那个判据会被**我自己加的**块内渐变
+ * （左侧高光、上下亮暗边）破坏 —— 块是实打实分了，但块内部并不是纯平色，
+ * 于是连续同色长度上不去。判据得对得上真正做出来的东西，
+ * 而这个效果真正保证的是「网格是规则的、周期等于声明的块大小」。
+ */
+function gridScore(
+  img: { width: number; data: Uint8Array | Uint8ClampedArray },
+  x0: number,
+  y0: number,
+  w: number,
+  h: number,
+  period: number,
+) {
+  const W = img.width;
+  const colDiff: number[] = [];
+  for (let x = x0 + 1; x < x0 + w; x++) {
+    let acc = 0;
+    for (let y = y0; y < y0 + h; y++) {
+      const o = (y * W + x) << 2;
+      const q = (y * W + x - 1) << 2;
+      acc +=
+        Math.abs(img.data[o] - img.data[q]) +
+        Math.abs(img.data[o + 1] - img.data[q + 1]) +
+        Math.abs(img.data[o + 2] - img.data[q + 2]);
+    }
+    colDiff.push(acc / h);
+  }
+
+  let best = 0;
+  const P = Math.max(2, Math.round(period));
+  for (let phase = 0; phase < P; phase++) {
+    let onSum = 0;
+    let onN = 0;
+    let offSum = 0;
+    let offN = 0;
+    for (let i = 0; i < colDiff.length; i++) {
+      if (i % P === phase) {
+        onSum += colDiff[i];
+        onN++;
+      } else {
+        offSum += colDiff[i];
+        offN++;
+      }
+    }
+    if (onN && offN && offSum > 0) best = Math.max(best, onSum / onN / (offSum / offN));
+  }
+  return best;
+}
+
+/**
  * 帧效果必须真的作用。
  *
  * 这条挡的是一类静默失效：`blur` 曾经能过校验、能正常渲染、什么效果都没有、
@@ -333,6 +390,10 @@ test("lowres-life：蒙版内与原帧逐像素相同，蒙版外被真正抹掉
 for (const [kind, effect] of [
   ["blur", { kind: "blur", radius: 0.02 }],
   ["desaturate", { kind: "desaturate", amount: 1 }],
+  [
+    "voxel",
+    { kind: "voxel", blocks: 30, palette: 0.55, levels: 7, saturate: 0.5, faceShade: 0.4, outline: 0.26, grain: 0.09, seed: 11 },
+  ],
 ] as const) {
   test(`帧效果 ${kind}：蒙版外真的变了，蒙版内逐像素不变`, async () => {
     const file = path.join(ARTIFACTS, `__effect-${kind}.json`);
@@ -398,6 +459,24 @@ for (const [kind, effect] of [
       expect(after / before, `蒙版外的高频能量应该被模糊抹掉（${before.toFixed(1)} → ${after.toFixed(1)}）`).toBeLessThan(
         0.6,
       );
+    } else if (kind === "voxel") {
+      /*
+       * 判据是**横向色块的平均长度**，不是「像素变了多少」。
+       *
+       * 体素化的产出必须是「成片的方块」。只看像素变化的话，一个只改了颜色、
+       * 根本没分块的实现照样能过 —— 而那正是这个效果最可能的失败形态
+       * （网格算错、blocks 传成 0、uniform 没接上，画面都还是「变了」的）。
+       * 色块长度直接量「一行上连续同色能连多远」，分辨率无关，
+       * 而且只有真的分块了才会涨上去。
+       */
+      // blocks 是「短边分几格」，harness 画布是横的，所以块边长 = 高 / blocks
+      const period = frame.height / 30;
+      const before = gridScore(base, bx, by, 120, 120, period);
+      const after = gridScore(frame, bx, by, 120, 120, period);
+      expect(after, `蒙版外应该出现周期 ${period.toFixed(1)}px 的规则网格（网格强度 ${after.toFixed(2)}）`).toBeGreaterThan(
+        2.5,
+      );
+      expect(before, "原帧上不该找得到这个周期的网格，否则这条断言证明不了是效果做的").toBeLessThan(1.6);
     } else {
       expect(outside.chroma, "amount=1 时蒙版外应该没有彩度了").toBeLessThan(2);
     }

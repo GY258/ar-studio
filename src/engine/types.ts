@@ -329,6 +329,48 @@ export interface SourceEffect {
         /** 必填。噪声必须是 hash(块, 帧号, seed) 的纯函数，不能用随机数 */
         seed: number;
       }
+    /**
+     * 体素化：把画面重建成 Minecraft 那样的方块世界。
+     *
+     * 块色来自**当前帧的真实像素**，不是贴一张事先做好的场景图 ——
+     * 所以构图和光照是按构造就匹配的。配 mask.provider "person" + apply "outside"
+     * 就是「人完全不动，只有背景变方块」。
+     *
+     * 和 pixelate 的区别不在网格：只做网格得到的是马赛克（画面糊了），
+     * 方块世界还需要调色板、立方体的面、块间接缝这三样，见 source-effects.ts。
+     */
+    | {
+        kind: "voxel";
+        /** 短边分几格。和 pixelate 同一个轴，resize 时块保持正方形 */
+        blocks: number;
+        /**
+         * 往 Minecraft 方块色靠拢的强度 0~1。
+         *
+         * 吸附时**保住原块的亮度**（见 shader 里的注释），所以调到 1
+         * 也不会把光照拍平 —— 颜色是 MC 的，明暗还是这一帧的。
+         */
+        palette: number;
+        /** 每通道量化到几级。MC 的贴图色阶很平，连续渐变一眼就不像 */
+        levels: number;
+        /** 量化前先提多少饱和度。真实房间偏灰，不提的话得到一堆灰方块 */
+        saturate?: number;
+        /** 立方体的面：顶边提亮 / 底边压暗的强度 0~1 */
+        faceShade: number;
+        /** 块间接缝压暗多少 0~1。方块要能一个个数出来 */
+        outline: number;
+        /** 块内颗粒 0~1。MC 的 16×16 贴图本来就有噪点，纯平色像 UI */
+        grain?: number;
+        /**
+         * 暗部地板 0~1，缺省 0.16。
+         *
+         * MC 的世界里没有纯黑（天光是全局的）。而真实房间的暗部是 0.02~0.05，
+         * 被 levels 量化后直接归零 —— 不抬的话半个背景是死黑，
+         * 读起来像渲染坏了。
+         */
+        ambient?: number;
+        /** 必填。颗粒是 hash(块坐标, seed) 的纯函数，不能用随机数 */
+        seed: number;
+      }
     /** 调试视图：直接把蒙版画出来，不做效果。红 = 判为人，绿 = 过渡带 */
     | { kind: "mask-debug" }
     | { kind: "posterize"; levels: number }

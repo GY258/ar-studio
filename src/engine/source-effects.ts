@@ -141,6 +141,133 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
     vec4 effectTexel = vec4( gRgb * gScan, gCenter.a );`,
 
   /*
+   * 体素化：把画面重建成 Minecraft 那样的方块世界。
+   *
+   * **块色来自当前帧的真实像素**，不是贴一张事先做好的场景图 ——
+   * 所以构图和光照是「按构造」就匹配的，不需要任何对齐工作。
+   * 配 mask.provider "person" + apply "outside" 就是「人完全不动，只有背景变方块」。
+   *
+   * 和 pixelate 的区别不在网格，在网格之外的三件事。只做网格的话得到的是马赛克，
+   * 那是「画面糊了」；方块世界要的是「每个块是一个**实体**」：
+   *   1. 调色板 —— MC 的方块贴图色域窄、饱和度高。但**不能硬拍成固定色**，
+   *      那样光照就没了。做法是先找最近的方块色，再用原块自己的亮度去调制它，
+   *      于是颜色变成 MC 的，明暗还是你房间的。
+   *   2. 立方体的面 —— 顶边一道亮线、底边一道暗线。这是「这是个立方体」
+   *      唯一真正读得出来的线索，没有它就只是彩色瓷砖。
+   *   3. 接缝 —— 块与块之间压暗一点（环境光遮蔽）。方块要能一个个数出来。
+   * 再加一点块内颗粒，因为 MC 的 16×16 贴图本来就是有噪点的，纯平色显得像 UI。
+   *
+   * 颗粒和一切随机都走 arHash(块坐标, seed)，**不含时间** —— 时间一进去，
+   * 人不动画面也会自己沸腾，而且 renderAt(t) 就不再是纯函数。
+   */
+  voxel: `
+    vec2 vCell = 1.0 / blocks;
+    vec2 vId = floor( vMapUv * blocks );
+    vec2 vBase = vId * vCell;
+
+    // 块内 2×2 加权取样。理由和 pixelate 那边一样：边界上的块一半人一半背景，
+    // 中心点落在人身上就整块用人的颜色，人的轮廓外会浮一圈肤色方块
+    vec4 vAcc = vec4( 0.0 );
+    float vWsum = 0.0;
+    for (int by = 0; by < 2; by++) {
+      for (int bx = 0; bx < 2; bx++) {
+        vec2 su = vBase + vCell * (vec2(float(bx), float(by)) + 0.5) * 0.5;
+        float sm = maskAt( su );
+        float w = applyOutside > 0.5 ? 1.0 - sm : sm;
+        vAcc += srcTexel( su ) * w;
+        vWsum += w;
+      }
+    }
+    vec4 vSrc = vWsum > 0.01 ? vAcc / vWsum : srcTexel( vBase + vCell * 0.5 );
+    vec3 vCol = vSrc.rgb;
+    float vLum = dot( vCol, vec3( 0.2126, 0.7152, 0.0722 ) );
+
+    /*
+     * 先把暗部抬起来。**这一步不能省。**
+     *
+     * MC 的世界里没有纯黑：天光是全局的，最暗的角落也还有底光。
+     * 而真实房间随便一拍暗部就是 0.02~0.05，接着被 levels 量化直接归零 ——
+     * 第一版就是这么翻的车：半个背景是死黑，只有零星几块有颜色，
+     * 读起来像渲染坏了而不是像方块世界。
+     *
+     * 抬地板 + 轻微 gamma 提亮，而不是整体加亮：整体加亮会把本来就亮的地方冲爆，
+     * 而「保住原始光照」是这个效果的前提。
+     */
+    vCol = vAmbient + ( 1.0 - vAmbient ) * pow( max( vCol, 0.0 ), vec3( 0.8 ) );
+
+    /*
+     * 再提饱和然后量化。
+     *
+     * 真实房间大多是灰扑扑的，直接量化只会得到一堆灰方块 —— 网格是对的，
+     * 但读不出「方块世界」，因为 MC 的方块色饱和度都很高。
+     */
+    vLum = dot( vCol, vec3( 0.2126, 0.7152, 0.0722 ) );
+    vCol = clamp( mix( vec3( vLum ), vCol, 1.0 + vSat ), 0.0, 1.0 );
+
+    // 每通道量化到 vLevels 级。MC 的贴图色阶很平，连续渐变一眼就不像
+    vCol = floor( vCol * vLevels + 0.5 ) / vLevels;
+
+    /*
+     * 往最近的方块色靠，但**保住原来的亮度**。
+     *
+     * 直接吸附成固定色的话，一面墙无论受光背光都变成同一块石头，光照就没了 ——
+     * 而「匹配原始光照」正是这个效果存在的前提。所以吸附之后再按
+     * 原块亮度 / 方块色亮度 缩放回去：颜色是 MC 的，明暗还是这一帧的。
+     */
+    vec3 vPal[16];
+    vPal[0]  = vec3( 0.498, 0.698, 0.220 );  // 草方块顶
+    vPal[1]  = vec3( 0.369, 0.549, 0.165 );  // 深草
+    vPal[2]  = vec3( 0.290, 0.478, 0.149 );  // 树叶
+    vPal[3]  = vec3( 0.525, 0.376, 0.263 );  // 泥土
+    vPal[4]  = vec3( 0.690, 0.518, 0.310 );  // 橡木板
+    vPal[5]  = vec3( 0.478, 0.478, 0.478 );  // 石头
+    vPal[6]  = vec3( 0.588, 0.588, 0.588 );  // 圆石
+    vPal[7]  = vec3( 0.298, 0.298, 0.298 );  // 深板岩
+    vPal[8]  = vec3( 0.859, 0.827, 0.627 );  // 沙子
+    vPal[9]  = vec3( 0.247, 0.463, 0.894 );  // 水
+    vPal[10] = vec3( 0.941, 0.941, 0.941 );  // 雪 / 白色混凝土
+    vPal[11] = vec3( 0.690, 0.180, 0.149 );  // 红色
+    vPal[12] = vec3( 0.114, 0.114, 0.129 );  // 黑色
+    vPal[13] = vec3( 0.588, 0.314, 0.247 );  // 红砖
+    vPal[14] = vec3( 0.898, 0.769, 0.325 );  // 干草 / 金
+    vPal[15] = vec3( 0.435, 0.647, 0.769 );  // 浅蓝 / 天空
+
+    vec3 vBest = vCol;
+    float vBestD = 1e9;
+    for (int i = 0; i < 16; i++) {
+      vec3 d = vPal[i] - vCol;
+      float dd = dot( d, d );
+      if (dd < vBestD) { vBestD = dd; vBest = vPal[i]; }
+    }
+    float vPalLum = max( 0.05, dot( vBest, vec3( 0.2126, 0.7152, 0.0722 ) ) );
+    float vSrcLum = dot( vCol, vec3( 0.2126, 0.7152, 0.0722 ) );
+    vec3 vSnapped = clamp( vBest * ( vSrcLum / vPalLum ), 0.0, 1.0 );
+    vCol = mix( vCol, vSnapped, vPalette );
+
+    // 块内颗粒。不含时间 —— 一含时间人不动画面也会自己沸腾
+    vCol *= 1.0 + ( arHash( vId, vSeed ) - 0.5 ) * vGrain;
+
+    /*
+     * 立方体的面。顶边一道亮线、底边一道暗线 ——
+     * 这是「这是个立方体」唯一真正读得出来的线索，没有它就只是彩色瓷砖。
+     */
+    vec2 vF = fract( vMapUv * blocks );
+    // 亮边/暗边占块的 22%。第一版给的是 16% 而接缝只有 6% —— 在 14px 的块上
+    // 那是不到 1 个像素，被抗锯齿抹平，看起来就是「一张打了马赛克的照片」。
+    // 立方体的线索必须在块**内部**占到肉眼能读的比例，不能是发丝线
+    float vTop = 1.0 - smoothstep( 0.0, 0.22, vF.y );
+    float vBot = smoothstep( 0.78, 1.0, vF.y );
+    // 左边也提一点：MC 里方块有两个可见侧面，只做上下会读成横条纹
+    float vLeft = 1.0 - smoothstep( 0.0, 0.18, vF.x );
+    vCol *= 1.0 + vFaceShade * ( vTop * 0.9 + vLeft * 0.35 - vBot * 0.8 );
+
+    // 接缝：块与块之间压暗（环境光遮蔽），方块要能一个个数出来
+    float vSeam = min( min( vF.x, vF.y ), min( 1.0 - vF.x, 1.0 - vF.y ) );
+    vCol *= mix( 1.0 - vOutline, 1.0, smoothstep( 0.0, 0.14, vSeam ) );
+
+    vec4 effectTexel = vec4( clamp( vCol, 0.0, 1.0 ), vSrc.a );`,
+
+  /*
    * 调试用：把蒙版本身画出来，不做任何效果。
    *
    * 存在的理由是「不要透过马赛克看蒙版」—— 抠图不准的时候，

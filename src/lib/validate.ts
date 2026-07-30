@@ -179,7 +179,7 @@ const GENERATORS = ["mirrorPair", "trail", "columns", "scatter", "ring", "spread
 const JITTER_GENERATORS = ["mirrorPair", "trail", "ring", "spread"];
 const MASK_PROVIDERS = ["person", "face-ellipse", "none"];
 /** schema 认识的 kind。是不是**实现了**另说，见下面的 IMPLEMENTED_EFFECTS */
-const EFFECT_KINDS = ["pixelate", "blur", "desaturate", "glitch", "mask-debug", "posterize", "pixel-art"];
+const EFFECT_KINDS = ["pixelate", "blur", "desaturate", "glitch", "voxel", "mask-debug", "posterize", "pixel-art"];
 
 /** 展开后的元素数硬上限。生成器很容易写出爆炸的数量。 */
 const MAX_ELEMENTS = 120;
@@ -814,6 +814,31 @@ function validateSource(raw: Raw, p: string[]) {
     if (!num(eff.seed)) {
       p.push(
         "source.effect.seed 必填。损坏必须是 hash(块, 帧号, seed) 的纯函数 —— " +
+          "用随机数的话 renderAt(t) 不再确定，整套渲染回归就不成立了",
+      );
+    }
+  }
+
+  if (kind === "voxel") {
+    if (!inRange(eff.blocks, 8, 200)) p.push("source.effect.blocks 应在 [8, 200]（短边分几格）");
+    for (const [k, hi, hint] of [
+      ["palette", 1, "往 Minecraft 方块色靠拢的强度。0 = 只方块化不改色"],
+      ["faceShade", 1, "立方体的面：顶边提亮 / 底边压暗"],
+      ["outline", 1, "块间接缝压暗多少"],
+    ] as const) {
+      if (!inRange(eff[k], 0, hi)) p.push(`source.effect.${k} 应在 [0, ${hi}]（${hint}）`);
+    }
+    if (!inRange(eff.levels, 2, 32)) p.push("source.effect.levels 应在 [2, 32]（每通道量化到几级）");
+    if (eff.saturate !== undefined && !inRange(eff.saturate, 0, 2)) {
+      p.push("source.effect.saturate 应在 [0, 2]（量化前先提多少饱和度）");
+    }
+    if (eff.grain !== undefined && !inRange(eff.grain, 0, 1)) p.push("source.effect.grain 应在 [0, 1]（块内颗粒）");
+    if (eff.ambient !== undefined && !inRange(eff.ambient, 0, 0.6)) {
+      p.push("source.effect.ambient 应在 [0, 0.6]（暗部地板。MC 的世界里没有纯黑）");
+    }
+    if (!num(eff.seed)) {
+      p.push(
+        "source.effect.seed 必填。块内颗粒是 hash(块坐标, seed) 的纯函数 —— " +
           "用随机数的话 renderAt(t) 不再确定，整套渲染回归就不成立了",
       );
     }

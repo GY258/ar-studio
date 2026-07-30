@@ -352,7 +352,10 @@ export class ArEngine {
     const effect = source.effect;
     const applyOutside = source.apply === "outside";
     this.applyOutside = applyOutside;
-    this.blocks = effect.kind === "pixelate" || effect.kind === "pixel-art" ? effect.blocks : 0;
+    // voxel 和 pixelate 共用同一个网格轴：blocks = 短边格数。
+    // 这样 resize 的重算逻辑（blockGrid）也一并复用，块永远是正方形的
+    this.blocks =
+      effect.kind === "pixelate" || effect.kind === "pixel-art" || effect.kind === "voxel" ? effect.blocks : 0;
     this.blurRadius = effect.kind === "blur" ? effect.radius : 0;
 
     /*
@@ -410,6 +413,15 @@ export class ArEngine {
       shader.uniforms.gDarkBias = { value: g?.darkBias ?? 0 };
       shader.uniforms.gSpeed = { value: g?.speed ?? 1 };
       shader.uniforms.gSeed = { value: g?.seed ?? 0 };
+      const v = effect.kind === "voxel" ? effect : null;
+      shader.uniforms.vPalette = { value: v?.palette ?? 0 };
+      shader.uniforms.vLevels = { value: v?.levels ?? 6 };
+      shader.uniforms.vSat = { value: v?.saturate ?? 0.35 };
+      shader.uniforms.vFaceShade = { value: v?.faceShade ?? 0 };
+      shader.uniforms.vOutline = { value: v?.outline ?? 0 };
+      shader.uniforms.vGrain = { value: v?.grain ?? 0 };
+      shader.uniforms.vAmbient = { value: v?.ambient ?? 0.16 };
+      shader.uniforms.vSeed = { value: v?.seed ?? 0 };
 
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -432,6 +444,14 @@ export class ArEngine {
           uniform float gDarkBias;
           uniform float gSpeed;
           uniform float gSeed;
+          uniform float vPalette;
+          uniform float vLevels;
+          uniform float vSat;
+          uniform float vFaceShade;
+          uniform float vOutline;
+          uniform float vGrain;
+          uniform float vAmbient;
+          uniform float vSeed;
           /** 脸部保护椭圆，蒙版空间（y 向下）。xy = 中心，zw = 半径 */
           uniform vec4 faceOval;
           /** 0 = 不保护。丢脸时也置 0，让效果照常作用而不是整片突然恢复 */

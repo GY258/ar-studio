@@ -317,6 +317,8 @@ ${Object.entries(ANCHOR_PAIRS)
         | { kind: "desaturate"; amount: number }   // [0, 1]，1 = 全灰
         | { kind: "glitch"; blocks; displace; channelSplit;        // 数字信号损坏，见下
                             scanline; colorNoise; darkBias; speed; seed }
+        | { kind: "voxel"; blocks; palette; levels;               // 方块世界，见下
+                           saturate?; faceShade; outline; grain?; ambient?; seed }
         | { kind: "mask-debug" }                   // 调试视图，见下
 }
 \`\`\`
@@ -347,6 +349,38 @@ inside 时脸上不作用，outside 时脸上保持原样。丢脸时自动关�
 
 **别拿亮度当「不是脸」的代理。** glitch 的 \`darkBias\` 只是让损坏偏向暗部，
 对深色皮肤、昏暗房间、浓妆阴影都会误伤；要真正保护脸就用这个字段。
+
+### voxel —— 把画面重建成 Minecraft 那样的方块世界
+
+\`\`\`jsonc
+{ "kind": "voxel", "blocks": 30, "palette": 0.55, "levels": 7,
+  "saturate": 0.5, "faceShade": 0.4, "outline": 0.26, "grain": 0.09, "seed": 11 }
+\`\`\`
+
+配 \`mask.provider: "person"\` + \`apply: "outside"\` 就是「人完全不动，只有背景变方块」。
+
+**块色来自当前帧的真实像素**，不是贴一张事先做好的场景图 ——
+所以构图和光照是按构造就匹配的，不需要任何对齐工作。代价也在这里：
+它是「你的房间被方块化」，不是「Minecraft 的瑞士山谷」。要后者得换成
+预渲染场景板，那是另一个效果。
+
+和 \`pixelate\` 的区别不在网格。**只做网格得到的是马赛克**（「画面糊了」），
+方块世界还需要三样东西，缺一样就不像：
+
+- \`palette\` 往 MC 方块色靠拢的强度。吸附时**保住原块的亮度**，
+  所以调到 1 也不会把光照拍平 —— 颜色是 MC 的，明暗还是这一帧的
+- \`faceShade\` 顶边提亮 / 底边压暗。这是「这是个立方体」唯一读得出来的线索，
+  给 0 的话只是彩色瓷砖
+- \`outline\` 块间接缝。方块要能一个个数出来
+
+调参上踩过的两个坑：
+
+1. **\`levels\` 会把暗部量化成纯黑。** 真实房间的暗部是 0.02~0.05，
+   \`levels: 5\` 一量化直接归零，半个背景死黑。\`ambient\`（缺省 0.16）是暗部地板，
+   MC 的世界里没有纯黑 —— 别把它调到 0。
+2. **\`palette\` 和 \`levels\` 一起调猛会把整面墙压成同一块石头。**
+   \`levels: 4\` + \`palette: 0.85\` 出来是一片均匀的灰，原来的色彩变化全没了。
+   先把 \`levels\` 放到 6~8，再调 \`palette\`。
 
 ### glitch
 

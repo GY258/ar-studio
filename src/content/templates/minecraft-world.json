@@ -1,0 +1,36 @@
+{
+  "slug": "minecraft-world",
+  "name": {
+    "zh": "方块世界",
+    "en": "Blockcraft"
+  },
+  "category": "fun",
+  "sort_order": 30,
+  "price_cents": 0,
+  "schema_version": 2,
+  "template_type": "overlay",
+  "perception": [
+    "segmentation"
+  ],
+  "preview": {},
+  "elements": [],
+  "source": {
+    "mask": {
+      "provider": "person",
+      "feather": 0.02,
+      "onLost": "clear"
+    },
+    "apply": "outside",
+    "effect": {
+      "kind": "voxel",
+      "blocks": 30,
+      "palette": 0.55,
+      "levels": 7,
+      "saturate": 0.5,
+      "faceShade": 0.4,
+      "outline": 0.26,
+      "grain": 0.09,
+      "seed": 11
+    }
+  }
+}
