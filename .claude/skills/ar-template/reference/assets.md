@@ -10,6 +10,16 @@
 | `crayon-drop` | 0 0 120 170 | 1.417 |
 | `crayon-drop-solid` | 0 0 120 170 | 1.417 |
 | `cursor-hand` | 0 0 32 32 | 1.000 |
+| `emoji-blossom` | 0 0 36 36 | 1.000 |
+| `emoji-cherry-blossom` | 0 0 36 36 | 1.000 |
+| `emoji-gem` | 0 0 36 36 | 1.000 |
+| `emoji-leaf` | 0 0 36 36 | 1.000 |
+| `emoji-lotus` | 0 0 36 36 | 1.000 |
+| `emoji-mushroom` | 0 0 36 36 | 1.000 |
+| `emoji-rose` | 0 0 36 36 | 1.000 |
+| `emoji-sparkles` | 0 0 36 36 | 1.000 |
+| `emoji-sunflower` | 0 0 36 36 | 1.000 |
+| `emoji-tulip` | 0 0 36 36 | 1.000 |
 | `folder` | 0 0 112 92 | 0.821 |
 | `quality-menu` | 0 0 340 300 | 0.882 |
 | `tear-drop` | 0 0 24 34 | 1.417 |

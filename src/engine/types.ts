@@ -99,10 +99,13 @@ export type TemplateType = "particle" | "overlay" | "facetrack";
  * 是合法且常用的组合。不要因为 anchor 是 face 就假定 size 一定是 iod。
  * ------------------------------------------------------------ */
 
-export type AnchorSpace = "screen" | "face";
+export type AnchorSpace = "screen" | "face" | "hand";
 
-/** 尺寸参照物。face_width / eye_width 由 landmark 实测，人退远会一起缩小；vw 不会。 */
-export type SizeRef = "vw" | "iod" | "eye_width" | "face_width";
+/**
+ * 尺寸参照物。face_width / eye_width / palm_width 由 landmark 实测，
+ * 人退远会一起缩小；vw 不会。
+ */
+export type SizeRef = "vw" | "iod" | "eye_width" | "face_width" | "palm_width";
 
 /**
  * scale 到底在量什么。
@@ -138,6 +141,21 @@ export type ElementAsset =
 
 export type ElementAnchor =
   | { space: "screen"; nx: number; ny: number }
+  /**
+   * 手部锚点。hand 说的是**本人的**左右手，不是画面上的左右 ——
+   * 画面是镜像的，本人的左手出现在屏幕右侧。按「戴戒指的那只手」思考。
+   *
+   * 一个元素绑一只手的一个点。要「十根指尖各挂一个」就写十个元素；
+   * 这比引入一个「按手展开」的隐式复制要好，因为每根手指挂的东西通常不一样。
+   */
+  | {
+      space: "hand";
+      hand: "left" | "right";
+      /** 只写语义名，见 hand-anchors.ts */
+      landmark: string;
+      /** 相对锚点的偏移，单位是掌宽 */
+      offset?: [number, number];
+    }
   /** landmark 只写语义名。数字是 v1 兼容层的产物，新 JSON 会被校验拒收。 */
   | {
       space: "face";

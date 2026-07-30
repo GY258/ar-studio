@@ -1,0 +1,218 @@
+{
+  "slug": "finger-flowers",
+  "name": {
+    "zh": "指尖开花",
+    "en": "Finger Garden"
+  },
+  "category": "hand",
+  "sort_order": 40,
+  "price_cents": 0,
+  "schema_version": 2,
+  "template_type": "overlay",
+  "perception": [
+    "hands"
+  ],
+  "preview": {},
+  "elements": [
+    {
+      "id": "l-thumb",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "emoji-mushroom"
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "thumb_tip",
+        "offset": [
+          0,
+          0.16
+        ]
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.42
+      }
+    },
+    {
+      "id": "l-index",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "emoji-sunflower"
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "index_tip",
+        "offset": [
+          0,
+          0.18
+        ]
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.4
+      }
+    },
+    {
+      "id": "l-middle",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "emoji-cherry-blossom"
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "middle_tip",
+        "offset": [
+          0,
+          0.18
+        ]
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.38
+      }
+    },
+    {
+      "id": "l-ring",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "emoji-rose"
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "ring_tip",
+        "offset": [
+          0,
+          0.18
+        ]
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.38
+      }
+    },
+    {
+      "id": "l-pinky",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "emoji-lotus"
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "pinky_tip",
+        "offset": [
+          0,
+          0.16
+        ]
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.34
+      }
+    },
+    {
+      "id": "r-thumb",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "emoji-gem"
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "thumb_tip",
+        "offset": [
+          0,
+          0.16
+        ]
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.4
+      }
+    },
+    {
+      "id": "r-index",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "emoji-tulip"
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "index_tip",
+        "offset": [
+          0,
+          0.18
+        ]
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.4
+      }
+    },
+    {
+      "id": "r-middle",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "emoji-leaf"
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "middle_tip",
+        "offset": [
+          0,
+          0.18
+        ]
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.38
+      }
+    },
+    {
+      "id": "r-ring",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "emoji-sparkles"
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "ring_tip",
+        "offset": [
+          0,
+          0.18
+        ]
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.36
+      }
+    },
+    {
+      "id": "r-pinky",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "emoji-blossom"
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "pinky_tip",
+        "offset": [
+          0,
+          0.16
+        ]
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 0.34
+      }
+    }
+  ]
+}

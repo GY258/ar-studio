@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { launchHarness, loadTemplate, capture, type FixtureName } from "./harness-driver";
 
-const FIXTURES: FixtureName[] = ["front", "side", "far", "noface"];
+const FIXTURES: FixtureName[] = ["front", "side", "far", "noface", "hands"];
 
 function parseArgs() {
   const argv = process.argv.slice(2).filter((a) => a !== "--");
@@ -32,7 +32,7 @@ function parseArgs() {
   }
 
   if (files.length === 0) {
-    console.error("用法：npm run render:preview -- <模板.json> [--t 秒] [--fixture front|side|far|noface]");
+    console.error("用法：npm run render:preview -- <模板.json> [--t 秒] [--fixture front|side|far|noface|hands]");
     process.exit(1);
   }
   if (!FIXTURES.includes(fixture)) {

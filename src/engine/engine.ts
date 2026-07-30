@@ -14,6 +14,7 @@ import {
   type FrameSource,
   type LandmarkProvider,
 } from "./face-tracker";
+import { HandTracker, MediaPipeHandProvider, type HandLandmarkProvider } from "./hand-tracker";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
 import { EFFECT_COMBINE, EFFECT_SNIPPETS } from "./source-effects";
@@ -67,6 +68,7 @@ export class ArEngine {
   private emitPos = { x: 0, y: 0.34 };
   private readonly elements: ElementRenderer;
   private readonly faceTracker = new FaceTracker();
+  private readonly handTracker = new HandTracker();
   private templateType: TemplateType = "particle";
   private perception: string[] = ["segmentation"];
   private segProvider: SegmentationProvider | null = null;
@@ -151,6 +153,11 @@ export class ArEngine {
     return this.elements.ready();
   }
 
+  /** 注入手部来源。不调用则用 MediaPipe，测试里注入 fixture 回放。 */
+  setHandProvider(p: HandLandmarkProvider) {
+    this.handTracker.setProvider(p);
+  }
+
   /** 注入分割来源。不调用则用 MediaPipe，测试里注入 fixture 回放。 */
   setSegmentationProvider(p: SegmentationProvider) {
     this.segProvider?.close?.();
@@ -164,6 +171,13 @@ export class ArEngine {
     const provider = new MediaPipeSegmentationProvider();
     await provider.load();
     this.segProvider = provider;
+  }
+
+  async loadHands(): Promise<void> {
+    if (this.handTracker.hasProvider()) return; // 已注入 fixture provider 就别再拉模型
+    const provider = new MediaPipeHandProvider();
+    await provider.load();
+    this.handTracker.setProvider(provider);
   }
 
   async loadFace(): Promise<void> {
@@ -216,6 +230,7 @@ export class ArEngine {
     this.particles.dispose();
     this.elements.dispose();
     this.faceTracker.dispose();
+    this.handTracker.dispose();
     this.sourceTex.dispose();
     this.propTextures.forEach((t) => t.dispose());
     this.renderer.dispose();
@@ -246,10 +261,15 @@ export class ArEngine {
     if (cfg.source?.mask.exclude === "face" && !this.perception.includes("face")) {
       this.perception.push("face");
     }
+    // 有 hand 空间元素就要手部感知，同样兜底
+    if (cfg.elements?.some((e) => e.anchor.space === "hand") && !this.perception.includes("hands")) {
+      this.perception.push("hands");
+    }
 
     // 清理其他类型的渲染状态
     this.elements.clear();
     this.faceTracker.reset();
+    this.handTracker.reset();
     this.particles.clear();
     this.particles.hide();
     this.prop.visible = false;
@@ -281,6 +301,9 @@ export class ArEngine {
     }
     if (this.perception.includes("face")) {
       this.loadFace().catch((e) => this.onError?.(e as Error));
+    }
+    if (this.perception.includes("hands")) {
+      this.loadHands().catch((e) => this.onError?.(e as Error));
     }
   }
 
@@ -646,6 +669,7 @@ export class ArEngine {
     this.particles.setPixelRatio(dpr);
     this.elements.setViewport(this.W, this.H);
     this.faceTracker.setViewport(this.W, this.H);
+    this.handTracker.setViewport(this.W, this.H);
     this.layoutProp();
   }
 
@@ -780,7 +804,7 @@ export class ArEngine {
     this.updateMask();
     this.setEffectTime(t);
     this.setFaceProtect(nowMs);
-    this.elements.update(t, this.faceTracker, this.faceTracker.frame(nowMs));
+    this.elements.update(t, this.faceTracker, this.faceTracker.frame(nowMs), this.handTracker, nowMs);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -790,16 +814,18 @@ export class ArEngine {
    * 于是脸明明已经追上了，状态栏还写着「Looking for a person…」。
    */
   private isTracking(nowMs: number): boolean {
-    const face = this.perception.includes("face");
-    const seg = this.perception.includes("segmentation");
-    if (face && seg) return this.faceTracker.frame(nowMs) !== null || this.field.seen;
-    if (face) return this.faceTracker.frame(nowMs) !== null;
-    if (seg) return this.field.seen;
-    return false;
+    // 「追踪上了没」要问当前真正在跑的那些感知，任意一个命中就算。
+    // 一律问分割的老写法让 facetrack 模板永远显示「在找人」。
+    const checks: boolean[] = [];
+    if (this.perception.includes("face")) checks.push(this.faceTracker.frame(nowMs) !== null);
+    if (this.perception.includes("hands")) checks.push(this.handTracker.frames(nowMs).length > 0);
+    if (this.perception.includes("segmentation")) checks.push(this.field.seen);
+    return checks.some(Boolean);
   }
 
   private perceive(nowMs: number) {
     if (this.perception.includes("face")) this.faceTracker.detect(this.source, nowMs);
+    if (this.perception.includes("hands")) this.handTracker.detect(this.source, nowMs);
     if (this.perception.includes("segmentation")) this.runSegmentation(nowMs);
   }
 
@@ -881,7 +907,7 @@ export class ArEngine {
     this.setFaceProtect(now);
 
     if (this.cfg?.elements?.length) {
-      this.elements.update(t, this.faceTracker, this.faceTracker.frame(now));
+      this.elements.update(t, this.faceTracker, this.faceTracker.frame(now), this.handTracker, now);
     }
 
     if (this.templateType === "particle" && this.cfg && this.cfg.emitter && this.cfg.substance) {

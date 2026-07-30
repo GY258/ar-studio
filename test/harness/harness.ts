@@ -11,6 +11,7 @@
 import { ArEngine } from "@/engine/engine";
 import { FixtureLandmarkProvider, type Landmark } from "@/engine/face-tracker";
 import { FixtureSegmentationProvider } from "@/engine/segmentation";
+import { FixtureHandProvider, type HandLandmarks } from "@/engine/hand-tracker";
 import { migrateElements } from "@/lib/migrate";
 import type { TemplateConfig } from "@/engine/types";
 
@@ -69,15 +70,20 @@ class Harness {
     this.canvas = canvas;
 
     const base = `/fixtures/${opts.fixture}`;
-    const [image, mask, landmarks] = await Promise.all([
+    const [image, mask, landmarks, hands] = await Promise.all([
       loadImage(`${base}.png`),
       loadMask(`${base}.mask.png`),
       fetch(`${base}.landmarks.json`).then((r) => r.json() as Promise<Landmark[] | null>),
+      // 没有手的 fixture 不写这个文件，404 就当没有手 —— 空数组和「没录过」要分得开
+      fetch(`${base}.hands.json`)
+        .then((r) => (r.ok ? (r.json() as Promise<HandLandmarks[]>) : null))
+        .catch(() => null),
     ]);
 
     const engine = new ArEngine({ canvas, onError: (e) => console.error("[engine]", e.message) });
     engine.setLandmarkProvider(new FixtureLandmarkProvider(landmarks));
     engine.setSegmentationProvider(new FixtureSegmentationProvider(mask.data, mask.w, mask.h));
+    engine.setHandProvider(new FixtureHandProvider(hands));
     engine.setSource(image);
     this.engine = engine;
   }

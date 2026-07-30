@@ -1,6 +1,7 @@
 import type { Control, TemplateConfig } from "@/engine/types";
 import { resolveControls } from "@/engine/resolve";
 import { FACE_ANCHORS, ANCHOR_PAIRS } from "@/engine/anchors";
+import { HAND_ANCHORS } from "@/engine/hand-anchors";
 import { listSvgKeys } from "@/engine/svg-assets";
 import { IMPLEMENTED_EFFECTS } from "@/engine/source-effects";
 import { sanitizeSvg } from "@/engine/svg-sanitize";
@@ -168,7 +169,8 @@ const EASES = ["linear", "in", "out", "inout", "gravity", "bounce"];
 /** 只有「0→1 走一趟」的原语能缓动。周期性原语套 ease 会在接缝处顿一下，见 animations.ts */
 const EASE_PRESETS = ["fall", "emit-fall-fade"];
 const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient"];
-const SIZE_REFS = ["vw", "iod", "eye_width", "face_width"];
+const HAND_ANCHOR_NAMES = Object.keys(HAND_ANCHORS);
+const SIZE_REFS = ["vw", "iod", "eye_width", "face_width", "palm_width"];
 const SIZE_FITS = ["width", "font"];
 const BLENDS = ["normal", "add", "screen", "multiply"];
 const GENERATORS = ["mirrorPair", "trail", "columns", "scatter", "ring", "spread"];
@@ -329,7 +331,31 @@ function validateAnchor(a: unknown, at: string, p: string[]) {
     return;
   }
 
-  p.push(`${at}.anchor.space "${space}" 无效，只能是 "screen" 或 "face"`);
+  if (space === "hand") {
+    if (anchor.hand !== "left" && anchor.hand !== "right") {
+      p.push(
+        `${at}.anchor.hand 必填，只能是 "left" 或 "right"。` +
+          `说的是**本人的**左右手，不是画面上的左右 —— 画面是镜像的，本人的左手出现在屏幕右侧`,
+      );
+    }
+    const lm = anchor.landmark;
+    if (typeof lm === "number") {
+      p.push(
+        `${at}.anchor.landmark 不能写裸编号 ${lm}。数字是引擎内部实现，JSON 只写语义名。` +
+          `可选：${HAND_ANCHOR_NAMES.join(", ")}`,
+      );
+    } else if (typeof lm !== "string") {
+      p.push(`${at}.anchor.landmark 必填，写语义名。可选：${HAND_ANCHOR_NAMES.join(", ")}`);
+    } else if (!HAND_ANCHOR_NAMES.includes(lm)) {
+      p.push(`${at}.anchor.landmark "${lm}" 不在手部锚点表里。相近的有：${nearest(lm, HAND_ANCHOR_NAMES).join(", ")}`);
+    }
+    if (anchor.offset !== undefined && !pair(anchor.offset)) {
+      p.push(`${at}.anchor.offset 必须是 [x, y] 两个数字，单位是掌宽`);
+    }
+    return;
+  }
+
+  p.push(`${at}.anchor.space "${space}" 无效，只能是 "screen" / "face" / "hand"`);
 }
 
 function validateSize(s: unknown, at: string, p: string[]) {
@@ -531,6 +557,31 @@ function validateElementSection(raw: Raw, templateType: string, p: string[]) {
     const at = `elements[${i}]`;
     if (typeof e.generate === "string") validateGenerator(e, at, p);
     else validateElement(e, at, p, ids);
+  }
+
+  /*
+   * 用了手部锚点或掌宽就必须声明 perception: ["hands"]。
+   *
+   * 和 mask.provider "person" 要求 "segmentation" 是同一条规矩，但这一条尤其重要：
+   * "hands" 曾经是个**静默失效的枚举值** —— types.ts 和 validate.ts 都认它，
+   * 而 engine.perceive() 没有对应分支，模板写了能过校验、能渲染、什么都不发生。
+   * 现在感知实现了，反过来要防的是「用了手部锚点却忘了声明感知」，
+   * 表现同样是静默的：元素永远解不出锚点，永远隐藏。
+   */
+  const needsHands = v2.some((e0) => {
+    const e = e0 as Raw;
+    const anchor = (e.anchor ?? (e.item as Raw | undefined)?.anchor) as Raw | undefined;
+    const size = (e.size ?? (e.item as Raw | undefined)?.size) as Raw | undefined;
+    return anchor?.space === "hand" || size?.ref === "palm_width";
+  });
+  if (needsHands) {
+    const perception = raw.perception;
+    if (!Array.isArray(perception) || !perception.includes("hands")) {
+      p.push(
+        '用了手部锚点（anchor.space "hand"）或掌宽（size.ref "palm_width"）时，' +
+          'perception 必须包含 "hands"，否则手部模型不会被加载，元素永远隐藏',
+      );
+    }
   }
 
   // 展开后再校验一次：展开本身就能暴露一半问题（空展开、数量爆炸、生成器填出越界锚点）。

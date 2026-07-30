@@ -22,4 +22,8 @@ export const FACE_MODEL =
   process.env.NEXT_PUBLIC_FACE_MODEL ||
   "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task";
 
+export const HAND_MODEL =
+  process.env.NEXT_PUBLIC_HAND_MODEL ||
+  "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
 export const SELF_HOSTED = WASM_BASE.startsWith("/");

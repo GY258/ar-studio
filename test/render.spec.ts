@@ -89,6 +89,19 @@ function highFreq(p: PNG, x0: number, y0: number, w: number, h: number): number 
   return n ? sum / n : 0;
 }
 
+/**
+ * 这个模板该用哪张 fixture 跑回归。
+ *
+ * 默认 front，但手部模板必须用 hands —— front 那张照片里没有手，
+ * 手部锚点解不出来，元素全部隐藏，「元素覆盖的像素比例 > 0.001」直接红。
+ * 按 perception 选而不是让模板自己声明测试用哪张图：测试用哪张输入是测试的事，
+ * 不该污染产品 schema。
+ */
+function fixtureFor(templatePath: string): FixtureName {
+  const raw = JSON.parse(fs.readFileSync(templatePath, "utf8"));
+  return Array.isArray(raw.perception) && raw.perception.includes("hands") ? "hands" : "front";
+}
+
 /** 展开后有没有动画。静态模板不该被「动画在动」那条断言卡住。 */
 function hasAnimations(templatePath: string): boolean {
   const raw = JSON.parse(fs.readFileSync(templatePath, "utf8"));
@@ -151,7 +164,8 @@ for (const file of templatesWithElements()) {
 
   test(`${slug} · 渲染回归`, async () => {
     const { period: P, closes } = templatePeriod(templatePath);
-    const count = await loadTemplate(harness.page, templatePath, "front");
+    const fx = fixtureFor(templatePath);
+    const count = await loadTemplate(harness.page, templatePath, fx);
     expect(count, "展开后应该有元素").toBeGreaterThan(0);
 
     const t0 = decode(await capture(harness.page, 0));
@@ -175,9 +189,9 @@ for (const file of templatesWithElements()) {
     }
     expect(ratio, `整帧差异像素比例（差异图见 test/.artifacts/${slug}-diff.png）`).toBeLessThanOrEqual(DIFF_MAX);
 
-    const base = await baseFrame("front");
+    const base = await baseFrame(fx);
     // baseFrame 换过模板，要把待测模板装回来
-    await loadTemplate(harness.page, templatePath, "front");
+    await loadTemplate(harness.page, templatePath, fx);
 
     expect(maskIoU(t0, golden, base), "元素掩膜 IoU").toBeGreaterThanOrEqual(IOU_MIN);
 
@@ -529,6 +543,31 @@ test("帧效果必须挂在内置材质上，不能退回裸 ShaderMaterial", as
   // 也就是说这个 bug 只能靠真机发现 —— 所以在这里把选择本身钉死。
   await loadTemplate(harness.page, path.join(TEMPLATES, "lowres-life.json"), "front");
   expect(await harness.page.evaluate(() => window.harness.bgMaterialType())).toBe("MeshBasicMaterial");
+});
+
+test("手部感知：有手时元素显示，没手时隐藏", async () => {
+  /*
+   * 这条同时钉两件事。
+   *
+   * 一、`perception: ["hands"]` 真的接上了。它曾经是个**静默失效的枚举值** ——
+   *     types.ts 和 validate.ts 都认，而 engine.perceive() 没有对应分支，
+   *     模板写了能过校验、能渲染、什么都不发生、也不报错。和当初的 blur 一样。
+   *     有人把 perceive 里那行删掉，这条会立刻红。
+   *
+   * 二、丢手兜底。手部元素在没有手时必须隐藏，而不是画到画面角上或者 (0,0)。
+   */
+  const tpl = path.join(TEMPLATES, "finger-flowers.json");
+
+  await loadTemplate(harness.page, tpl, "hands");
+  const withHands = decode(await capture(harness.page, 0));
+  const handsBase = await baseFrame("hands");
+  expect(coverage(withHands, handsBase), "有手时指尖元素应该画出来").toBeGreaterThan(0.002);
+
+  // front 那张照片里没有手，fixture 也没录 hands.json
+  await loadTemplate(harness.page, tpl, "front");
+  const noHands = decode(await capture(harness.page, 0));
+  const frontBase = await baseFrame("front");
+  expect(coverage(noHands, frontBase), "没有手时手部元素必须全部隐藏").toBeLessThan(0.0005);
 });
 
 test("文字用的是内嵌字体，不是系统字体", async () => {

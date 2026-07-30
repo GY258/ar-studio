@@ -11,12 +11,14 @@
  */
 
 import { FACE_ANCHORS, ANCHOR_PAIRS } from "@/engine/anchors";
+import { HAND_ANCHORS } from "@/engine/hand-anchors";
 import { listSvgKeys, getSvg } from "@/engine/svg-assets";
 import { extractAspect } from "@/engine/svg-sanitize";
 
 /** ElementV2 / AnimationV2 / GeneratorV2 / SourceEffect 的类型说明。 */
 export function buildSchemaReference(): string {
   const anchorNames = Object.keys(FACE_ANCHORS);
+  const handAnchorNames = Object.keys(HAND_ANCHORS);
 
   return `## 模板骨架
 
@@ -30,7 +32,7 @@ export function buildSchemaReference(): string {
   "hidden": false,                      // 可选。true = 不进模板库列表，但 /studio/<slug> 仍可直接访问
   "schema_version": 2,
   "template_type": "facetrack | overlay",
-  "perception": ["face"],               // 用到什么感知能力就写什么
+  "perception": ["face"],               // segmentation / face / hands，用到什么写什么
   "preview": {},
   "elements": [ /* ElementV2 或生成器 */ ],
   "source": { /* 可选，帧效果 */ }
@@ -69,8 +71,11 @@ type ElementAnchor =
   | { space: "face";   landmark: FaceAnchorName;  // 只写语义名，绝不写数字
       offset?: [number, number];                  // 单位 IOD（瞳距），y 正数向下
       mirror?: boolean }                          // 水平翻转
+  | { space: "hand";   hand: "left" | "right";    // **本人的**左右手，见下
+      landmark: HandAnchorName;
+      offset?: [number, number] }                 // 单位掌宽，y 正数向下
 
-type SizeRef = "vw" | "iod" | "eye_width" | "face_width"
+type SizeRef = "vw" | "iod" | "eye_width" | "face_width" | "palm_width"
 type SizeFit = "width" | "font"
 \`\`\`
 
@@ -93,6 +98,29 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 - \`add\` 发光 → 星星、光斑
 
 贴在脸上的半透明东西默认就该考虑 \`multiply\` 或 \`screen\`，别一律用 normal。
+
+### 手部锚点
+
+\`\`\`jsonc
+{ "id": "l-index", "asset": { "kind": "svg-lib", "key": "emoji-sunflower" },
+  "anchor": { "space": "hand", "hand": "left", "landmark": "index_tip", "offset": [0, 0.18] },
+  "size": { "ref": "palm_width", "scale": 0.4 } }
+\`\`\`
+
+**\`hand\` 说的是本人的左右手，不是画面上的左右。** 画面是镜像的，
+本人的左手出现在屏幕右侧。按「戴戒指的那只手」思考，别按屏幕位置思考。
+
+**一个元素绑一只手的一个点。** 要「十根指尖各挂一个」就写十个元素 ——
+没有「按手自动复制」的生成器，因为每根手指挂的东西通常不一样。
+
+\`offset\` 单位是**掌宽**（食指根到小指根），和人脸那边用 IOD 是一个道理：
+用像素的话人一退远偏移就不成比例了。\`size.ref: "palm_width"\` 同理。
+
+**手部元素默认不跟手转**（\`followRoll\` 缺省 false）：emoji 立着好看，
+而且手的 roll 抖动比头大得多。要跟就显式写 \`followRoll: true\`。
+
+用了手部锚点或 \`palm_width\` 就**必须** \`perception: ["hands"]\`，校验器会拦 ——
+忘了声明的话手部模型不加载，元素永远隐藏，而且不报错。
 
 **\`interactive\`** 让用户在画面上直接拖动元素、滚轮或双指缩放它。
 只对 \`space: "screen"\` 有意义——face 空间的位置由 landmark 决定，拖了下一帧就被拉回去。
@@ -274,9 +302,16 @@ inside 时脸上不作用，outside 时脸上保持原样。丢脸时自动关�
 4. 单模板展开后 ≤ 120 个元素。
 5. 引擎里不允许出现 \`if (slug === "...")\`。需要新维度就扩 schema，不要开特例分支。
 
-## 可用锚点（${anchorNames.length} 个）
+## 可用人脸锚点（${anchorNames.length} 个）
 
 ${anchorNames.join(", ")}
+
+## 可用手部锚点（${handAnchorNames.length} 个）
+
+${handAnchorNames.join(", ")}
+
+指尖是 \`thumb_tip\` / \`index_tip\` / \`middle_tip\` / \`ring_tip\` / \`pinky_tip\`；
+\`_mcp\` 是指根、\`_pip\` 和 \`_dip\` 是中间关节、\`wrist\` 是手腕。
 `;
 }
 

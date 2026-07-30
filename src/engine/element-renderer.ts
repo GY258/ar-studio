@@ -15,6 +15,7 @@ import { ensureTextFont } from "./text-font";
 import { extractAspect } from "./svg-sanitize";
 import { evaluateAnimations } from "./animations";
 import type { FaceFrame, FaceTracker } from "./face-tracker";
+import type { HandFrame, HandTracker } from "./hand-tracker";
 
 /** 文字统一按这个字号栅格化一次，再按 size 缩放 mesh。避免人一动就重新栅格化。 */
 const TEXT_RASTER_PX = 64;
@@ -152,8 +153,11 @@ export class ElementRenderer {
     return { tex, aspect: 0.5, textPxWidth: 0 };
   }
 
-  /** size.ref → 像素基准。face 参照物在没有人脸时不可解，返回 null 让元素隐藏。 */
-  private refPixels(ref: SizeRef, face: FaceFrame | null): number | null {
+  /**
+   * size.ref → 像素基准。参照物解不出来时返回 null，让元素隐藏 ——
+   * 没有人脸时 iod 不可解，没有手时 palm_width 不可解。
+   */
+  private refPixels(ref: SizeRef, face: FaceFrame | null, hand: HandFrame | null): number | null {
     switch (ref) {
       case "vw":
         return this.W;
@@ -163,23 +167,36 @@ export class ElementRenderer {
         return face ? face.eyeWidth : null;
       case "face_width":
         return face ? face.faceWidth : null;
+      case "palm_width":
+        return hand ? hand.palmWidth : null;
     }
   }
 
-  update(t: number, tracker: FaceTracker, face: FaceFrame | null) {
+  update(
+    t: number,
+    tracker: FaceTracker,
+    face: FaceFrame | null,
+    handTracker?: HandTracker,
+    nowMs = t * 1000,
+  ) {
     for (const item of this.items) {
       const { mesh, elem, aspect, textPxWidth } = item;
       const mat = mesh.material as THREE.MeshBasicMaterial;
       const isFace = elem.anchor.space === "face";
+      const isHand = elem.anchor.space === "hand";
 
-      // 人脸空间的元素在丢脸时藏起来；屏幕空间的照常显示。
-      // face-anchored 元素用 vw 尺寸时依然需要人脸来定位，所以这里按 space 判断而不是按 ref。
-      if (isFace && !face) {
+      // 这只元素绑的那只手。手部空间才去查，省掉不必要的遍历
+      const hand =
+        isHand && handTracker ? handTracker.frame(nowMs, (elem.anchor as { hand: "left" | "right" }).hand) : null;
+
+      // 人脸 / 手部空间的元素在目标丢失时藏起来；屏幕空间的照常显示。
+      // 按 space 判断而不是按 ref：face 空间的元素用 vw 尺寸时依然需要人脸来定位。
+      if ((isFace && !face) || (isHand && !hand)) {
         mesh.visible = false;
         continue;
       }
 
-      const basePx = this.refPixels(elem.size.ref, face);
+      const basePx = this.refPixels(elem.size.ref, face, hand);
       if (basePx === null) {
         mesh.visible = false;
         continue;
@@ -187,8 +204,8 @@ export class ElementRenderer {
       mesh.visible = true;
 
       const base = basePx * elem.size.scale * item.userScale;
-      // emit-fall-fade 的 distance 以 IOD 计（face）或屏幕宽度计（screen）
-      const unit = isFace && face ? face.iod : this.W;
+      // emit-fall-fade 的 distance 以 IOD 计（face）、掌宽计（hand）或屏幕宽度计（screen）
+      const unit = isFace && face ? face.iod : isHand && hand ? hand.palmWidth : this.W;
       const anim = evaluateAnimations(elem.animations, t, this.H, unit);
 
       // --- 中心位置 ---
@@ -199,6 +216,25 @@ export class ElementRenderer {
       if (elem.anchor.space === "screen") {
         cx = (elem.anchor.nx - 0.5) * this.W;
         cy = (0.5 - elem.anchor.ny) * this.H;
+      } else if (elem.anchor.space === "hand") {
+        const lm = handTracker!.landmarkAt(hand!, elem.anchor.landmark);
+        if (!lm) {
+          mesh.visible = false;
+          continue;
+        }
+        // 和人脸、背景平面守同一个镜像约定：0.5 - x，不是 x - 0.5
+        cx = (0.5 - lm.x) * this.W;
+        cy = (0.5 - lm.y) * this.H;
+        // 手部元素默认**不**跟手转：emoji 立着好看，而且手的 roll 抖动比头大得多。
+        // 要跟就显式写 followRoll: true
+        roll = elem.followRoll ? hand!.roll : 0;
+
+        const [ox, oy] = elem.anchor.offset ?? [0, 0];
+        // 偏移以掌宽为单位。跟脸那边以 IOD 为单位是一个道理：
+        // 用像素的话人一退远偏移就不成比例了
+        cx += ox * hand!.palmWidth;
+        cy += -oy * hand!.palmWidth + anim.positionY;
+        cx += anim.outwardX;
       } else {
         const lm = tracker.landmarkAt(face!, elem.anchor.landmark);
         if (!lm) {
@@ -247,6 +283,7 @@ export class ElementRenderer {
 
       // --- 旋转 ---
       const selfRot = ((elem.rotation ?? 0) * -Math.PI) / 180;
+      // face 空间默认跟头转；hand 空间默认**不**跟手转（见上面的注释）；screen 恒不转
       const followRoll = elem.followRoll ?? elem.anchor.space === "face";
       mesh.rotation.z = selfRot + anim.rotation - (followRoll ? roll : 0);
     }
