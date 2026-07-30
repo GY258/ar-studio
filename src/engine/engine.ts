@@ -420,7 +420,7 @@ export class ArEngine {
       shader.uniforms.vFaceShade = { value: v?.faceShade ?? 0 };
       shader.uniforms.vOutline = { value: v?.outline ?? 0 };
       shader.uniforms.vGrain = { value: v?.grain ?? 0 };
-      shader.uniforms.vAmbient = { value: v?.ambient ?? 0.16 };
+      shader.uniforms.vAmbient = { value: v?.ambient ?? 0.02 };
       shader.uniforms.vSmooth = { value: v?.smooth ?? 0.65 };
       shader.uniforms.vSeed = { value: v?.seed ?? 0 };
 

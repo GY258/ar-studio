@@ -231,7 +231,16 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
      * 抬地板 + 轻微 gamma，而不是整体加亮：整体加亮会冲爆本来就亮的地方，
      * 而「保住原始光照」是这个效果的前提。
      */
-    vCol = vAmbient + ( 1.0 - vAmbient ) * pow( max( vCol, 0.0 ), vec3( 0.8 ) );
+    float vL0 = dot( vCol, vec3( 0.2126, 0.7152, 0.0722 ) );
+    // 注意这里是**线性空间**（srcTexel 已经做过 sRGB 解码）。
+    // ambient 和这个 gamma 都要按线性去取值：sRGB 的 64 在线性里只有 0.05，
+    // 拿 sRGB 的直觉给 0.12 的地板等于把它抬了三倍多，整张图发白。
+    // 第一版就是这么翻的车，实测背景从 64 被抬到 143。
+    float vL1 = vAmbient + ( 1.0 - vAmbient ) * pow( max( vL0, 0.0 ), 0.95 );
+    // 只抬亮度，RGB 等比缩放。往三个通道**同时加常数**会把饱和度压没 ——
+    // 实测一面米色墙 0.28 → 0.06，整张图发灰发白，正是「颜色不对」的真正来源。
+    // 等比缩放下饱和度 (max-min)/max 是不变量，色相和彩度都原样保留
+    vCol = clamp( vCol * ( vL1 / max( vL0, 0.004 ) ), 0.0, 1.0 );
 
     /*
      * 提饱和**必须在平均之后**。
