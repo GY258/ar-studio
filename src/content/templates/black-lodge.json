@@ -29,8 +29,8 @@
         ]
       },
       "size": {
-        "ref": "face_width",
-        "scale": 1.25
+        "ref": "iod",
+        "scale": 2.662
       },
       "blend": "add",
       "animations": [
@@ -64,8 +64,8 @@
         ]
       },
       "size": {
-        "ref": "face_width",
-        "scale": 0.8
+        "ref": "iod",
+        "scale": 1.704
       },
       "rotation": -8,
       "animations": [
@@ -89,13 +89,13 @@
         "space": "face",
         "landmark": "temple_left",
         "offset": [
-          1.8,
-          -1.44
+          1.7051,
+          -1.525
         ]
       },
       "size": {
-        "ref": "face_width",
-        "scale": 0.105
+        "ref": "iod",
+        "scale": 0.2236
       },
       "rotation": -8,
       "animations": [
@@ -119,13 +119,13 @@
         "space": "face",
         "landmark": "temple_left",
         "offset": [
-          1.8,
-          -0.02
+          1.8972,
+          -0.1582
         ]
       },
       "size": {
-        "ref": "face_width",
-        "scale": 0.058
+        "ref": "iod",
+        "scale": 0.1235
       },
       "rotation": -8,
       "animations": [
@@ -151,8 +151,8 @@
         ]
       },
       "size": {
-        "ref": "face_width",
-        "scale": 0.8
+        "ref": "iod",
+        "scale": 1.704
       },
       "rotation": 8,
       "animations": [
@@ -176,13 +176,13 @@
         "space": "face",
         "landmark": "temple_right",
         "offset": [
-          -1.8,
-          -1.44
+          -1.7051,
+          -1.525
         ]
       },
       "size": {
-        "ref": "face_width",
-        "scale": 0.105
+        "ref": "iod",
+        "scale": 0.2236
       },
       "rotation": 8,
       "animations": [
@@ -206,13 +206,13 @@
         "space": "face",
         "landmark": "temple_right",
         "offset": [
-          -1.8,
-          -0.02
+          -1.8972,
+          -0.1582
         ]
       },
       "size": {
-        "ref": "face_width",
-        "scale": 0.058
+        "ref": "iod",
+        "scale": 0.1235
       },
       "rotation": 8,
       "animations": [
@@ -222,6 +222,100 @@
           "period": 2.0
         }
       ]
+    },
+    {
+      "generate": "trail",
+      "landmark": "temple_left",
+      "count": 5,
+      "offset": [
+        1.9316,
+        0.0865
+      ],
+      "step": 0,
+      "decay": 1,
+      "phaseShift": 0.32,
+      "item": {
+        "asset": {
+          "kind": "svg-lib",
+          "key": "coin-gold"
+        },
+        "size": {
+          "ref": "iod",
+          "scale": 0.36
+        },
+        "jitter": {
+          "size": 0.25,
+          "phase": 0.1,
+          "offset": [
+            0.16,
+            0.05
+          ],
+          "seed": 907
+        },
+        "animations": [
+          {
+            "preset": "emit-fall-fade",
+            "period": 1.6,
+            "distance": 1.5,
+            "outwardDrift": 0.14,
+            "shrink": 0.15,
+            "emitPortion": 0.12,
+            "fadePortion": 0.22,
+            "ease": "gravity"
+          },
+          {
+            "preset": "spin",
+            "period": 1.5
+          }
+        ]
+      }
+    },
+    {
+      "generate": "trail",
+      "landmark": "temple_right",
+      "count": 5,
+      "offset": [
+        -1.9316,
+        0.0865
+      ],
+      "step": 0,
+      "decay": 1,
+      "phaseShift": 0.32,
+      "item": {
+        "asset": {
+          "kind": "svg-lib",
+          "key": "coin-gold"
+        },
+        "size": {
+          "ref": "iod",
+          "scale": 0.36
+        },
+        "jitter": {
+          "size": 0.25,
+          "phase": 0.1,
+          "offset": [
+            0.16,
+            0.05
+          ],
+          "seed": 908
+        },
+        "animations": [
+          {
+            "preset": "emit-fall-fade",
+            "period": 1.6,
+            "distance": 1.5,
+            "outwardDrift": -0.14,
+            "shrink": 0.15,
+            "emitPortion": 0.12,
+            "fadePortion": 0.22,
+            "ease": "gravity"
+          },
+          {
+            "preset": "spin",
+            "period": 1.7
+          }
+        ]
+      }
     }
   ]
 }

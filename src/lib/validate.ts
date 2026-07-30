@@ -542,6 +542,14 @@ function validateGenerator(g: Raw, at: string, p: string[]) {
     case "trail":
       if (!num(g.count) || (g.count as number) < 1) p.push(`${at}.count 必须是 ≥1 的整数`);
       if (!num(g.step)) p.push(`${at}.step 必填，相邻两个的 y 间距，单位 IOD`);
+      // 顶层 trail 不写 landmark 会静默挂到 nose_bridge 上 —— 校验过、渲染出来，
+      // 只是长在鼻梁上。这类「不报错但位置全错」的失效最难查，所以这里直接拦掉
+      if (g.landmark !== undefined && !ANCHOR_NAMES.includes(g.landmark as string)) {
+        p.push(
+          `${at}.landmark "${String(g.landmark)}" 不在锚点表里。` +
+            `相近的有：${nearest(String(g.landmark), ANCHOR_NAMES).join(", ")}`,
+        );
+      }
       break;
     case "columns":
       if (!num(g.rows) || (g.rows as number) < 1) p.push(`${at}.rows 必须是 ≥1 的整数`);
