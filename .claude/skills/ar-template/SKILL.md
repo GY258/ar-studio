@@ -100,6 +100,14 @@ npm run test:render
 `hand` 说的是**本人的**左右手，不是画面上的左右（画面是镜像的）。
 一个元素绑一只手的一个点，十根指尖就写十个元素。参考 `finger-flowers.json`。
 
+**「拖出一条轨迹 / 种花」** → `asset: { kind: "trail", color, seconds, leaf }`，锚在会动的
+东西上（`hand` 或 `face`）。**它是唯一一个几何依赖时间历史的 asset**，所以离线渲染必须走
+`stepTo`（harness 已经是了），而且验的时候要用**序列** fixture：单帧数据只有一个点，
+画不出带。参考 `finger-flowers.json`。
+
+**「捏合触发」** → `asset: { kind: "pinch-bloom", key, seconds, grow }`。边沿触发，
+一次捏合一朵。同样依赖跨帧状态。
+
 **「用 emoji」** → 别写 `kind: "text"` 塞 emoji 字符，那走的是系统 emoji 字体，
 macOS 和 Linux 字形不同，golden 只在录它的机器上成立。用 `svg-lib` 的 `emoji-*` 素材
 （Twemoji，见 `src/content/assets/CREDITS.md`），缺哪个照那份文档加。

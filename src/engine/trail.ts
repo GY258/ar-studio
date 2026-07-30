@@ -97,3 +97,79 @@ export class TrailBuffer {
     this.lastSlot = -1;
   }
 }
+
+/* ============================================================
+ * 捏合事件
+ * ============================================================ */
+
+/** 捏合判定：拇指尖到食指尖的距离小于掌宽的这个比例 */
+const PINCH_ON = 0.28;
+/**
+ * 松开判定用一个更大的阈值。
+ *
+ * 单阈值会在临界点上反复触发（手抖一下就 on/off/on/off），一秒钟蹦出十几朵花。
+ * 施密特触发器是这类边沿检测的标准做法，这里的迟滞带是 0.28~0.42。
+ */
+const PINCH_OFF = 0.42;
+
+export interface BloomEvent {
+  /** 捏合点（拇指尖和食指尖的中点），归一化坐标 */
+  x: number;
+  y: number;
+  /** 触发时刻，秒 */
+  t: number;
+}
+
+/**
+ * 捏合的边沿检测 + 事件缓冲。
+ *
+ * 和 TrailBuffer 一样是 append-only：事件写进去只会随时间过期，不参与交互。
+ * **边沿**触发而不是状态触发 —— 「正在捏着」每帧都成立，会连续生成，
+ * 而「刚捏上」才是一次动作。
+ */
+export class PinchDetector {
+  private readonly events: BloomEvent[] = [];
+  private pinching = false;
+  private lastT = -1;
+
+  constructor(
+    private readonly seconds: number,
+    private readonly maxEvents = 8,
+  ) {}
+
+  /**
+   * 喂一帧。ratio = 拇指尖到食指尖距离 / 掌宽。
+   * 返回是否**刚**触发了一次，方便测试断言边沿而不是状态。
+   */
+  update(t: number, ratio: number, x: number, y: number): boolean {
+    // 时间倒流：整个状态重置。理由同 TrailBuffer
+    if (t < this.lastT) this.clear();
+    this.lastT = t;
+
+    let fired = false;
+    if (!this.pinching && ratio < PINCH_ON) {
+      this.pinching = true;
+      this.events.push({ x, y, t });
+      if (this.events.length > this.maxEvents) this.events.shift();
+      fired = true;
+    } else if (this.pinching && ratio > PINCH_OFF) {
+      this.pinching = false;
+    }
+
+    const cutoff = t - this.seconds;
+    let drop = 0;
+    while (drop < this.events.length && this.events[drop].t < cutoff) drop++;
+    if (drop) this.events.splice(0, drop);
+    return fired;
+  }
+
+  live(): readonly BloomEvent[] {
+    return this.events;
+  }
+
+  clear() {
+    this.events.length = 0;
+    this.pinching = false;
+    this.lastT = -1;
+  }
+}

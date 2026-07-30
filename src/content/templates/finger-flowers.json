@@ -443,6 +443,42 @@
         "ref": "palm_width",
         "scale": 0.34
       }
+    },
+    {
+      "id": "bloom-left",
+      "asset": {
+        "kind": "pinch-bloom",
+        "key": "emoji-cherry-blossom",
+        "seconds": 1.1,
+        "grow": 0.85
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "left",
+        "landmark": "index_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 1
+      }
+    },
+    {
+      "id": "bloom-right",
+      "asset": {
+        "kind": "pinch-bloom",
+        "key": "emoji-sparkles",
+        "seconds": 1.1,
+        "grow": 0.85
+      },
+      "anchor": {
+        "space": "hand",
+        "hand": "right",
+        "landmark": "index_tip"
+      },
+      "size": {
+        "ref": "palm_width",
+        "scale": 1
+      }
     }
   ]
 }

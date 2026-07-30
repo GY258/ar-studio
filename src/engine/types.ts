@@ -163,6 +163,22 @@ export type ElementAsset =
         /** 必填。没有 seed 每次展开长的位置都不一样，golden 对比不成立 */
         seed: number;
       };
+    }
+  /**
+   * 捏合绽放：拇指和食指捏在一起时，在捏合点冒出一朵，然后放大淡出。
+   *
+   * 和 trail 一样依赖跨帧状态（要知道「刚捏上」而不是「正捏着」），
+   * 所以同样要求离线渲染走 stepTo。锚点只需要 space "hand" + hand，
+   * 位置由拇指尖和食指尖的中点算，写哪个 landmark 都不影响结果。
+   */
+  | {
+      kind: "pinch-bloom";
+      /** svg-lib 的 key。开出来的是什么花 */
+      key: string;
+      /** 一朵活多久，秒 */
+      seconds: number;
+      /** 最终大小相对 size.ref 的倍数 */
+      grow: number;
     };
 
 export type ElementAnchor =

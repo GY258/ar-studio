@@ -14,7 +14,7 @@ import { getSvg, getSvgAspect, rasterizeSvg, rasterizeText } from "./svg-assets"
 import { ensureTextFont } from "./text-font";
 import { extractAspect } from "./svg-sanitize";
 import { evaluateAnimations } from "./animations";
-import { TRAIL_RATE, TrailBuffer } from "./trail";
+import { PinchDetector, TRAIL_RATE, TrailBuffer } from "./trail";
 import type { FaceFrame, FaceTracker } from "./face-tracker";
 import type { HandFrame, HandTracker } from "./hand-tracker";
 
@@ -26,6 +26,12 @@ function hash1(i: number, seed: number): number {
 
 /** 文字统一按这个字号栅格化一次，再按 size 缩放 mesh。避免人一动就重新栅格化。 */
 const TEXT_RASTER_PX = 64;
+
+/** 捏合绽放额外带的东西：边沿检测器 + 一池花的网格 */
+interface BloomParts {
+  detector: PinchDetector;
+  sprites: THREE.Mesh[];
+}
 
 /** 轨迹元素额外带的东西：历史缓冲、带的几何、沿途叶子的网格池 */
 interface TrailParts {
@@ -54,6 +60,7 @@ interface Item {
   lastW: number;
   lastH: number;
   trail?: TrailParts;
+  bloom?: BloomParts;
 }
 
 export class ElementRenderer {
@@ -112,6 +119,26 @@ export class ElementRenderer {
             lastW: 0,
             lastH: 0,
             trail: parts,
+          });
+        }
+        continue;
+      }
+
+      if (elem.asset.kind === "pinch-bloom") {
+        const parts = await this.buildBloom(elem.asset);
+        if (gen !== this.generation) return;
+        if (parts) {
+          this.items.push({
+            mesh: parts.sprites[0],
+            elem,
+            aspect: 1,
+            textPxWidth: 0,
+            userDx: 0,
+            userDy: 0,
+            userScale: 1,
+            lastW: 0,
+            lastH: 0,
+            bloom: parts,
           });
         }
         continue;
@@ -381,9 +408,76 @@ export class ElementRenderer {
     for (let i = leafIdx; i < parts.leaves.length; i++) parts.leaves[i].visible = false;
   }
 
+  /** 捏合绽放：一池固定数量的花，按事件数显示。 */
+  private async buildBloom(
+    asset: Extract<ElementAsset, { kind: "pinch-bloom" }>,
+  ): Promise<BloomParts | null> {
+    const svg = getSvg(asset.key);
+    if (!svg) return null;
+    const aspect = getSvgAspect(asset.key);
+    const canvas = await rasterizeSvg(svg, 192, Math.max(1, Math.round(192 * aspect)));
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    // 池子大小 = 缓冲能存的事件数。多了浪费，少了会让快速连捏时新的顶掉旧的
+    const sprites: THREE.Mesh[] = [];
+    for (let i = 0; i < 8; i++) {
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, aspect),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }),
+      );
+      m.renderOrder = 6; // 压在花和茎之上：刚捏出来的那朵该是最显眼的
+      m.visible = false;
+      this.group.add(m);
+      sprites.push(m);
+    }
+    return { detector: new PinchDetector(asset.seconds), sprites };
+  }
+
+  /**
+   * 捏合的一帧：喂比值给边沿检测器，再把活着的事件画出来。
+   *
+   * 位置用拇指尖和食指尖的**中点**，不用某一个 landmark ——
+   * 捏合的语义是「两指相碰的那个点」，用单指会让花偏在一侧。
+   */
+  private updateBloom(item: Item, elem: ElementV2, t: number, basePx: number, hand: HandFrame, handTracker: HandTracker) {
+    const parts = item.bloom!;
+    const asset = elem.asset as Extract<ElementAsset, { kind: "pinch-bloom" }>;
+    const thumb = handTracker.landmarkAt(hand, "thumb_tip");
+    const index = handTracker.landmarkAt(hand, "index_tip");
+    if (thumb && index) {
+      const mx = (thumb.x + index.x) / 2;
+      const my = (thumb.y + index.y) / 2;
+      // 距离要除以掌宽换算成「相对手的大小」，否则人退远之后永远判成捏合
+      const distPx = Math.hypot((thumb.x - index.x) * this.W, (thumb.y - index.y) * this.H);
+      parts.detector.update(t, distPx / Math.max(1e-3, hand.palmWidth), mx, my);
+    }
+
+    const live = parts.detector.live();
+    for (let i = 0; i < parts.sprites.length; i++) {
+      const m = parts.sprites[i];
+      const ev = live[i];
+      if (!ev) {
+        m.visible = false;
+        continue;
+      }
+      const p = Math.min(1, Math.max(0, (t - ev.t) / asset.seconds));
+      m.visible = true;
+      // 前 25% 弹出、之后边长大边淡出。一上来就全尺寸会显得没有「绽开」的动作
+      const pop = p < 0.25 ? p / 0.25 : 1;
+      const s = basePx * asset.grow * (0.35 + 0.65 * pop) * (1 + p * 0.45);
+      m.scale.set(s, s, 1);
+      m.position.set((0.5 - ev.x) * this.W, (0.5 - ev.y) * this.H, 6);
+      (m.material as THREE.MeshBasicMaterial).opacity = 1 - p * p;
+    }
+  }
+
   /** 清掉所有跨帧状态。切模板和时间倒流时调 —— 见 engine.stepTo。 */
   resetState() {
-    for (const it of this.items) it.trail?.buffer.clear();
+    for (const it of this.items) {
+      it.trail?.buffer.clear();
+      it.bloom?.detector.clear();
+    }
   }
 
   /** 四种 asset.kind 各自的栅格化路径。返回 null 表示这个元素画不出来，跳过。 */
@@ -416,6 +510,9 @@ export class ElementRenderer {
         textPxWidth: canvas.width,
       };
     }
+
+    // trail / pinch-bloom 有自己的构建路径，走不到这里
+    if (a.kind !== "gradient") return null;
 
     // gradient：程序化径向渐变椭圆。腮红这类不值得单独做成素材文件的东西。
     const c = document.createElement("canvas");
@@ -483,6 +580,12 @@ export class ElementRenderer {
 
       if (item.trail) {
         this.updateTrail(item, elem, t, basePx, face, hand, tracker, handTracker);
+        continue;
+      }
+
+      if (item.bloom) {
+        if (hand && handTracker) this.updateBloom(item, elem, t, basePx, hand, handTracker);
+        else for (const m of item.bloom.sprites) m.visible = false;
         continue;
       }
 

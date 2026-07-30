@@ -168,7 +168,7 @@ const ANIM_PRESETS = ["float", "fall", "pulse", "spin", "emit-fall-fade"];
 const EASES = ["linear", "in", "out", "inout", "gravity", "bounce"];
 /** 只有「0→1 走一趟」的原语能缓动。周期性原语套 ease 会在接缝处顿一下，见 animations.ts */
 const EASE_PRESETS = ["fall", "emit-fall-fade"];
-const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail"];
+const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "pinch-bloom"];
 const HAND_ANCHOR_NAMES = Object.keys(HAND_ANCHORS);
 const SIZE_REFS = ["vw", "iod", "eye_width", "face_width", "palm_width"];
 const SIZE_FITS = ["width", "font"];
@@ -289,6 +289,15 @@ function validateAsset(a: unknown, at: string, p: string[]) {
         }
       }
     }
+  }
+
+  if (kind === "pinch-bloom") {
+    const keys = svgKeys();
+    if (typeof asset.key !== "string" || (keys.length && !keys.includes(asset.key))) {
+      p.push(`${at}.asset.key "${asset.key}" 不在素材库里。相近的有：${nearest(String(asset.key), keys).join(", ")}`);
+    }
+    if (!inRange(asset.seconds, 0.2, 6)) p.push(`${at}.asset.seconds 应在 [0.2, 6]（一朵活多久）`);
+    if (!inRange(asset.grow, 0.05, 4)) p.push(`${at}.asset.grow 应在 [0.05, 4]（最终大小相对 size.ref）`);
   }
 
   if (kind === "svg-inline") {
@@ -420,6 +429,12 @@ function validateElement(e: Raw, at: string, p: string[], ids: Set<string>) {
   validateAnchor(e.anchor, at, p);
   const assetKind = (e.asset as Raw | undefined)?.kind;
   const space = (e.anchor as Raw | undefined)?.space;
+  if (assetKind === "pinch-bloom" && space !== "hand") {
+    p.push(
+      `${at} 的 asset 是 pinch-bloom 但锚不在 hand 空间 —— 捏合是手的动作，` +
+        `要靠拇指尖和食指尖的距离判定，别的空间没有这两个点`,
+    );
+  }
   if (assetKind === "trail" && space === "screen") {
     p.push(
       `${at} 的 asset 是 trail 但锚在 screen 空间 —— 屏幕上的固定点没有轨迹，画不出任何东西。` +

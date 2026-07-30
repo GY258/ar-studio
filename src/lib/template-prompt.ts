@@ -67,6 +67,7 @@ type ElementAsset =
   | { kind: "gradient";   shape: "ellipse"; color: string; opacity?: number }
   | { kind: "trail";      color: string; seconds: number;   // 锚点走过的路，画成一条带
       leaf?: { key: string; spacing: number; scale: number; seed: number } }
+  | { kind: "pinch-bloom"; key: string; seconds: number; grow: number }  // 捏合时开一朵
 
 type ElementAnchor =
   | { space: "screen"; nx: number; ny: number }   // 归一化屏幕坐标，[-0.2, 1.2]
@@ -123,6 +124,24 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 采样落在固定的 12Hz 时间网格上，不是每帧一次 —— 每帧一次的话同一段手势在
 60fps 和 20fps 下会生成不同的带。相邻采样点位移超过 0.18 屏会**断开重新起一条**：
 手划出画面再进来、检测短暂丢失重新锁定，都会瞬移，连起来就是一条横跨画面的假线。
+
+### pinch-bloom —— 捏合绽放
+
+\`\`\`jsonc
+{ "id": "bloom-left",
+  "asset": { "kind": "pinch-bloom", "key": "emoji-cherry-blossom", "seconds": 1.1, "grow": 0.85 },
+  "anchor": { "space": "hand", "hand": "left", "landmark": "index_tip" },
+  "size": { "ref": "palm_width", "scale": 1 } }
+\`\`\`
+
+拇指和食指捏在一起时，在**两指中点**冒出一朵，然后放大淡出。
+锚点必须是 \`space: "hand"\`（捏合要靠拇指尖和食指尖的距离判定）；
+写哪个 \`landmark\` 不影响结果，位置永远取两指中点。
+
+**边沿触发，不是状态触发**：一次捏合 = 一朵花。判定带迟滞（0.28 收 / 0.42 放），
+不然手在临界点抖一下就是一串。距离除以掌宽再判，否则人退远之后永远算捏合中。
+
+和 trail 一样依赖跨帧状态，所以同样要求离线渲染走 stepTo。
 
 ### 手部锚点
 

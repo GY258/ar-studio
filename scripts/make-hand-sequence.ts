@@ -33,6 +33,11 @@ const DROP = 0.55;
  * 但幅度大了茎会卷成钩子，看不出「茎」这个意思。0.014 是两者之间。
  */
 const SWAY = 0.014;
+/** 捏合发生在序列的这几段（占全程比例）。两段是为了验边沿触发而不是状态触发 */
+const PINCH_WINDOWS: [number, number][] = [
+  [0.3, 0.4],
+  [0.66, 0.74],
+];
 
 type Pt = { x: number; y: number; z: number };
 type Hand = { hand: "left" | "right"; points: Pt[] };
@@ -50,22 +55,41 @@ function main() {
     // 茎短到看不出是茎 —— 指数取 1.25 既保留「起步稍慢」的手感，又让全程都在走
     const dy = DROP * Math.pow(p, 1.25);
     const dx = Math.sin(p * Math.PI * 2.2) * SWAY;
+    /*
+     * 捏合：把拇指尖和食指尖往中点收。
+     *
+     * 只动指尖那两个点，不动整只手 —— 判定用的是「两指距离 / 掌宽」，
+     * 掌宽得保持不变才能验出比值真的降下去了。
+     * 两段捏合是为了验**边沿**触发：状态触发的话第一段里每帧都会冒一朵。
+     */
+    const inPinch = PINCH_WINDOWS.some(([a, b]) => p >= a && p <= b);
     frames.push(
-      base.map((h) => ({
-        hand: h.hand,
-        points: h.points.map((q) => ({
+      base.map((h) => {
+        const pts = h.points.map((q) => ({
           x: +(q.x + dx).toFixed(4),
           y: +(q.y + dy).toFixed(4),
           z: q.z,
-        })),
-      })),
+        }));
+        if (inPinch) {
+          const [ti, ii] = [4, 8]; // thumb_tip / index_tip
+          const cx = (pts[ti].x + pts[ii].x) / 2;
+          const cy = (pts[ti].y + pts[ii].y) / 2;
+          for (const i of [ti, ii]) {
+            pts[i] = { x: +(cx + (pts[i].x - cx) * 0.12).toFixed(4), y: +(cy + (pts[i].y - cy) * 0.12).toFixed(4), z: pts[i].z };
+          }
+        }
+        return { hand: h.hand, points: pts };
+      }),
     );
   }
 
   fs.writeFileSync(FILE, JSON.stringify({ fps: FPS, frames }));
   const kb = (fs.statSync(FILE).size / 1024) | 0;
   console.log(`${path.relative(process.cwd(), FILE)}  ${total} 帧 @ ${FPS}fps（${SECONDS}s），${kb}KB`);
-  console.log(`运动是合成的（下落 ${DROP} + 横向飘 ${SWAY}），几何是真模型录的。理由见脚本头部注释。`);
+  console.log(
+    `运动是合成的（下落 ${DROP} + 横向飘 ${SWAY} + ${PINCH_WINDOWS.length} 段捏合），` +
+      `几何是真模型录的。理由见脚本头部注释。`,
+  );
 }
 
 main();

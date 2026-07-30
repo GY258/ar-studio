@@ -18,6 +18,7 @@ import { test, expect } from "@playwright/test";
 import type { PNG } from "pngjs";
 import { expandGenerators } from "../src/engine/generators";
 import { applyEase, evaluateAnimations } from "../src/engine/animations";
+import { PinchDetector } from "../src/engine/trail";
 import { migrateElements } from "../src/lib/migrate";
 import {
   launchHarness,
@@ -601,6 +602,49 @@ test("轨迹：状态层确定，且带真的在长", async () => {
   // 再来一次同一个 t。走的是「时间倒流 → 清状态 → 重新按定步长积到 2.4」
   const again = await capture(harness.page, 2.4);
   expect(again.equals(lateBuf), "同一个 t 渲染两次必须逐位相同，否则状态没清干净或步长不定").toBe(true);
+});
+
+test("捏合是边沿触发，不是状态触发", () => {
+  /*
+   * 纯函数，不进浏览器。
+   *
+   * 这条钉的是「一次动作 = 一朵花」。用状态触发（每帧只看在不在捏）的话，
+   * 捏住一秒会蹦出十几朵 —— 而且这个 bug 在截图上看不出来，
+   * 因为叠在一起的花和一朵花长得差不多。
+   *
+   * 顺带钉住迟滞：单阈值会在临界点反复触发，手抖一下就是一串。
+   */
+  const d = new PinchDetector(2);
+  // 松开状态喂几帧，不该触发
+  expect(d.update(0.0, 0.9, 0.5, 0.5)).toBe(false);
+  expect(d.update(0.1, 0.6, 0.5, 0.5)).toBe(false);
+  // 越过 ON 阈值：触发一次
+  expect(d.update(0.2, 0.2, 0.5, 0.5)).toBe(true);
+  // 继续捏着：不该再触发
+  expect(d.update(0.3, 0.15, 0.5, 0.5)).toBe(false);
+  expect(d.update(0.4, 0.25, 0.5, 0.5)).toBe(false);
+  // 回到 ON 和 OFF 之间的迟滞带：仍然算捏着，不该重新触发
+  expect(d.update(0.5, 0.35, 0.5, 0.5)).toBe(false);
+  expect(d.live().length).toBe(1);
+  // 越过 OFF 阈值才算松开，之后再捏才是第二次
+  expect(d.update(0.6, 0.5, 0.5, 0.5)).toBe(false);
+  expect(d.update(0.7, 0.2, 0.5, 0.5)).toBe(true);
+  expect(d.live().length).toBe(2);
+  // 超过存活时长的事件要过期
+  d.update(3.0, 0.9, 0.5, 0.5);
+  expect(d.live().length).toBe(0);
+});
+
+test("捏合绽放：捏合窗口里真的开出花", async () => {
+  // fixture 序列的捏合窗口在全程 30%~40%，3 秒序列就是 0.9~1.2s
+  const tpl = path.join(TEMPLATES, "finger-flowers.json");
+  await loadTemplate(harness.page, tpl, "hands");
+  const base = await baseFrame("hands");
+  await loadTemplate(harness.page, tpl, "hands");
+
+  const before = coverage(decode(await capture(harness.page, 0.8)), base);
+  const during = coverage(decode(await capture(harness.page, 1.05)), base);
+  expect(during, `捏合时该多出一朵（${before.toFixed(4)} → ${during.toFixed(4)}）`).toBeGreaterThan(before * 1.15);
 });
 
 test("文字用的是内嵌字体，不是系统字体", async () => {
