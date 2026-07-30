@@ -1,0 +1,227 @@
+{
+  "slug": "black-lodge",
+  "name": {
+    "zh": "黑木屋",
+    "en": "Black Lodge"
+  },
+  "category": "face",
+  "sort_order": 45,
+  "price_cents": 0,
+  "schema_version": 2,
+  "template_type": "facetrack",
+  "perception": [
+    "face"
+  ],
+  "preview": {},
+  "elements": [
+    {
+      "id": "crown",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "crown-flame"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "head_top",
+        "offset": [
+          0,
+          -1.62
+        ]
+      },
+      "size": {
+        "ref": "face_width",
+        "scale": 1.25
+      },
+      "blend": "add",
+      "animations": [
+        {
+          "preset": "pulse",
+          "scaleRange": [
+            0.94,
+            1.06
+          ],
+          "period": 0.9
+        },
+        {
+          "preset": "float",
+          "amplitude": 0.006,
+          "period": 1.7
+        }
+      ]
+    },
+    {
+      "id": "slot-l",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "slot-machine"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_left",
+        "offset": [
+          1.8,
+          -0.85
+        ]
+      },
+      "size": {
+        "ref": "face_width",
+        "scale": 0.8
+      },
+      "rotation": -8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.3
+        }
+      ]
+    },
+    {
+      "id": "slot-l-lucky",
+      "asset": {
+        "kind": "text",
+        "text": "LUCKY",
+        "color": "#FFD86B",
+        "fontWeight": 800,
+        "shadow": "0 1 3 rgba(0,0,0,.8)"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_left",
+        "offset": [
+          1.8,
+          -1.44
+        ]
+      },
+      "size": {
+        "ref": "face_width",
+        "scale": 0.105
+      },
+      "rotation": -8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.3
+        }
+      ]
+    },
+    {
+      "id": "slot-l-lodge",
+      "asset": {
+        "kind": "text",
+        "text": "BLACK LODGE",
+        "color": "#FFD86B",
+        "fontWeight": 800,
+        "shadow": "0 1 2 rgba(0,0,0,.8)"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_left",
+        "offset": [
+          1.8,
+          -0.02
+        ]
+      },
+      "size": {
+        "ref": "face_width",
+        "scale": 0.058
+      },
+      "rotation": -8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.3
+        }
+      ]
+    },
+    {
+      "id": "slot-r",
+      "asset": {
+        "kind": "svg-lib",
+        "key": "slot-machine"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_right",
+        "offset": [
+          -1.8,
+          -0.85
+        ]
+      },
+      "size": {
+        "ref": "face_width",
+        "scale": 0.8
+      },
+      "rotation": 8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.0
+        }
+      ]
+    },
+    {
+      "id": "slot-r-lucky",
+      "asset": {
+        "kind": "text",
+        "text": "LUCKY",
+        "color": "#FFD86B",
+        "fontWeight": 800,
+        "shadow": "0 1 3 rgba(0,0,0,.8)"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_right",
+        "offset": [
+          -1.8,
+          -1.44
+        ]
+      },
+      "size": {
+        "ref": "face_width",
+        "scale": 0.105
+      },
+      "rotation": 8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.0
+        }
+      ]
+    },
+    {
+      "id": "slot-r-lodge",
+      "asset": {
+        "kind": "text",
+        "text": "BLACK LODGE",
+        "color": "#FFD86B",
+        "fontWeight": 800,
+        "shadow": "0 1 2 rgba(0,0,0,.8)"
+      },
+      "anchor": {
+        "space": "face",
+        "landmark": "temple_right",
+        "offset": [
+          -1.8,
+          -0.02
+        ]
+      },
+      "size": {
+        "ref": "face_width",
+        "scale": 0.058
+      },
+      "rotation": 8,
+      "animations": [
+        {
+          "preset": "float",
+          "amplitude": 0.005,
+          "period": 2.0
+        }
+      ]
+    }
+  ]
+}

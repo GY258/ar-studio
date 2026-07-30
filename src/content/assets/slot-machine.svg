@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 250" fill="none">
+  <defs>
+    <linearGradient id="smBody" x1="20" y1="20" x2="180" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7E1218"/><stop offset=".45" stop-color="#4A0A10"/><stop offset="1" stop-color="#2A0509"/>
+    </linearGradient>
+    <linearGradient id="smGold" x1="0" y1="0" x2="0" y2="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE9A8"/><stop offset=".5" stop-color="#D9A22B"/><stop offset="1" stop-color="#8A5E12"/>
+    </linearGradient>
+    <linearGradient id="smReel" x1="0" y1="96" x2="0" y2="152" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFF6DF"/><stop offset=".5" stop-color="#FFFDF6"/><stop offset="1" stop-color="#E6D3AE"/>
+    </linearGradient>
+  </defs>
+  <!-- 机身：上方拱形，下方矩形 -->
+  <path fill="url(#smBody)" stroke="#E8BE5C" stroke-width="4"
+        d="M100 8c34 0 62 24 62 54v10h8c6 0 10 4 10 10v146c0 6-4 10-10 10H30c-6 0-10-4-10-10V82c0-6 4-10 10-10h8V62C38 32 66 8 100 8Z"/>
+  <!-- 顶部灯牌 -->
+  <path fill="#1B0407" stroke="#E8BE5C" stroke-width="3" d="M100 20c26 0 48 18 48 42v8H52v-8c0-24 22-42 48-42Z"/>
+  <!-- 三个转轮窗口 -->
+  <rect x="34" y="96" width="132" height="58" rx="6" fill="#1B0407" stroke="#E8BE5C" stroke-width="3"/>
+  <g fill="url(#smReel)">
+    <rect x="40" y="102" width="38" height="46" rx="4"/>
+    <rect x="81" y="102" width="38" height="46" rx="4"/>
+    <rect x="122" y="102" width="38" height="46" rx="4"/>
+  </g>
+  <!-- 三个 7 画成路径而不是文字：SVG 当图片加载时拿不到内嵌字体，
+       用 <text> 会让同一份素材在不同系统上字形不同，golden 只在录它的机器上成立 -->
+  <g fill="#C3161F">
+    <path d="M50 110h20l-9 30h-8l7-23H50z"/>
+    <path d="M91 110h20l-9 30h-8l7-23H91z"/>
+    <path d="M132 110h20l-9 30h-8l7-23H132z"/>
+  </g>
+  <!-- 底部铭牌，文字由模板用 text 元素叠上去（同样是字体确定性的原因） -->
+  <rect x="40" y="192" width="120" height="30" rx="5" fill="#1B0407" stroke="#E8BE5C" stroke-width="2.5"/>
+  <!-- 拉杆 -->
+  <g stroke="#E8BE5C" stroke-width="7" stroke-linecap="round">
+    <path d="M178 96l14-26"/>
+  </g>
+  <circle cx="194" cy="62" r="12" fill="#C3161F" stroke="#E8BE5C" stroke-width="3.5"/>
+  <!-- 底座 -->
+  <rect x="12" y="232" width="176" height="14" rx="6" fill="#1B0407" stroke="#E8BE5C" stroke-width="3"/>
+</svg>
