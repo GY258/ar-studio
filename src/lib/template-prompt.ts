@@ -318,7 +318,8 @@ ${Object.entries(ANCHOR_PAIRS)
         | { kind: "glitch"; blocks; displace; channelSplit;        // 数字信号损坏，见下
                             scanline; colorNoise; darkBias; speed; seed }
         | { kind: "voxel"; blocks; palette; levels;               // 方块世界，见下
-                           saturate?; faceShade; outline; grain?; ambient?; seed }
+                           smooth?; saturate?; faceShade; outline;
+                           grain?; ambient?; seed }
         | { kind: "mask-debug" }                   // 调试视图，见下
 }
 \`\`\`
@@ -353,8 +354,8 @@ inside 时脸上不作用，outside 时脸上保持原样。丢脸时自动关�
 ### voxel —— 把画面重建成 Minecraft 那样的方块世界
 
 \`\`\`jsonc
-{ "kind": "voxel", "blocks": 30, "palette": 0.55, "levels": 7,
-  "saturate": 0.5, "faceShade": 0.4, "outline": 0.26, "grain": 0.09, "seed": 11 }
+{ "kind": "voxel", "blocks": 44, "palette": 0.8, "levels": 5, "smooth": 0.7,
+  "saturate": 0.35, "faceShade": 0.42, "outline": 0.28, "grain": 0.09, "seed": 11 }
 \`\`\`
 
 配 \`mask.provider: "person"\` + \`apply: "outside"\` 就是「人完全不动，只有背景变方块」。
@@ -375,10 +376,19 @@ inside 时脸上不作用，outside 时脸上保持原样。丢脸时自动关�
 
 调参上踩过的两个坑：
 
+0. **\`blocks\` 和 \`smooth\` 是两个独立的选择，别绑在一起。**
+   辨识度来自**大片连续的同一种方块**（一整面石头墙、一片草地），
+   不来自「每块颜色量化」—— 逐块独立量化一张有噪点的照片，出来必然是椒盐点。
+   连贯靠 \`smooth\`（相邻块共享采样窗口 → 落到同一个调色板项），
+   不靠把块调大。我一开始把这两件事绑在一起，为了压椒盐点把块调到 20，
+   结果背景里什么都认不出来了。**先用 \`smooth\` 压噪，再单独选块大小。**
 1. **\`levels\` 会把暗部量化成纯黑。** 真实房间的暗部是 0.02~0.05，
    \`levels: 5\` 一量化直接归零，半个背景死黑。\`ambient\`（缺省 0.16）是暗部地板，
    MC 的世界里没有纯黑 —— 别把它调到 0。
-2. **\`palette\` 和 \`levels\` 一起调猛会把整面墙压成同一块石头。**
+2. **提饱和是在平均之后做的**，别指望 \`saturate\` 去救灰扑扑的画面 ——
+   放在平均之前提的是传感器噪点的彩度，一面米色的墙会长出淡紫、淡黄、
+   淡蓝的杂色方块，正好是最毁效果的那种椒盐点。
+3. **\`palette\` 和 \`levels\` 一起调猛会把整面墙压成同一块石头。**
    \`levels: 4\` + \`palette: 0.85\` 出来是一片均匀的灰，原来的色彩变化全没了。
    先把 \`levels\` 放到 6~8，再调 \`palette\`。
 

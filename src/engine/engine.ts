@@ -421,6 +421,7 @@ export class ArEngine {
       shader.uniforms.vOutline = { value: v?.outline ?? 0 };
       shader.uniforms.vGrain = { value: v?.grain ?? 0 };
       shader.uniforms.vAmbient = { value: v?.ambient ?? 0.16 };
+      shader.uniforms.vSmooth = { value: v?.smooth ?? 0.65 };
       shader.uniforms.vSeed = { value: v?.seed ?? 0 };
 
       shader.fragmentShader = shader.fragmentShader
@@ -451,6 +452,7 @@ export class ArEngine {
           uniform float vOutline;
           uniform float vGrain;
           uniform float vAmbient;
+          uniform float vSmooth;
           uniform float vSeed;
           /** 脸部保护椭圆，蒙版空间（y 向下）。xy = 中心，zw = 半径 */
           uniform vec4 faceOval;

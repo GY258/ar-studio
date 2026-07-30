@@ -833,6 +833,9 @@ function validateSource(raw: Raw, p: string[]) {
       p.push("source.effect.saturate 应在 [0, 2]（量化前先提多少饱和度）");
     }
     if (eff.grain !== undefined && !inRange(eff.grain, 0, 1)) p.push("source.effect.grain 应在 [0, 1]（块内颗粒）");
+    if (eff.smooth !== undefined && !inRange(eff.smooth, 0, 1)) {
+      p.push("source.effect.smooth 应在 [0, 1]（用多大范围的颜色填一个块。和 blocks 是两个独立的选择）");
+    }
     if (eff.ambient !== undefined && !inRange(eff.ambient, 0, 0.6)) {
       p.push("source.effect.ambient 应在 [0, 0.6]（暗部地板。MC 的世界里没有纯黑）");
     }

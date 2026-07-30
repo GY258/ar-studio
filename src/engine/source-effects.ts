@@ -178,6 +178,7 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
      */
     vec3 vAcc = vec3( 0.0 );
     float vWsum = 0.0;
+    vec3 vCenter = vec3( 0.0 );
     for (int j = -1; j <= 1; j++) {
       for (int i = -1; i <= 1; i++) {
         // 块中心。用块中心而不是块内网格点：这里要的是「这一片大概什么颜色」
@@ -190,12 +191,27 @@ export const EFFECT_SNIPPETS: Record<string, string> = {
          */
         float sm = maskAt( su );
         float w = kw * ( applyOutside > 0.5 ? 1.0 - sm : sm );
-        vAcc += srcTexel( su ).rgb * w;
+        vec3 sc = srcTexel( su ).rgb;
+        if (i == 0 && j == 0) vCenter = sc;
+        vAcc += sc * w;
         vWsum += w;
       }
     }
     // 整片都在「不该取样」的那一侧时退回本块中心，避免除零后一片黑
-    vec3 vCol = vWsum > 0.01 ? vAcc / vWsum : srcTexel( ( vId + 0.5 ) * vCell ).rgb;
+    vec3 vAvg = vWsum > 0.01 ? vAcc / vWsum : vCenter;
+
+    /*
+     * 平滑半径和**块大小解耦**。
+     *
+     * 这两件事我一开始绑在一起了：为了压掉椒盐点把块调大 —— 结果块一大，
+     * 背景里什么都认不出来了。但「块多大」和「用多大范围的颜色去填这块」
+     * 本来就是两个独立的选择：块小是为了保住细节，平滑是为了让相邻块
+     * 落到同一个调色板项上。
+     *
+     * 0 = 每块只看自己（细节最多，也最容易椒盐）
+     * 1 = 完全用 3×3 邻域（最连贯，也最糊）
+     */
+    vec3 vCol = mix( vCenter, vAvg, vSmooth );
 
     /*
      * 把暗部抬起来。MC 的世界里没有纯黑：天光是全局的。
