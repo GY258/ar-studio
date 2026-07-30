@@ -98,6 +98,14 @@ function frameLooksBlank(buf: Buffer): boolean {
   return variance < 30;
 }
 
+/** 模板 JSON 里声明了多少个元素。装上的比声明的少，说明有东西被静默跳过了 */
+function declaredElementCount(slug: string): number {
+  const raw = JSON.parse(fs.readFileSync(path.join(TEMPLATES, `${slug}.json`), "utf8"));
+  const els = raw.elements ?? raw.overlay_elements ?? raw.face_track_elements;
+  // 有生成器的模板展开后数量会变多，这里只做「不少于平铺声明数」的下界检查
+  return Array.isArray(els) ? els.filter((e: Record<string, unknown>) => !e.generate).length : 0;
+}
+
 async function runGroup(
   browser: Browser,
   baseUrl: string,
@@ -117,6 +125,7 @@ async function runGroup(
       if (/GLSL|shader|WebGL: INVALID/i.test(t)) problems.push(`console: ${t.slice(0, 200)}`);
     });
 
+    const declaredElements = declaredElementCount(slug);
     let fps: number | null = null;
     let tracking: boolean | null = null;
     try {
@@ -132,11 +141,50 @@ async function runGroup(
       const stats = (await page.evaluate(() =>
         (
           window as unknown as {
-            __engine: { debugStats(): { fps: number; tracking: boolean; needsTracking: boolean } };
+            __engine: {
+              debugStats(): {
+                fps: number;
+                tracking: boolean;
+                needsTracking: boolean;
+                elementCount: number;
+                missingAssets: string[];
+              };
+            };
           }
         ).__engine.debugStats(),
-      )) as { fps: number; tracking: boolean; needsTracking: boolean };
+      )) as {
+        fps: number;
+        tracking: boolean;
+        needsTracking: boolean;
+        elementCount: number;
+        missingAssets: string[];
+      };
+      if (stats.missingAssets.length) {
+        problems.push(`有元素的素材解不出来（静默跳过了）：${stats.missingAssets.join("；")}`);
+      }
+      if (declaredElements > 0 && stats.elementCount < declaredElements) {
+        problems.push(`模板声明了 ${declaredElements} 个元素，只装上了 ${stats.elementCount} 个`);
+      }
       fps = stats.fps;
+      /*
+       * fps 读到 0 先隔一秒再读一次，取大的。
+       *
+       * 这个数是「最近一段时间画了几帧」，而这台机器上冒烟是串行跑十几个模板、
+       * 每个都在 SwiftShader 上软渲染两个模型 —— rAF 被饿一秒就是真的 0。
+       * 单次瞬时读数下 `glass` 报过一次 fps=0，单独重跑两次都是 20，
+       * 截图里杯子、倒液、堆积全都在。也就是说这个断言会**因为机器负载误报**，
+       * 而冒烟一旦开始误报，下次真出问题时我会先怀疑是抖动 —— 那它就废了。
+       *
+       * 重读一次而不是放宽阈值：真的停了的话（shader 没编过、异常打断循环）
+       * 第二次读还是 0，该抓的照样抓得到。
+       */
+      if (fps <= 0) {
+        await page.waitForTimeout(1_000);
+        const again = (await page.evaluate(() =>
+          (window as unknown as { __engine: { debugStats(): { fps: number } } }).__engine.debugStats(),
+        )) as { fps: number };
+        fps = Math.max(fps, again.fps);
+      }
       // 不需要感知的模板（纯屏幕空间贴纸）没有东西可追，别对它断言
       tracking = stats.needsTracking ? stats.tracking : null;
 

@@ -647,6 +647,45 @@ test("捏合绽放：捏合窗口里真的开出花", async () => {
   expect(during, `捏合时该多出一朵（${before.toFixed(4)} → ${during.toFixed(4)}）`).toBeGreaterThan(before * 1.15);
 });
 
+test("切模板不留残渣：池化的 mesh 也要拆干净", async () => {
+  /*
+   * 这条堵的是我真的犯过的一个 bug：trail 的叶子池和 pinch-bloom 的花池是单独
+   * add 到 group 里的，而 clear() 原来只移除 item.mesh —— 从「指尖开花」切走之后，
+   * 叶子还挂在脸上，永久不走。
+   *
+   * **断言必须是结构性的，不能看像素。** 我第一版写的是「切换后覆盖率应该接近底图」，
+   * 结果 bug 在的时候它照样绿：切换那一刻 131 个泄漏对象里只有 3 个恰好是可见的
+   * （叶子池里超出当前茎长的那些本来就隐藏着），像素上根本看不出来。
+   * 而在真机上它非常明显 —— 用户切换时手已经动了一阵，茎长、叶子多。
+   *
+   * 不可见的泄漏仍然是泄漏：内存在涨，而且换个时机就会露出来。
+   * 所以比的是「同一个模板，全新装载 vs 从别的模板切过来」的对象数。
+   * 这样也不用把「black-lodge 有几个 mesh」这种数字写死在测试里。
+   */
+  const objects = () =>
+    harness.page.evaluate(
+      () =>
+        (window as unknown as { harness: { engine: { debugStats(): { elementObjects: number } } } }).harness.engine
+          .debugStats().elementObjects,
+    );
+
+  const target = path.join(TEMPLATES, "black-lodge.json");
+
+  // 基准：全新装载 black-lodge 该有多少个对象
+  await loadTemplate(harness.page, target, "hands");
+  const fresh = await objects();
+  expect(fresh, "基准本身得非零，否则这条断言是空的").toBeGreaterThan(0);
+
+  // 装一个有池化 mesh 的模板，跑到轨迹和绽放都长出来，再在**同一个引擎上**切过去
+  await loadTemplate(harness.page, path.join(TEMPLATES, "finger-flowers.json"), "hands");
+  await capture(harness.page, 1.6);
+  const loaded = await objects();
+  expect(loaded, "指尖开花的对象数该远多于 black-lodge（有叶子池和花池）").toBeGreaterThan(fresh * 3);
+
+  await switchTemplate(harness.page, target);
+  expect(await objects(), "切过来之后的对象数必须和全新装载一致").toBe(fresh);
+});
+
 test("文字用的是内嵌字体，不是系统字体", async () => {
   /*
    * 这条钉的是「golden 必须跨机器成立」。

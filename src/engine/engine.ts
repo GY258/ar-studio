@@ -574,6 +574,20 @@ export class ArEngine {
       degraded: this.degraded,
       perception: this.perception.join(","),
       templateType: this.templateType,
+      elementCount: this.elements.count(),
+      /**
+       * 元素组里实际有多少个 Object3D。
+       *
+       * 和 elementCount 分开报，因为一个元素可能拥有多个 mesh（轨迹的叶子池、
+       * 绽放的花池）。**切模板后这个数没回落就是泄漏了** ——
+       * 而泄漏出来的东西当时可能刚好是隐藏的，像素断言抓不到。
+       */
+      elementObjects: this.elements.objectCount(),
+      /**
+       * 解不出素材、被跳过的元素。**非空就是有东西没画出来**。
+       * smoke:live 据此判失败 —— 这个失效模式以前是完全静默的。
+       */
+      missingAssets: [...this.elements.missing()],
     };
   }
 

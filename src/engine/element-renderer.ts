@@ -59,6 +59,14 @@ interface Item {
   /** 上一帧算出来的屏幕尺寸，命中测试用 */
   lastW: number;
   lastH: number;
+  /**
+   * 这个元素创建的**所有** Object3D，clear() 按它拆干净。
+   *
+   * 不这么记的话，只有 item.mesh 会被移除 —— trail 的叶子池和 pinch-bloom 的花池
+   * 是单独 add 到 group 里的，切模板之后会永久留在画面上。
+   * 这个 bug 我犯过一次：从「指尖开花」切到别的模板，叶子还挂在脸上。
+   */
+  owned: THREE.Object3D[];
   trail?: TrailParts;
   bloom?: BloomParts;
 }
@@ -71,6 +79,8 @@ export class ElementRenderer {
   private generation = 0;
   /** 最近一次 setElements 的完成信号。离线 harness 必须等纹理栅格化完才能截图。 */
   private pending: Promise<void> = Promise.resolve();
+  /** 这一批里解不出素材、被跳过的元素。见 build() 里的注释 */
+  private readonly missingAssets: string[] = [];
 
   constructor(scene: THREE.Scene) {
     this.group.renderOrder = 5;
@@ -118,6 +128,7 @@ export class ElementRenderer {
             userScale: 1,
             lastW: 0,
             lastH: 0,
+            owned: [parts.ribbon, ...parts.leaves],
             trail: parts,
           });
         }
@@ -138,6 +149,7 @@ export class ElementRenderer {
             userScale: 1,
             lastW: 0,
             lastH: 0,
+            owned: [...parts.sprites],
             bloom: parts,
           });
         }
@@ -146,7 +158,19 @@ export class ElementRenderer {
 
       const built = await this.buildTexture(elem);
       if (gen !== this.generation) return;
-      if (!built) continue;
+      if (!built) {
+        /*
+         * 素材解不出来时**记下来**，不要静默跳过。
+         *
+         * 这条路真的踩过：新素材加进 SVG_LIB 之后 dev server 拿的是旧 bundle，
+         * getSvg() 返回 undefined，元素被无声跳过 —— 画面上只剩文字元素，
+         * 而校验、回归、冒烟全是绿的（冒烟只验了「画面不是纯色」）。
+         * 现在 debugStats().missingAssets 会报出来，smoke:live 据此判失败。
+         */
+        const a = elem.asset as { kind: string; key?: string };
+        this.missingAssets.push(`${elem.id}: ${a.kind}${a.key ? ` "${a.key}"` : ""}`);
+        continue;
+      }
 
       const mat = new THREE.MeshBasicMaterial({
         map: built.tex,
@@ -169,6 +193,7 @@ export class ElementRenderer {
         userScale: 1,
         lastW: 0,
         lastH: 0,
+        owned: [mesh],
       });
       this.group.add(mesh);
     }
@@ -472,6 +497,27 @@ export class ElementRenderer {
     }
   }
 
+  /** 解不出素材而被跳过的元素。空数组 = 全都画上了。 */
+  missing(): readonly string[] {
+    return this.missingAssets;
+  }
+
+  /** 元素总数，用来判断「装上了几个」。 */
+  count(): number {
+    return this.items.length;
+  }
+
+  /**
+   * 元素组里实际的 Object3D 数量。
+   *
+   * 一个元素可能拥有多个 mesh，所以这个数和 count() 不是一回事。
+   * 切模板后它没回落就说明有 mesh 没被拆掉 —— 而泄漏的那些当时可能刚好隐藏着，
+   * 只看画面是抓不到的。
+   */
+  objectCount(): number {
+    return this.group.children.length;
+  }
+
   /** 清掉所有跨帧状态。切模板和时间倒流时调 —— 见 engine.stepTo。 */
   resetState() {
     for (const it of this.items) {
@@ -704,14 +750,21 @@ export class ElementRenderer {
 
   clear() {
     this.generation++;
-    for (const { mesh } of this.items) {
-      const mat = mesh.material as THREE.MeshBasicMaterial;
-      mat.map?.dispose();
-      mat.dispose();
-      mesh.geometry.dispose();
-      this.group.remove(mesh);
+    // 贴图在池化的 mesh 之间是共享的（一池叶子共用一张），用 Set 去重避免二次 dispose
+    const maps = new Set<THREE.Texture>();
+    for (const item of this.items) {
+      for (const obj of item.owned) {
+        const m = obj as THREE.Mesh;
+        const mat = m.material as THREE.MeshBasicMaterial | undefined;
+        if (mat?.map) maps.add(mat.map);
+        mat?.dispose();
+        m.geometry?.dispose();
+        this.group.remove(obj);
+      }
     }
+    for (const t of maps) t.dispose();
     this.items.length = 0;
+    this.missingAssets.length = 0;
   }
 
   dispose() {
