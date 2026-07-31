@@ -1,5 +1,5 @@
 /**
- * 肥皂泡：从画面下方缓缓飘起，指尖划过去戳破。
+ * 肥皂泡：满屏浮着，指尖划过去戳破。
  *
  * ## 状态是怎么被压到最小的
  *
@@ -24,31 +24,45 @@
  * 回到逐帧积分，把上面那一整段简单性都赔进去 —— 换来的是一个在参考里
  * 根本看不出来的效果。要做也该等到它真的成为观感瓶颈。
  *
- * ## 冒泡时刻落在固定时间网格上
+ * ## 数量恒定，靠绕回而不是靠冒泡
  *
- * 和轨迹采样同一条纪律：按「每帧掷一次骰子」冒泡的话，60fps 和 20fps
- * 会冒出完全不同的数量，离线 golden 和线上不一致，换台机器就变。
+ * 泡泡不从画面底边冒出来 —— 一开场屏幕上就该是满的。做法是固定 count 个槽位，
+ * 每个槽位的位置纵向**绕回**（飘出顶端就从底端接着进来），所以数量恒定、
+ * 位置仍然是闭式。被戳破的槽位在残留动画结束后换一组 hash 参数重新出现，
+ * 于是屏幕永远是满的，不会越玩越空。
+ *
+ * 槽位的「第几代」是个单调计数器，所以整个模拟仍然是 (t, seed) 的函数。
  */
 
 import * as THREE from "three";
 
-/** 每秒最多冒几个。落在固定网格上，见文件头 */
-const SPAWN_RATE = 5;
 /** 破掉之后的残留动画时长，秒 */
 const POP_SECONDS = 0.26;
 /** 横向摆动频率，Hz。慢到像空气流动，不像抖动 */
 const WOBBLE_HZ = 0.21;
 
-/** 确定性 hash。冒泡的位置、大小、速度全走它，不许出现真随机数 */
+/**
+ * 确定性 hash。泡泡的位置、大小、速度全走它，不许出现真随机数。
+ *
+ * **不能用 `fract(sin(i * k) * big)` 那一套。** 这里的下标是等差的
+ * （slot * 131 + gen * 17 + k），而 131 * 127.1 对 2π 取模只剩 0.1 弧度 ——
+ * 相邻槽位算出来的值几乎相同，30 个泡泡会挤成一坨。
+ * 这个坑很隐蔽：hash 本身「看起来是随机的」，只有在等差下标上才退化。
+ *
+ * 换成整数雪崩混合（xorshift + imul），对任何下标模式都均匀。
+ */
 function hash1(i: number, seed: number): number {
-  const x = Math.sin(i * 127.1 + seed * 311.7) * 43758.5453;
-  return x - Math.floor(x);
+  let x = Math.imul((i | 0) ^ 0x9e3779b9, 0x85ebca6b);
+  x ^= x >>> 13;
+  x = Math.imul(x ^ Math.imul(seed | 0, 0xc2b2ae35), 0x27d4eb2f);
+  x ^= x >>> 16;
+  return (x >>> 0) / 4294967296;
 }
 
 export interface BubbleParams {
   /** 同时最多几个 */
   count: number;
-  /** 上升速度，每秒走过画面高度的比例 */
+  /** 上浮速度，每秒走过画面高度的比例。飘出顶端会从底端绕回来 */
   rise: number;
   /** 半径范围，占画面宽度的比例 */
   size: [number, number];
@@ -64,20 +78,24 @@ export interface BubbleParams {
   seed: number;
 }
 
-/** 一个泡泡。除了 poppedAt，其余都是生成时定死的不变量 */
+/** 一个槽位。除了 poppedAt / gen，其余都是这一代生成时定死的不变量 */
 interface Bubble {
-  /** 出生时刻，秒 */
+  /** 这一代出生的时刻，秒 */
   t0: number;
   /** 出生时的横向位置，世界坐标 */
   x0: number;
+  /** 出生时的纵向位置，世界坐标。绕回的起点 */
+  y0: number;
   /** 半径，px */
   r: number;
-  /** 上升速度，px/s */
+  /** 上浮速度，px/s */
   vy: number;
   /** 摆动相位 */
   phase: number;
-  /** 每个泡泡自己的随机种子，决定高光位置和彩虹相位 */
+  /** 决定高光位置、彩虹相位和彩虹朝哪一侧 */
   seed: number;
+  /** 第几代。被戳破后 +1，换一组 hash 参数重新出现 */
+  gen: number;
   /** 破掉的时刻。null = 还活着 */
   poppedAt: number | null;
 }
@@ -94,8 +112,6 @@ export class BubbleField {
   private readonly iPop: Float32Array;
 
   private bubbles: Bubble[] = [];
-  /** 上一次冒泡落在哪个网格格子。-1 = 还没冒过 */
-  private lastSlot = -1;
   private lastT = -1;
   private W = 1280;
   private H = 720;
@@ -206,23 +222,26 @@ export class BubbleField {
           vec3 behind = texture2D(uSrc, clamp(srcUv + off, 0.001, 0.999)).rgb;
 
           /*
-           * 边缘分两层：一圈很窄的亮边 + 一层很宽很淡的膜。
+           * 边缘分两层：一圈很窄的亮边 + 一层很宽的膜。
            *
-           * 只做一层的话得到的是「一个彩色圆环」，参考素材里的泡泡是
-           * **亮白软边**，中间还蒙着一层极淡的光 —— 那层宽的膜才是
-           * 「这是一层液膜」的读法，缺了它就只是描边。
+           * 只做一层的话得到的是「一个彩色圆环」，而参考素材里的泡泡
+           * **明显是乳白色的实体**：能透出背后的画面，但整个球面都蒙着
+           * 一层白，不是只有边缘亮。那层宽的膜才是「这是一层液膜」的读法。
            */
           float rim = pow(1.0 - z, 3.2);
-          float film = pow(1.0 - z, 1.2) * 0.32;
+          float film = pow(1.0 - z, 0.75);
 
           /*
-           * 薄膜干涉只出现在**最外那一圈**（6 次幂），不是铺满整个球。
+           * 薄膜干涉是**一侧的月牙**，不是整圈。
            *
-           * 铺满会得到一个饱和的彩虹圆环，一眼假：真实肥皂泡的色散集中在
-           * 掠射角，正面看几乎是无色的。相位随边缘距离和每个泡泡自己的 seed 走 ——
-           * 所有泡泡彩虹一模一样的话，同样一眼就看出是贴图不是物理。
+           * 铺满一圈得到的是彩虹环，一眼假。参考素材里色散只出现在每个泡泡的
+           * 某一侧（光源方向那边），而且是一道弧 —— 这才是薄膜厚度沿球面变化
+           * 该有的样子。方向随 seed 走，所以满屏泡泡的彩虹不会朝同一边。
            */
-          vec3 irid = spectrum(fract(d * 2.2 + vSeed * 3.7)) * pow(1.0 - z, 6.0) * uIrid;
+          float ang = vSeed * 6.28318;
+          vec2 lightDir = vec2(cos(ang), sin(ang));
+          float crescent = smoothstep(0.1, 0.95, dot(normalize(vLocal + 1e-5), lightDir));
+          vec3 irid = spectrum(fract(d * 1.9 + vSeed * 3.7)) * pow(1.0 - z, 3.0) * crescent * uIrid;
 
           // 两点高光。位置也跟 seed 走，不然满屏泡泡的高光排成一列
           float a1 = vSeed * 6.28318;
@@ -232,14 +251,18 @@ export class BubbleField {
           spec += smoothstep(0.20, 0.0, length(vLocal - h1));
           spec += smoothstep(0.13, 0.0, length(vLocal - h2)) * 0.7;
 
-          // 膜会透一点光，所以泡泡内部比背景**略亮**。差别很小，但少了它泡泡会显脏
-          vec3 col = behind * 1.06 + 0.02 + irid + vec3(spec) + vec3(rim * 0.55);
-
           /*
-           * 泡膜本身几乎是透明的，只有边缘和高光看得见 ——
-           * 中间给不透明度的话立刻变成塑料球。
+           * 往乳白色混，而不是只把背景加亮。
+           *
+           * 只做 behind * 1.06 的话泡泡是「透明的、只有边亮」，参考素材里
+           * 它们是**奶白色的球**：背后的画面还看得见，但明显蒙了一层白。
+           * mix 到白色才有那个厚度感，单纯加亮只会让画面发灰。
            */
-          float alpha = (0.05 + film + rim * 0.9 + spec) * vA * uOpacity;
+          vec3 milky = mix(behind, vec3(1.0), 0.26 + film * 0.24);
+          vec3 col = milky + irid + vec3(spec) + vec3(rim * 0.5);
+
+          // 整个球面都有不透明度（不只是边缘），但仍然透得过背景
+          float alpha = (0.22 + film * 0.42 + rim * 0.5 + spec) * vA * uOpacity;
           // 破掉的过程：环向外扩张同时整体淡出
           alpha *= 1.0 - vPop;
           alpha *= mix(1.0, smoothstep(0.55, 1.0, d), vPop);
@@ -268,7 +291,6 @@ export class BubbleField {
   /** 清掉所有跨帧状态。切模板和时间倒流时调 */
   reset() {
     this.bubbles.length = 0;
-    this.lastSlot = -1;
     this.lastT = -1;
   }
 
@@ -277,10 +299,64 @@ export class BubbleField {
     return this.bubbles.filter((b) => b.poppedAt === null).length;
   }
 
+  /** 按槽位序号和第几代生成一个泡泡。全部走 hash，没有随机数 */
+  private spawn(slot: number, gen: number, t0: number, fresh: boolean): Bubble {
+    const p = this.params;
+    const h = (k: number) => hash1(slot * 131 + gen * 17 + k, p.seed);
+    const r = (p.size[0] + (p.size[1] - p.size[0]) * h(1)) * this.W;
+
+    /*
+     * 分层撒点：每个槽位固定分到一个格子，只在格内抖动。
+     *
+     * 纯随机撒 30 个点必然结块 —— 第一版就是这样，一半屏幕空着，
+     * 另一半挤成一坨。而「满屏浮着 30 个泡泡」要的是均匀铺开。
+     * 分层是消除结块的标准做法，而且照样是 hash 的纯函数。
+     *
+     * 允许中心落在画面外一点（±0.55），让泡泡被画面边缘切开 ——
+     * 全都完整地待在框里反而假，参考素材里边上的泡泡都是切掉一半的。
+     */
+    const cols = Math.max(1, Math.round(Math.sqrt((p.count * this.W) / this.H)));
+    const rows = Math.max(1, Math.ceil(p.count / cols));
+    const cx = (slot % cols) + 0.5;
+    const cy = Math.floor(slot / cols) + 0.5;
+
+    return {
+      t0,
+      x0: ((cx + (h(2) - 0.5) * 0.9) / cols - 0.5) * this.W * 1.1,
+      /*
+       * 重生也留在自己的格子里，只换一组抖动。
+       *
+       * 放在底边看起来会「从下面冒出来」—— 而这正是要避免的。
+       * 留在原格子还能保住铺开的均匀性，不然玩一会儿就又结块了。
+       */
+      y0: ((cy + (h(6) - 0.5) * 0.9) / rows - 0.5) * this.H * 1.1,
+      r,
+      // 大泡泡升得慢一点。真实的肥皂泡阻力随半径涨，小的窜得快
+      vy: p.rise * this.H * (0.75 + 0.5 * h(3)) * (1.0 - 0.35 * (r / (p.size[1] * this.W))),
+      phase: h(4) * Math.PI * 2,
+      seed: h(5),
+      gen,
+      poppedAt: fresh ? null : null,
+    };
+  }
+
+  /** 这一代的当前位置。纵向绕回，所以是闭式的、数量恒定 */
+  private posAt(b: Bubble, t: number): { x: number; y: number } {
+    const p = this.params;
+    const span = this.H + b.r * 2;
+    // 绕回：飘出顶端就从底端接着进来。取模保证它是 t 的纯函数，不靠累加
+    let y = b.y0 + b.vy * (t - b.t0) + this.H / 2 + b.r;
+    y = ((y % span) + span) % span;
+    return {
+      x: b.x0 + Math.sin(t * WOBBLE_HZ * Math.PI * 2 + b.phase) * p.wobble * this.W,
+      y: y - this.H / 2 - b.r,
+    };
+  }
+
   /**
    * 推进到时刻 t。tips 是这一帧所有指尖的世界坐标。
    *
-   * 只有「破没破」是真的在改状态；位置是 t 的闭式函数，见文件头。
+   * 只有「破没破」和「第几代」是真的在改状态；位置是 t 的闭式函数，见文件头。
    */
   update(t: number, tips: readonly { x: number; y: number }[]) {
     // 时间倒流：整个重来。状态是历史的函数，倒着走没有意义（同 TrailBuffer）
@@ -288,41 +364,15 @@ export class BubbleField {
     this.lastT = t;
 
     const p = this.params;
-    const top = this.H / 2;
-    const bottom = -this.H / 2;
 
-    // --- 冒泡。落在固定时间网格上，不是每帧掷骰子 ---
-    const slot = Math.floor(t * SPAWN_RATE);
-    if (this.lastSlot < 0) this.lastSlot = slot - 1;
-    for (let s = this.lastSlot + 1; s <= slot; s++) {
-      if (this.bubbles.length >= this.max) break;
-      if (this.aliveCount() >= p.count) continue;
-      const h = (k: number) => hash1(s * 7 + k, p.seed);
-      const r = (p.size[0] + (p.size[1] - p.size[0]) * h(1)) * this.W;
-      this.bubbles.push({
-        t0: s / SPAWN_RATE,
-        // 留出半径的余量，免得整排泡泡贴着画面边缘冒出来
-        x0: (h(2) - 0.5) * (this.W - r * 2),
-        r,
-        // 大泡泡升得慢一点。真实的肥皂泡阻力随半径涨，小的窜得快
-        vy: p.rise * this.H * (0.75 + 0.5 * h(3)) * (1.0 - 0.35 * (r / (p.size[1] * this.W))),
-        phase: h(4) * Math.PI * 2,
-        seed: h(5),
-        poppedAt: null,
-      });
+    // 第一次：一次性铺满整屏。不从底边一个个冒 —— 一开场屏幕上就该是满的
+    if (this.bubbles.length === 0) {
+      for (let i = 0; i < p.count; i++) this.bubbles.push(this.spawn(i, 0, 0, false));
     }
-    this.lastSlot = slot;
 
-    // --- 位置（闭式）+ 戳破判定 + 回收 ---
-    const live: Bubble[] = [];
     for (const b of this.bubbles) {
-      const age = t - b.t0;
-      const y = bottom - b.r + b.vy * age;
-      const x = b.x0 + Math.sin(t * WOBBLE_HZ * Math.PI * 2 + b.phase) * p.wobble * this.W;
-
+      const { x, y } = this.posAt(b, t);
       if (b.poppedAt === null) {
-        // 飘出画面顶端就回收
-        if (y - b.r > top) continue;
         const pr = b.r * p.popRadius;
         for (const tip of tips) {
           if (Math.hypot(tip.x - x, tip.y - y) < pr) {
@@ -331,38 +381,30 @@ export class BubbleField {
           }
         }
       } else if (t - b.poppedAt > POP_SECONDS) {
-        continue;
+        // 残留动画放完，换一组参数重新出现。屏幕永远是满的，不会越玩越空
+        const slot = this.bubbles.indexOf(b);
+        this.bubbles[slot] = this.spawn(slot, b.gen + 1, t, true);
       }
-      live.push(b);
     }
-    this.bubbles = live;
 
-    // --- 写实例缓冲 ---
     /*
      * 先按 y 从远到近排序再写。
      *
      * 半透明物体的正确合成依赖绘制顺序，而深度测试对它没用。
-     * 不排的话混合顺序就是「谁先冒出来谁先画」，两个泡泡叠在一起时
-     * 前后关系会跟着回收顺序随机变 —— 而且同一个 t 排两次得到的顺序
-     * 必须一样，所以排序键里带上 t0 打破平局，不能只按 y。
+     * 不排的话混合顺序就是槽位顺序，两个泡泡叠在一起时前后关系
+     * 会跟着重生顺序随机变 —— 而且同一个 t 排两次得到的顺序必须一样，
+     * 所以排序键里带上 t0 和半径打破平局，不能只按 y。
      */
     const sorted = this.bubbles
-      .map((b) => {
-        const age = t - b.t0;
-        return {
-          b,
-          x: b.x0 + Math.sin(t * WOBBLE_HZ * Math.PI * 2 + b.phase) * p.wobble * this.W,
-          y: bottom - b.r + b.vy * age,
-        };
-      })
-      .sort((a, c) => a.y - c.y || a.b.t0 - c.b.t0);
+      .map((b) => ({ b, ...this.posAt(b, t) }))
+      .sort((a, c) => a.y - c.y || a.b.t0 - c.b.t0 || a.b.r - c.b.r);
 
     let n = 0;
     for (const { b, x, y } of sorted) {
       if (n >= this.max) break;
       const pop = b.poppedAt === null ? 0 : Math.min(1, (t - b.poppedAt) / POP_SECONDS);
-      // 刚冒出来时淡入，不然会在画面底边凭空出现
-      const fadeIn = Math.min(1, (t - b.t0) * 2.2);
+      // 重生的那一代要淡入，不然会凭空出现在画面中间
+      const fadeIn = b.gen === 0 ? 1 : Math.min(1, (t - b.t0) * 2.6);
       this.iPos[n * 2] = x;
       this.iPos[n * 2 + 1] = y;
       this.iRad[n] = b.r;

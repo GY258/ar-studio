@@ -174,8 +174,6 @@ const GOLDEN_AT: Record<string, number> = {
   "hand-stem": 1.5,
   // 轨迹在 t=0 只有一个采样点，画不出带。2.0s 时带已经长起来了
   "hand-trail": 2.0,
-  // 泡泡是从画面底边冒出来的，t=0 时第一个才刚出生。6s 时已经飘满一屏
-  "soap-bubbles": 6.0,
 };
 
 for (const file of templatesWithElements()) {
@@ -729,14 +727,15 @@ test("轨迹：状态层确定，且带真的在长", async () => {
   expect(again.equals(lateBuf), "同一个 t 渲染两次必须逐位相同，否则状态没清干净或步长不定").toBe(true);
 });
 
-test("泡泡：在冒、在往上飘、指尖真的能戳破", async () => {
+test("泡泡：一开场就满屏、在动、指尖真的能戳破", async () => {
   /*
-   * 三件事一起验，因为**光看画面分不清它们**：泡泡少了，可能是被戳破了，
-   * 也可能是飘出画面了；泡泡没动，可能是模拟停了，也可能是恰好那一帧。
-   * 所以断言直接读活着的泡泡数，不看像素。
+   * 四件事一起验，因为**光看画面分不清它们**：泡泡少了，可能是被戳破了，
+   * 也可能是飘走了；泡泡没动，可能是模拟停了，也可能是恰好那一帧。
+   * 所以「戳破」那条直接读活着的泡泡数，不看像素。
    *
-   * 戳破是这个模拟里唯一可变的状态（位置是时刻的闭式函数，见 bubbles.ts），
-   * 所以它也是唯一可能引入不确定性的地方 —— 最后那条逐位断言钉的就是它。
+   * 第一条钉的是这次改的需求：泡泡**不从画面底边冒出来**，t=0 时整屏就该是满的。
+   * 上一版是从底部一个个飘上来的，那条路上 t=0 画面几乎是空的 ——
+   * 只断言「整帧覆盖率 > 0」的话，两种实现都能过。
    */
   const tpl = path.join(TEMPLATES, "soap-bubbles.json");
   const alive = () =>
@@ -746,31 +745,16 @@ test("泡泡：在冒、在往上飘、指尖真的能戳破", async () => {
           .debugStats().bubblesAlive,
     );
 
-  // --- 没有手：泡泡照常冒，一个都不会破 ---
-  await loadTemplate(harness.page, tpl, "front");
-  const base = await baseFrame("front");
-  await loadTemplate(harness.page, tpl, "front");
-  await capture(harness.page, 3.0);
-  const noHands = await alive();
-  expect(noHands, "三秒之后画面上该有一批泡泡了").toBeGreaterThan(4);
-
-  /*
-   * 2s vs 7s，不是 0.6s vs 3s。
-   *
-   * rise 是 0.16 屏高/秒，3 秒只飘了半屏还没进上半部分 —— 断言当场就红了，
-   * 而红的原因是「取样时刻不对」不是「泡泡不飘」。取样点必须落在
-   * 被测行为真的发生了的区间里，否则这条断言测的是别的东西。
-   */
-  const early = decode(await capture(harness.page, 2.0));
-  const later = decode(await capture(harness.page, 7.0));
-  expect(coverage(later, base), "泡泡该画出成规模的像素").toBeGreaterThan(0.01);
-  // 往上飘：晚一点的时候画面上半部分应该比早期有更多东西
-  /** 画面上半部分有多少像素和底图不同。判「在往上飘」用它，不用整帧覆盖率 */
-  const topCov = (img: { width: number; height: number; data: Uint8Array | Uint8ClampedArray }) => {
+  /** 指定横条里有多少像素和底图不同 */
+  const bandCov = (
+    img: { width: number; height: number; data: Uint8Array | Uint8ClampedArray },
+    base: { width: number; data: Uint8Array | Uint8ClampedArray },
+    y0f: number,
+    y1f: number,
+  ) => {
     let n = 0;
     let total = 0;
-    const H = Math.floor(img.height * 0.45);
-    for (let y = 0; y < H; y++) {
+    for (let y = Math.floor(img.height * y0f); y < Math.floor(img.height * y1f); y++) {
       for (let x = 0; x < img.width; x++) {
         const o = (y * img.width + x) << 2;
         const d =
@@ -783,18 +767,33 @@ test("泡泡：在冒、在往上飘、指尖真的能戳破", async () => {
     }
     return n / total;
   };
-  expect(topCov(later) / Math.max(1e-4, topCov(early)), "泡泡应该在往上飘").toBeGreaterThan(2);
+
+  await loadTemplate(harness.page, tpl, "front");
+  const base = await baseFrame("front");
+  await loadTemplate(harness.page, tpl, "front");
+
+  // --- 一开场就满屏：t=0 的**上四分之一**就该有泡泡 ---
+  const t0 = decode(await capture(harness.page, 0));
+  expect(bandCov(t0, base, 0, 0.25), "t=0 时画面顶部就该有泡泡，不是从底边冒上来").toBeGreaterThan(0.05);
+
+  // --- 在动 ---
+  const later = decode(await capture(harness.page, 4.0));
+  expect(diffRatio(t0, later, 0.05), "泡泡应该在飘").toBeGreaterThan(0.05);
+
+  await capture(harness.page, 3.0);
+  const noHands = await alive();
+  expect(noHands, "没有手时一个都不该破").toBe(30);
 
   /*
-   * --- 有手：冒泡序列完全一样（hash(第几个, seed) 的纯函数），
-   *     所以活着的泡泡变少只可能是被戳破了 ---
+   * --- 有手：每个槽位的位置是 hash(槽位, 第几代, seed) 的纯函数，
+   *     两次跑的冒泡序列完全一样，所以活着的变少只可能是被戳破了 ---
    */
   await loadTemplate(harness.page, tpl, "hands");
   const buf = await capture(harness.page, 3.0);
   const withHands = await alive();
   expect(withHands, `指尖划过去应该戳破一些（无手 ${noHands} → 有手 ${withHands}）`).toBeLessThan(noHands);
 
-  // 同一个 t 再来一次：戳破是唯一可变的状态，它必须可回放
+  // 同一个 t 再来一次：戳破和「第几代」是仅有的可变状态，它们必须可回放
   await capture(harness.page, 4.5);
   const again = await capture(harness.page, 3.0);
   expect(again.equals(buf), "同一个 t 渲染两次必须逐位相同 —— 戳破的状态没清干净就会不一样").toBe(true);
