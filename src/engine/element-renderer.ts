@@ -15,6 +15,8 @@ import { ensureTextFont } from "./text-font";
 import { extractAspect } from "./svg-sanitize";
 import { evaluateAnimations } from "./animations";
 import { PinchDetector, TRAIL_RATE, TrailBuffer } from "./trail";
+import { BubbleField } from "./bubbles";
+import { FINGER_TIPS } from "./hand-anchors";
 import type { FaceFrame, FaceTracker } from "./face-tracker";
 import type { HandFrame, HandTracker } from "./hand-tracker";
 
@@ -77,6 +79,7 @@ interface Item {
   owned: THREE.Object3D[];
   trail?: RibbonParts;
   bloom?: BloomParts;
+  bubbles?: BubbleField;
 }
 
 export class ElementRenderer {
@@ -89,6 +92,11 @@ export class ElementRenderer {
   private pending: Promise<void> = Promise.resolve();
   /** 这一批里解不出素材、被跳过的元素。见 build() 里的注释 */
   private readonly missingAssets: string[] = [];
+  /**
+   * 当前画面源的纹理。泡泡的折射要采它 —— 泡泡背后就是摄像头画面，
+   * 而那正是想要的效果，不需要读回帧缓冲。
+   */
+  private sourceTex: THREE.Texture | null = null;
 
   constructor(scene: THREE.Scene) {
     this.group.renderOrder = 5;
@@ -98,6 +106,13 @@ export class ElementRenderer {
   setViewport(w: number, h: number) {
     this.W = w;
     this.H = h;
+    for (const it of this.items) it.bubbles?.setViewport(w, h);
+  }
+
+  /** 引擎换源（摄像头 ↔ 离线静态图）时要重新传，否则泡泡里是上一张画面 */
+  setSourceTexture(tex: THREE.Texture | null) {
+    this.sourceTex = tex;
+    for (const it of this.items) it.bubbles?.setSource(tex);
   }
 
   setElements(elements: ElementV2[]): Promise<void> {
@@ -141,6 +156,45 @@ export class ElementRenderer {
             trail: parts,
           });
         }
+        continue;
+      }
+
+      if (elem.asset.kind === "bubbles") {
+        const a = elem.asset;
+        /*
+         * 池子容量给到 count 的两倍再加余量：破掉的泡泡还要占位跑完残留动画，
+         * 而这期间新的已经在冒了。给死 count 的话满屏时戳破会看到「补不上」。
+         */
+        const field = new BubbleField(
+          {
+            count: a.count,
+            rise: a.rise,
+            size: a.size,
+            wobble: a.wobble,
+            popRadius: a.popRadius,
+            refraction: a.refraction,
+            iridescence: a.iridescence,
+            opacity: elem.opacity ?? 1,
+            seed: a.seed,
+          },
+          Math.min(256, a.count * 2 + 8),
+        );
+        field.setViewport(this.W, this.H);
+        field.setSource(this.sourceTex);
+        this.group.add(field.mesh);
+        this.items.push({
+          mesh: field.mesh,
+          elem,
+          aspect: 1,
+          textPxWidth: 0,
+          userDx: 0,
+          userDy: 0,
+          userScale: 1,
+          lastW: 0,
+          lastH: 0,
+          owned: [field.mesh],
+          bubbles: field,
+        });
         continue;
       }
 
@@ -666,11 +720,22 @@ export class ElementRenderer {
     return this.group.children.length;
   }
 
+  /**
+   * 当前还活着的泡泡数。测试靠它断言「真的在冒」和「指尖真的戳破了」——
+   * 戳破是这个模拟里唯一可变的状态，只看画面很难把它和「飘走了」区分开。
+   */
+  bubbleAlive(): number {
+    let n = 0;
+    for (const it of this.items) n += it.bubbles?.aliveCount() ?? 0;
+    return n;
+  }
+
   /** 清掉所有跨帧状态。切模板和时间倒流时调 —— 见 engine.stepTo。 */
   resetState() {
     for (const it of this.items) {
       // 茎没有 buffer：它是当前帧的纯函数，没有要清的状态
       it.trail?.buffer?.clear();
+      it.bubbles?.reset();
       it.bloom?.detector.clear();
     }
   }
@@ -772,6 +837,28 @@ export class ElementRenderer {
         continue;
       }
       mesh.visible = true;
+
+      if (item.bubbles) {
+        /*
+         * 十根指尖全都能戳破，两只手都算。
+         *
+         * 只认食指的话玩起来很别扭 —— 参考素材里用户就是整只手划过去的。
+         * 没有手时传空数组：泡泡照常飘，只是没人戳。
+         */
+        const tips: { x: number; y: number }[] = [];
+        if (handTracker) {
+          for (const hf of handTracker.frames(nowMs)) {
+            for (const name of FINGER_TIPS) {
+              const lm = handTracker.landmarkAt(hf, name);
+              // 和背景平面、人脸守同一个镜像约定：0.5 - x
+              if (lm) tips.push({ x: (0.5 - lm.x) * this.W, y: (0.5 - lm.y) * this.H });
+            }
+          }
+        }
+        item.bubbles.update(t, tips);
+        mesh.visible = true;
+        continue;
+      }
 
       if (item.trail) {
         if (elem.asset.kind === "stem") this.updateStem(item, elem, basePx, hand, handTracker);

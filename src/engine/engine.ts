@@ -142,6 +142,7 @@ export class ArEngine {
     this.scene.add(this.prop);
 
     this.elements = new ElementRenderer(this.scene);
+    this.elements.setSourceTexture(this.sourceTex);
 
     this.attachDrag(opts.canvas);
     this.resize();
@@ -159,6 +160,9 @@ export class ArEngine {
     const mat = this.bgMat as THREE.MeshBasicMaterial;
     mat.map = this.sourceTex;
     mat.needsUpdate = true;
+    // 泡泡的折射要采这张。不同步的话泡泡里是上一张画面 ——
+    // 离线 harness 每换一个 fixture 都会走这条路
+    this.elements.setSourceTexture(this.sourceTex);
     this.resize();
   }
 
@@ -605,6 +609,7 @@ export class ArEngine {
        * 而泄漏出来的东西当时可能刚好是隐藏的，像素断言抓不到。
        */
       elementObjects: this.elements.objectCount(),
+      bubblesAlive: this.elements.bubbleAlive(),
       /**
        * 解不出素材、被跳过的元素。**非空就是有东西没画出来**。
        * smoke:live 据此判失败 —— 这个失效模式以前是完全静默的。

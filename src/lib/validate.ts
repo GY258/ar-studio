@@ -168,7 +168,7 @@ const ANIM_PRESETS = ["float", "fall", "pulse", "spin", "emit-fall-fade"];
 const EASES = ["linear", "in", "out", "inout", "gravity", "bounce"];
 /** 只有「0→1 走一趟」的原语能缓动。周期性原语套 ease 会在接缝处顿一下，见 animations.ts */
 const EASE_PRESETS = ["fall", "emit-fall-fade"];
-const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "stem", "pinch-bloom"];
+const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "stem", "bubbles", "pinch-bloom"];
 const FINGER_NAMES = ["thumb", "index", "middle", "ring", "pinky"];
 const HAND_ANCHOR_NAMES = Object.keys(HAND_ANCHORS);
 const SIZE_REFS = ["vw", "iod", "eye_width", "face_width", "palm_width"];
@@ -328,6 +328,30 @@ function validateAsset(a: unknown, at: string, p: string[]) {
     }
   }
 
+  if (kind === "bubbles") {
+    if (!inRange(asset.count, 1, 120)) p.push(`${at}.asset.count 应在 [1, 120]（同时最多几个）`);
+    if (!inRange(asset.rise, 0.01, 1)) p.push(`${at}.asset.rise 应在 [0.01, 1]（每秒走过画面高度的比例）`);
+    if (!pair(asset.size)) {
+      p.push(`${at}.asset.size 必须是 [最小, 最大]，占画面宽度的比例`);
+    } else {
+      const [lo, hi] = asset.size as [number, number];
+      if (!inRange(lo, 0.005, 0.5) || !inRange(hi, 0.005, 0.5)) p.push(`${at}.asset.size 的两端都应在 [0.005, 0.5]`);
+      if (lo > hi) p.push(`${at}.asset.size 的最小值大于最大值了`);
+    }
+    if (!inRange(asset.wobble, 0, 0.3)) p.push(`${at}.asset.wobble 应在 [0, 0.3]（横向摆动幅度）`);
+    if (!inRange(asset.popRadius, 0.2, 4)) {
+      p.push(`${at}.asset.popRadius 应在 [0.2, 4]（戳破判定半径，相对泡泡半径。>1 是因为指尖 landmark 本身有抖动）`);
+    }
+    if (!inRange(asset.refraction, 0, 1)) p.push(`${at}.asset.refraction 应在 [0, 1]（把背后画面推开多少）`);
+    if (!inRange(asset.iridescence, 0, 2)) p.push(`${at}.asset.iridescence 应在 [0, 2]（边缘彩虹强度）`);
+    if (!num(asset.seed)) {
+      p.push(
+        `${at}.asset.seed 必填。冒泡的位置、大小、速度都是 hash(第几个, seed) 的纯函数 —— ` +
+          `用随机数的话 renderAt(t) 不再确定，整套渲染回归就不成立了`,
+      );
+    }
+  }
+
   if (kind === "pinch-bloom") {
     const keys = svgKeys();
     if (typeof asset.key !== "string" || (keys.length && !keys.includes(asset.key))) {
@@ -470,6 +494,12 @@ function validateElement(e: Raw, at: string, p: string[], ids: Set<string>) {
     p.push(
       `${at} 的 asset 是 pinch-bloom 但锚不在 hand 空间 —— 捏合是手的动作，` +
         `要靠拇指尖和食指尖的距离判定，别的空间没有这两个点`,
+    );
+  }
+  if (assetKind === "bubbles" && space !== "screen") {
+    p.push(
+      `${at} 的 asset 是 bubbles 但锚不在 screen 空间 —— 它是满屏的模拟，` +
+        `不挂在任何一个点上。写 { "space": "screen", "nx": 0.5, "ny": 0.5 }`,
     );
   }
   if (assetKind === "stem" && space !== "hand") {

@@ -56,6 +56,9 @@ type ElementAsset =
       leaf?: { key: string; spacing: number; scale: number; seed: number };
       flower?: { key: string; scale: number };              // 长在茎顶端，跟着生长的那头走
       seed: number }                                        // 必填：定弯的方向和叶子的左右
+  | { kind: "bubbles";    count: number; rise: number;       // 肥皂泡，见下
+      size: [number, number]; wobble: number; popRadius: number;
+      refraction: number; iridescence: number; seed: number }
   | { kind: "pinch-bloom"; key: string; seconds: number; grow: number }  // 捏合时开一朵
 
 type ElementAnchor =
@@ -148,6 +151,40 @@ svg 和 gradient 只有宽度一种含义，写 `fit: "font"` 也按宽度处理
 采样落在固定的 12Hz 时间网格上，不是每帧一次 —— 每帧一次的话同一段手势在
 60fps 和 20fps 下会生成不同的带。相邻采样点位移超过 0.18 屏会**断开重新起一条**：
 手划出画面再进来、检测短暂丢失重新锁定，都会瞬移，连起来就是一条横跨画面的假线。
+
+### bubbles —— 肥皂泡，指尖戳破
+
+```jsonc
+{ "id": "bubbles",
+  "asset": { "kind": "bubbles", "count": 18, "rise": 0.16,
+             "size": [0.035, 0.11], "wobble": 0.035, "popRadius": 1.15,
+             "refraction": 0.34, "iridescence": 1.1, "seed": 23 },
+  "anchor": { "space": "screen", "nx": 0.5, "ny": 0.5 },
+  "size": { "ref": "vw", "scale": 1 } }
+```
+
+从画面下方缓缓飘起，**十根指尖**（两只手）划过去都能戳破。
+必须 `perception: ["hands"]`，锚点必须是 `space: "screen"` ——
+它是满屏的模拟，不挂在任何一个点上，元素自己的 `size` 会被忽略
+（泡泡大小由 `asset.size` 这个区间决定，一屏里本来就要有大有小）。
+
+**位置是时刻的闭式函数**，不是逐帧积分：
+
+    y(t) = y0 + vy * (t - t0)
+    x(t) = x0 + sin(t * 0.21Hz + phase) * wobble
+
+所以一个泡泡从生到死只存 `{ t0, x0, r, vy, phase }` 这几个不变量，
+每帧不修改任何东西 —— 没有「浮点求和顺序敏感」，也不会因为掉帧而漂。
+真正可变的只有**破没破**一个单调位。
+
+- `popRadius` 是相对泡泡半径的倍数，给 >1 是因为**指尖 landmark 本身有抖动**，
+  按几何半径判会经常戳不中，玩起来很挫
+- `refraction` 直接采源视频纹理，不读回帧缓冲 —— 泡泡背后就是摄像头画面，
+  那正是想要的效果
+- `iridescence` 的彩虹只出现在最外那一圈。铺满整个球会得到一个饱和的彩虹环，
+  一眼假：真实肥皂泡的色散集中在掠射角，正面看几乎无色
+- 没做泡泡之间的碰撞。参考素材里它们本来就是互相穿过的，
+  做碰撞要放弃闭式位置、回到逐帧积分，把上面那一整段简单性都赔进去
 
 ### pinch-bloom —— 捏合绽放
 
