@@ -793,8 +793,35 @@ test("泡泡：一开场就满屏、在动、指尖真的能戳破", async () =>
   const withHands = await alive();
   expect(withHands, `指尖划过去应该戳破一些（无手 ${noHands} → 有手 ${withHands}）`).toBeLessThan(noHands);
 
-  // 同一个 t 再来一次：戳破和「第几代」是仅有的可变状态，它们必须可回放
-  await capture(harness.page, 4.5);
+  /*
+   * --- 破了不再生，所以最终能清空。这是这个玩具的终局，也是它和屏保的区别 ---
+   *
+   * 泡泡纵向绕回（飘出顶端从底端进来），fixture 里那只手是张开的手掌 ——
+   * 所以只要跑得够久，每个泡泡都会飘过手掌被戳破。
+   * 断言是**单调递减**加上最终清空：会补充的实现过不了单调那一条。
+   */
+  const trail: number[] = [];
+  for (const tt of [6, 12, 20, 30, 42]) {
+    await capture(harness.page, tt);
+    trail.push(await alive());
+  }
+  for (let i = 1; i < trail.length; i++) {
+    expect(trail[i], `活着的泡泡只能变少不能变多（${trail.join(" → ")}）`).toBeLessThanOrEqual(trail[i - 1]);
+  }
+  /*
+   * 断言「剩得很少」而不是「归零」。
+   *
+   * 归零离线达不到，而且**原因在 fixture 不在代码**：泡泡横向只摆动 2% 画面宽，
+   * 而 fixture 里那只手固定在画面中间 —— 最左最右两列的泡泡永远碰不到它。
+   * 真机上手能划到任何地方，全戳完是做得到的。
+   *
+   * 写成 toBe(0) 的话这条会一直红，而红的原因和被测行为无关；
+   * 放宽到「没有补充」+「掉到个位数」才是这个环境能证明的事。
+   */
+  expect(trail[trail.length - 1], `跑够久该只剩边角上碰不到的几个（${trail.join(" → ")}）`).toBeLessThan(8);
+
+  // 同一个 t 再来一次：戳破是仅有的可变状态，它必须可回放
+  await capture(harness.page, 3.0);
   const again = await capture(harness.page, 3.0);
   expect(again.equals(buf), "同一个 t 渲染两次必须逐位相同 —— 戳破的状态没清干净就会不一样").toBe(true);
 });

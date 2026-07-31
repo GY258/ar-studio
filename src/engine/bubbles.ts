@@ -24,14 +24,15 @@
  * 回到逐帧积分，把上面那一整段简单性都赔进去 —— 换来的是一个在参考里
  * 根本看不出来的效果。要做也该等到它真的成为观感瓶颈。
  *
- * ## 数量恒定，靠绕回而不是靠冒泡
+ * ## 一开场就满屏，破了不再生 —— 所以能清空
  *
- * 泡泡不从画面底边冒出来 —— 一开场屏幕上就该是满的。做法是固定 count 个槽位，
- * 每个槽位的位置纵向**绕回**（飘出顶端就从底端接着进来），所以数量恒定、
- * 位置仍然是闭式。被戳破的槽位在残留动画结束后换一组 hash 参数重新出现，
- * 于是屏幕永远是满的，不会越玩越空。
+ * 泡泡不从画面底边冒出来，一开场屏幕上就是满的：固定 count 个槽位，位置纵向
+ * **绕回**（飘出顶端就从底端接着进来），所以没人戳的话一个都不会少。
  *
- * 槽位的「第几代」是个单调计数器，所以整个模拟仍然是 (t, seed) 的函数。
+ * 破掉的**不再生**。这让它有了终局：全部戳完屏幕就空了。
+ * 会不停补充的话就只是个屏保，没有「玩完了」这件事。
+ *
+ * 于是可变状态只剩一个单调递减的集合 —— 比 append-only 还简单。
  */
 
 import * as THREE from "three";
@@ -78,9 +79,9 @@ export interface BubbleParams {
   seed: number;
 }
 
-/** 一个槽位。除了 poppedAt / gen，其余都是这一代生成时定死的不变量 */
+/** 一个泡泡。除了 poppedAt，其余都是生成时定死的不变量 */
 interface Bubble {
-  /** 这一代出生的时刻，秒 */
+  /** 出生时刻，秒。全部是 0 —— 一开场就都在了 */
   t0: number;
   /** 出生时的横向位置，世界坐标 */
   x0: number;
@@ -94,8 +95,6 @@ interface Bubble {
   phase: number;
   /** 决定高光位置、彩虹相位和彩虹朝哪一侧 */
   seed: number;
-  /** 第几代。被戳破后 +1，换一组 hash 参数重新出现 */
-  gen: number;
   /** 破掉的时刻。null = 还活着 */
   poppedAt: number | null;
 }
@@ -112,6 +111,8 @@ export class BubbleField {
   private readonly iPop: Float32Array;
 
   private bubbles: Bubble[] = [];
+  /** 已经铺过一次了。和 bubbles.length 分开：全戳完之后长度是 0，但不该重铺 */
+  private seeded = false;
   private lastT = -1;
   private W = 1280;
   private H = 720;
@@ -291,6 +292,7 @@ export class BubbleField {
   /** 清掉所有跨帧状态。切模板和时间倒流时调 */
   reset() {
     this.bubbles.length = 0;
+    this.seeded = false;
     this.lastT = -1;
   }
 
@@ -299,10 +301,10 @@ export class BubbleField {
     return this.bubbles.filter((b) => b.poppedAt === null).length;
   }
 
-  /** 按槽位序号和第几代生成一个泡泡。全部走 hash，没有随机数 */
-  private spawn(slot: number, gen: number, t0: number, fresh: boolean): Bubble {
+  /** 按槽位序号生成一个泡泡。全部走 hash，没有随机数 */
+  private spawn(slot: number): Bubble {
     const p = this.params;
-    const h = (k: number) => hash1(slot * 131 + gen * 17 + k, p.seed);
+    const h = (k: number) => hash1(slot * 131 + k, p.seed);
     const r = (p.size[0] + (p.size[1] - p.size[0]) * h(1)) * this.W;
 
     /*
@@ -321,22 +323,15 @@ export class BubbleField {
     const cy = Math.floor(slot / cols) + 0.5;
 
     return {
-      t0,
+      t0: 0,
       x0: ((cx + (h(2) - 0.5) * 0.9) / cols - 0.5) * this.W * 1.1,
-      /*
-       * 重生也留在自己的格子里，只换一组抖动。
-       *
-       * 放在底边看起来会「从下面冒出来」—— 而这正是要避免的。
-       * 留在原格子还能保住铺开的均匀性，不然玩一会儿就又结块了。
-       */
       y0: ((cy + (h(6) - 0.5) * 0.9) / rows - 0.5) * this.H * 1.1,
       r,
       // 大泡泡升得慢一点。真实的肥皂泡阻力随半径涨，小的窜得快
       vy: p.rise * this.H * (0.75 + 0.5 * h(3)) * (1.0 - 0.35 * (r / (p.size[1] * this.W))),
       phase: h(4) * Math.PI * 2,
       seed: h(5),
-      gen,
-      poppedAt: fresh ? null : null,
+      poppedAt: null,
     };
   }
 
@@ -365,11 +360,14 @@ export class BubbleField {
 
     const p = this.params;
 
-    // 第一次：一次性铺满整屏。不从底边一个个冒 —— 一开场屏幕上就该是满的
-    if (this.bubbles.length === 0) {
-      for (let i = 0; i < p.count; i++) this.bubbles.push(this.spawn(i, 0, 0, false));
+    // 第一次：一次性铺满整屏。不从底边一个个冒 —— 一开场屏幕上就该是满的。
+    // 全部戳完之后这里不会再补：空了就是空了，那是这个玩具的终局
+    if (!this.seeded) {
+      this.seeded = true;
+      for (let i = 0; i < p.count; i++) this.bubbles.push(this.spawn(i));
     }
 
+    const live: Bubble[] = [];
     for (const b of this.bubbles) {
       const { x, y } = this.posAt(b, t);
       if (b.poppedAt === null) {
@@ -381,11 +379,11 @@ export class BubbleField {
           }
         }
       } else if (t - b.poppedAt > POP_SECONDS) {
-        // 残留动画放完，换一组参数重新出现。屏幕永远是满的，不会越玩越空
-        const slot = this.bubbles.indexOf(b);
-        this.bubbles[slot] = this.spawn(slot, b.gen + 1, t, true);
+        continue; // 残留动画放完就永久移除。破了不再生，所以能清空
       }
+      live.push(b);
     }
+    this.bubbles = live;
 
     /*
      * 先按 y 从远到近排序再写。
@@ -403,8 +401,8 @@ export class BubbleField {
     for (const { b, x, y } of sorted) {
       if (n >= this.max) break;
       const pop = b.poppedAt === null ? 0 : Math.min(1, (t - b.poppedAt) / POP_SECONDS);
-      // 重生的那一代要淡入，不然会凭空出现在画面中间
-      const fadeIn = b.gen === 0 ? 1 : Math.min(1, (t - b.t0) * 2.6);
+      // 没有重生，所以不需要淡入：所有泡泡从 t=0 起就都在
+      const fadeIn = 1;
       this.iPos[n * 2] = x;
       this.iPos[n * 2 + 1] = y;
       this.iRad[n] = b.r;
