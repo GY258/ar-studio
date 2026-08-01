@@ -128,6 +128,10 @@ export class ArEngine {
   private camInfo = "";
   /** 设备**支持**什么（不是这次拿到了什么）。见 startCamera 里的注释 */
   private camCaps = "";
+  /** 当前用的是前置还是后置。转屏重开摄像头时要沿用 */
+  private facing: "user" | "environment" = "user";
+  /** 正在重开摄像头。防止 resize 连续触发时叠着开好几路流 */
+  private reopening = false;
   /**
    * 数字缩放倍率。1 = 原始取景。
    *
@@ -283,54 +287,91 @@ export class ArEngine {
    * 漏掉任何一处的表现都是「贴在了镜像的位置上」，而且**只有换到后置才看得出来**。
    * 所以这里只设一个 setMirrored，具体换算集中在各自的一个函数里。
    */
+  /**
+   * 按一组约束开流，返回拿到的流和它的方向。
+   *
+   * 分成三档策略，从「什么都不指定」开始 —— 这是这次踩的坑的核心：
+   * 写死 width/height 反而害了自己。iOS 按自己的距离函数在**原生（横向）档位**里
+   * 挑最近的，而 1080x1920 和 1920x1080 像素数完全一样，在「最近」这件事上
+   * 是平手，等于没给方向信息，于是它保持横向。
+   * 不指定的话 Safari 会给按设备方向来的默认值。
+   */
+  private async openStream(
+    facing: "user" | "environment",
+    deviceId: string | undefined,
+    strategy: "auto" | "aspect" | "explicit",
+    portraitView: boolean,
+  ): Promise<MediaStream> {
+    const base: MediaTrackConstraints = {
+      facingMode: facing,
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    };
+    const video: MediaTrackConstraints =
+      strategy === "auto"
+        ? base
+        : strategy === "aspect"
+          ? { ...base, aspectRatio: { ideal: portraitView ? 9 / 16 : 16 / 9 } }
+          : {
+              ...base,
+              width: { ideal: portraitView ? 1080 : 1920 },
+              height: { ideal: portraitView ? 1920 : 1080 },
+            };
+    return navigator.mediaDevices.getUserMedia({ video, audio: false });
+  }
+
+  /**
+   * 开摄像头。
+   *
+   * facing 决定用前置还是后置，**同时决定画面镜不镜像**：
+   * 前置自拍不镜像的话抬左手看着是右手动，人立刻别扭；
+   * 后置拍别人镜像了则整个世界左右反了。
+   *
+   * **方向必须和视口一致**：竖着拿手机就要竖向流。拿不到的话竖屏画布 cover
+   * 之后只显示 16:9 横向流宽度的 26%，取景比系统相机窄一大截 ——
+   * 那不是比例算错，是把 74% 的画面裁掉了。
+   * 所以这里会校验拿到的方向，不对就换一种约束重试。
+   */
   async startCamera(facing: "user" | "environment" = "user", deviceId?: string): Promise<void> {
     if (!this.video) throw new Error("startCamera 需要一个 video 元素；离线模式请用 setSource()");
     this.degraded = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
     this.stopCamera();
+
+    const portraitView = this.H > this.W;
+    const tried: string[] = [];
+    let stream: MediaStream | null = null;
+
     /*
-     * 手机上请求**竖向**分辨率。
+     * 依次尝试，拿到方向对得上的就停。
      *
-     * 原来一律要 4:3 横向（1280×960），而手机画布是 9:16 竖屏 ——
-     * cover 裁切会把两侧砍掉一大半，人直接被切成半边。
-     * 全身类模板（fluidity）在这个裁法下根本框不进一个人。
-     *
-     * 用 ideal 而不是 exact：拿不到竖向流的设备会退回它自己的最佳档，
-     * 而不是直接抛 OverconstrainedError 让整个页面开不了摄像头。
+     * 不用 exact：拿不到就抛异常，整个页面开不了摄像头 —— 而「方向不对但能用」
+     * 比「什么都没有」好得多。所以是**尽力而为 + 兜底**，最后一档一定会成功。
      */
-    const portrait = this.degraded;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: portrait ? 1080 : 1920 },
-        height: { ideal: portrait ? 1920 : 1080 },
-        facingMode: facing,
-        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-      },
-      audio: false,
-    });
-    this.setMirrored(facing === "user");
+    for (const strategy of ["auto", "aspect", "explicit"] as const) {
+      try {
+        const s = await this.openStream(facing, deviceId, strategy, portraitView);
+        const st = s.getVideoTracks()[0]?.getSettings?.();
+        const portraitStream = (st?.height ?? 0) > (st?.width ?? 0);
+        tried.push(`${strategy}:${st?.width}x${st?.height}`);
+        if (stream) stream.getTracks().forEach((t) => t.stop());
+        stream = s;
+        if (portraitStream === portraitView) break;
+      } catch {
+        tried.push(`${strategy}:失败`);
+      }
+    }
+    if (!stream) throw new Error("开不了摄像头");
+
     this.video.srcObject = stream;
     await this.video.play();
-    /*
-     * 记下**实际拿到的**和**设备到底支持什么**。
-     *
-     * 「iOS 给不了竖向流」这个结论不该从一次观察推出来 —— ideal 只是偏好，
-     * 浏览器按自己的距离函数挑最近的档位，而 1080x1920 和 1920x1080
-     * 像素数完全一样，「最近」这件事上是平手，于是它保持了原生方向。
-     * 真正能证明「给不了」的是 getCapabilities()：它列出设备支持的
-     * 宽高范围和长宽比范围。竖向档位存不存在，看那个才知道。
-     */
+
     const track = stream.getVideoTracks()[0];
     const st = track?.getSettings?.();
     if (st) this.camInfo = `${st.width}x${st.height}@${Math.round(st.frameRate ?? 0)}`;
-    const caps = track?.getCapabilities?.() as
-      | { width?: { max?: number }; height?: { max?: number }; aspectRatio?: { min?: number; max?: number } }
-      | undefined;
-    if (caps?.aspectRatio) {
-      // 长宽比下限小于 1 就说明设备**能**给竖向流，那样的话该改约束而不是让用户缩
-      this.camCaps = `ar ${caps.aspectRatio.min?.toFixed(2) ?? "?"}~${caps.aspectRatio.max?.toFixed(2) ?? "?"}`;
-    } else if (caps?.width?.max) {
-      this.camCaps = `max ${caps.width.max}x${caps.height?.max ?? "?"}`;
-    }
+    // 试过哪几档也记下来 —— 「方向对不上」时唯一能判断该改哪儿的信息
+    this.camCaps = tried.join(" ");
+
+    this.facing = facing;
+    this.setMirrored(facing === "user");
     // videoWidth/videoHeight 在 play 后才可靠，再 resize 一次确保 cover 比例正确
     this.video.addEventListener("loadedmetadata", () => this.resize(), { once: true });
     this.resize();
@@ -887,6 +928,27 @@ export class ArEngine {
 
   resize() {
     const canvas = this.renderer.domElement;
+    /*
+     * 转屏之后流的方向就对不上了 —— 竖着拿手机却在放横向流，
+     * cover 会把大半个画面裁掉。所以这里检查一下，不对就重开。
+     *
+     * 只在**方向真的翻了**的时候重开：resize 在滚动、地址栏收起、
+     * 软键盘弹出时都会触发，每次都重开摄像头会闪成一片。
+     * reopening 这个锁是必须的，否则连续 resize 会叠着开好几路流。
+     */
+    if (this.video && !this.reopening) {
+      const vw = this.video.videoWidth;
+      const vh = this.video.videoHeight;
+      const r = canvas.getBoundingClientRect();
+      if (vw > 0 && vh > 0 && r.width > 0 && vh > vw !== r.height > r.width) {
+        this.reopening = true;
+        void this.startCamera(this.facing)
+          .catch((e) => this.onError?.(e as Error))
+          .finally(() => {
+            this.reopening = false;
+          });
+      }
+    }
     const rect = canvas.getBoundingClientRect();
     this.W = Math.max(2, Math.round(rect.width));
     this.H = Math.max(2, Math.round(rect.height));
