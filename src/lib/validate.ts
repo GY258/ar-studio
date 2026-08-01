@@ -209,6 +209,24 @@ function validateElementControls(raw: Raw, p: string[]) {
       );
     }
 
+    /*
+     * 滑块的 default 必须和元素里那个参数的初值一致。
+     *
+     * 不一致的话面板显示一个数、效果用另一个数 —— 而且**看起来完全正常**：
+     * 引擎装载后会按滑块的 default 推一遍，于是实际生效的是滑块那个值，
+     * 模板 JSON 里写的初值形同虚设。改模板的人改了 asset 却没改 controls，
+     * 就会得到「我明明改了怎么没变」。这是典型的两处真相。
+     */
+    const el = (raw.elements as Raw[])?.find((e) => e?.id === et.elementId);
+    const asset = el?.asset as Record<string, unknown> | undefined;
+    const initial = et.param === "opacity" ? el?.opacity : asset?.[et.param];
+    if (num(initial) && num(c.default) && initial !== c.default) {
+      p.push(
+        `${at}.default 是 ${c.default}，但元素 "${et.elementId}" 的 ${et.param} 初值是 ${initial} —— ` +
+          `两者必须一致。不一致时生效的是滑块的 default，模板里写的初值形同虚设`,
+      );
+    }
+
     if (c.options !== undefined) {
       const opts = c.options as Raw[];
       if (!Array.isArray(opts) || opts.length < 2) {
