@@ -21,12 +21,13 @@
         "boxes": 64,
         "lines": 48,
         "detectHz": 22,
+        "density": 0.3,
         "jitter": 0.3,
-        "boxScale": [
-          0.055,
-          1.05
-        ],
+        "boxSize": 0.13,
+        "boxSizeSpread": 0.85,
+        "labelRatio": 0.78,
         "digits": 5,
+        "lineReach": 0.08,
         "color": "#FFFFFF",
         "seed": 41
       },

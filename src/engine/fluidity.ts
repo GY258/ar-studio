@@ -75,8 +75,19 @@ export interface FluidityParams {
   detectHz: number;
   /** 框位置抖动幅度，相对肩宽 */
   jitter: number;
-  /** 框大小范围，相对肩宽 */
-  boxScale: [number, number];
+  /** 框的**平均**大小，相对肩宽 */
+  boxSize: number;
+  /**
+   * 大小差异程度 0~1。0 = 全一样大；1 = 大量小框 + 少数几个大框。
+   * 不管调多少，**平均值恒等于 boxSize** —— 见 update() 里的推导。
+   */
+  boxSizeSpread: number;
+  /** 多少比例的框带编号 0~1。参考素材里不是每个框都有 */
+  labelRatio: number;
+  /** 静止（spread=0）时还剩多少密度 0~1 */
+  density: number;
+  /** 多少比例的线拉出画面 0~1 */
+  lineReach: number;
   /** 编号位数 */
   digits: number;
   color: string;
@@ -306,7 +317,7 @@ export class FluidityField {
      * 静止时不清零而是留 25% —— 参考素材第 5 帧（手收在胸前）仍然有几个框，
      * 全清的话读起来像「检测丢了」而不是「没什么可解析的」。
      */
-    const n = Math.max(3, Math.round(p.boxes * (0.42 + 0.58 * pose.spread)));
+    const n = Math.max(3, Math.round(p.boxes * (p.density + (1 - p.density) * pose.spread)));
 
     /* ---------------- 框 + 编号 ---------------- */
     const centers: { x: number; y: number }[] = [];
@@ -345,13 +356,20 @@ export class FluidityField {
       const cx = (0.5 - lm.x) * this.W + (h(1) - 0.5) * p.jitter * sw;
       const cy = (0.5 - lm.y) * this.H + (h(2) - 0.5) * p.jitter * sw;
       /*
-       * 尺寸分布**偏小**（2.5 次幂），不是均匀分布。
+       * 尺寸：给「平均大小」和「差异程度」两个旋钮，不给 min/max。
        *
-       * 参考素材里是「大量小框贴在关节上 + 少数几个大框罩住躯干」。
-       * 均匀分布出来全是不大不小的中等框，读起来像网格不像检测结果 ——
-       * 第一版就是这样。幂次让大框变成少数派，而上限可以给得更高。
+       * min/max 那套的问题是**算不出平均值**：分布是 2.5 次幂（偏小），
+       * [0.055, 1.05] 的平均其实是 0.34 个肩宽 —— 想「把框调小一点」
+       * 得先在脑子里做一遍积分。
+       *
+       * 这里用 size = boxSize * (a + b * h^2.5)，取 E[h^2.5] = 1/3.5，
+       * 令 a = 1 - spread、b = 3.5 * spread，于是 a + b/3.5 ≡ 1 ——
+       * **不管差异调多少，平均值恒等于 boxSize**。
+       *   spread = 0 → 全是一样大的框
+       *   spread = 1 → 0~3.5 倍均值，大量小框 + 少数几个大框（参考的样子）
        */
-      const w = (p.boxScale[0] + (p.boxScale[1] - p.boxScale[0]) * Math.pow(h(3), 2.5)) * sw;
+      const sp = p.boxSizeSpread;
+      const w = p.boxSize * (1 - sp + 3.5 * sp * Math.pow(h(3), 2.5)) * sw;
       // 长宽比也抖一下，全是正方形的话读起来像网格不像检测框
       const hgt = w * (0.6 + h(4) * 0.9);
 
@@ -362,6 +380,15 @@ export class FluidityField {
       this.bSize[bi * 2 + 1] = Math.round(hgt);
       this.bAlp[bi] = 1;
       centers.push({ x: cx, y: cy });
+
+      /*
+       * 只有一部分框带编号。参考素材里不是每个框都有 ——
+       * 全带的话数字比框还抢眼，而它本来是「检测 id」这种次要信息。
+       */
+      if (hash1(i * 3301 + f * 29, p.seed) > p.labelRatio) {
+        bi++;
+        continue;
+      }
 
       // 编号贴在左上角外侧，和参考一致
       /*
@@ -429,11 +456,11 @@ export class FluidityField {
        * 全都框对框的话线永远困在人体轮廓内，读起来是网格不是流动。
        */
       /*
-       * 只有很少一部分线拉出画面（8%），第一版给了 18% ——
+       * 只有 lineReach 那一小部分线拉出画面。第一版写死了 18% ——
        * 结果满屏都是横贯画面的长斜线，人体上的网状结构反而看不见了。
        * 参考素材里长线是点缀，主体是**框与框之间**连出来的网。
        */
-      if (hash1(j * 811 + f * 17, p.seed) > 0.92) {
+      if (hash1(j * 811 + f * 17, p.seed) < p.lineReach) {
         const ang = hash1(j * 929 + f * 23, p.seed) * Math.PI * 2;
         b = { x: a.x + Math.cos(ang) * this.W, y: a.y + Math.sin(ang) * this.H };
       }

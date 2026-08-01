@@ -216,8 +216,27 @@ export type ElementAsset =
       detectHz: number;
       /** 框位置抖动幅度，相对肩宽 */
       jitter: number;
-      /** 框大小范围 [最小, 最大]，相对肩宽 */
-      boxScale: [number, number];
+      /**
+       * 框的**平均**大小，相对肩宽。
+       *
+       * 给平均值而不是 min/max：分布是偏小的幂次，min/max 那套**算不出平均值**，
+       * 想「把框调小一点」得先在脑子里做一遍积分。
+       */
+      boxSize: number;
+      /**
+       * 大小差异程度 0~1。0 = 全一样大；1 = 大量小框 + 少数几个大框（参考的样子）。
+       * 不管调多少，**平均值恒等于 boxSize**。
+       */
+      boxSizeSpread: number;
+      /** 多少比例的框带编号 0~1。参考素材里不是每个框都有 */
+      labelRatio: number;
+      /**
+       * 静止时还剩多少密度 0~1。
+       * 参考素材里手收拢那几帧只剩三五个框，给小一点才有那个对比。
+       */
+      density: number;
+      /** 多少比例的线拉出画面 0~1。给大了满屏横贯的斜线会盖掉人体上的网 */
+      lineReach: number;
       /** 编号位数。参考素材是 5 位 */
       digits: number;
       color: string;

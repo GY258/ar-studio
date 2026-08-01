@@ -75,8 +75,10 @@ type ElementAsset =
       flower?: { key: string; scale: number };              // 长在茎顶端，跟着生长的那头走
       seed: number }                                        // 必填：定弯的方向和叶子的左右
   | { kind: "fluidity";   boxes: number; lines: number;      // 检测框 + 连线，见下
-      detectHz: number; jitter: number; boxScale: [number, number];
-      digits: number; color: string; seed: number }
+      detectHz: number; density: number; jitter: number;
+      boxSize: number; boxSizeSpread: number;
+      labelRatio: number; digits: number; lineReach: number;
+      color: string; seed: number }
   | { kind: "bubbles";    count: number; rise: number;       // 肥皂泡，见下
       size: [number, number]; wobble: number; popRadius: number;
       refraction: number; iridescence: number; seed: number }
@@ -178,7 +180,9 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 \`\`\`jsonc
 { "id": "fluidity",
   "asset": { "kind": "fluidity", "boxes": 64, "lines": 48, "detectHz": 22,
-             "jitter": 0.3, "boxScale": [0.055, 1.05], "digits": 5,
+             "density": 0.3, "jitter": 0.3,
+             "boxSize": 0.13, "boxSizeSpread": 0.85,
+             "labelRatio": 0.78, "digits": 5, "lineReach": 0.08,
              "color": "#FFFFFF", "seed": 41 },
   "anchor": { "space": "screen", "nx": 0.5, "ny": 0.5 },
   "size": { "ref": "vw", "scale": 1 } }
@@ -193,9 +197,15 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 
 - \`detectHz\` 是**一帧一检测**那种生硬跳变的节奏，编号和抖动都 key 在它上面，
   不做任何插值。平滑插值会让它变成柔顺的装饰动画，完全是另一个东西
-- \`boxScale\` 的分布是**偏小的**（2.5 次幂），不是均匀 —— 参考里是
-  「大量小框贴在关节上 + 少数几个大框罩住躯干」，均匀分布出来全是中等框，
-  读起来像网格不像检测结果
+- \`boxSize\` 是**平均**大小，不是上限。分布本身是偏小的幂次，
+  给 min/max 的话算不出平均值 —— 想「把框调小一点」得先在脑子里做一遍积分。
+  \`boxSizeSpread\` 只调差异程度（0 = 全一样大，1 = 大量小框 + 少数大框），
+  **平均值恒等于 boxSize**，两个旋钮互不干扰
+- \`density\` 是静止时还剩多少密度。参考里手收拢那几帧只剩三五个框，
+  给小一点才有那个对比 —— 给大了整段都是满屏，反而没有「爆发」可言
+- \`labelRatio\` 控制多少框带编号。全带的话数字比框还抢眼，
+  而它本来是「检测 id」这种次要信息
+- \`lineReach\` 是多少比例的线拉出画面。给大了满屏横贯的斜线会盖掉人体上的网
 - 编号走 \`hash(第几个框, 第几个检测帧, seed)\`，看着像每帧重新分配的检测 id，
   实际是纯函数。数字是 shader 里的 3×5 程序化点阵，不用字体 ——
   系统字体会让 golden 只在录它的机器上成立

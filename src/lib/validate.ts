@@ -335,13 +335,18 @@ function validateAsset(a: unknown, at: string, p: string[]) {
       p.push(`${at}.asset.detectHz 应在 [1, 60]（每秒重检测几次。这是「一帧一检测」那种跳动的节奏）`);
     }
     if (!inRange(asset.jitter, 0, 2)) p.push(`${at}.asset.jitter 应在 [0, 2]（框位置抖动，相对肩宽）`);
-    if (!pair(asset.boxScale)) {
-      p.push(`${at}.asset.boxScale 必须是 [最小, 最大]，相对肩宽`);
-    } else {
-      const [lo, hi] = asset.boxScale as [number, number];
-      if (!inRange(lo, 0.01, 3) || !inRange(hi, 0.01, 3)) p.push(`${at}.asset.boxScale 两端都应在 [0.01, 3]`);
-      if (lo > hi) p.push(`${at}.asset.boxScale 的最小值大于最大值了`);
+    if (!inRange(asset.boxSize, 0.01, 2)) {
+      p.push(`${at}.asset.boxSize 应在 [0.01, 2]（框的**平均**大小，相对肩宽）`);
     }
+    if (!inRange(asset.boxSizeSpread, 0, 1)) {
+      p.push(
+        `${at}.asset.boxSizeSpread 应在 [0, 1]（大小差异。0 = 全一样大，1 = 大量小框 + 少数大框。` +
+          `不管调多少平均值都等于 boxSize）`,
+      );
+    }
+    if (!inRange(asset.labelRatio, 0, 1)) p.push(`${at}.asset.labelRatio 应在 [0, 1]（多少比例的框带编号）`);
+    if (!inRange(asset.density, 0, 1)) p.push(`${at}.asset.density 应在 [0, 1]（静止时还剩多少密度）`);
+    if (!inRange(asset.lineReach, 0, 1)) p.push(`${at}.asset.lineReach 应在 [0, 1]（多少比例的线拉出画面）`);
     if (!inRange(asset.digits, 1, 8)) p.push(`${at}.asset.digits 应在 [1, 8]（编号位数，参考素材是 5）`);
     if (typeof asset.color !== "string") p.push(`${at}.asset.color 必填`);
     if (!num(asset.seed)) {
