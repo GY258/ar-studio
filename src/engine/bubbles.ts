@@ -378,7 +378,7 @@ export class BubbleField {
    *
    * 只有「破没破」和「第几代」是真的在改状态；位置是 t 的闭式函数，见文件头。
    */
-  update(t: number, tips: readonly { x: number; y: number }[]) {
+  update(t: number, tips: readonly { x: number; y: number; reach: number }[]) {
     // 时间倒流：整个重来。状态是历史的函数，倒着走没有意义（同 TrailBuffer）
     if (t < this.lastT) this.reset();
     this.lastT = t;
@@ -396,8 +396,19 @@ export class BubbleField {
     for (const b of this.bubbles) {
       const { x, y } = this.posAt(b, t);
       if (b.poppedAt === null) {
-        const pr = b.r * p.popRadius;
+        /*
+         * 判定半径取「泡泡的 popRadius 倍」和「指尖自己的容差」中**大的那个**。
+         *
+         * 只按泡泡半径算的话，手机上根本戳不中：泡泡半径是 size × 画布宽度，
+         * 而手机竖屏的宽度是短边（约 390~780），桌面横屏是长边（1280+）——
+         * 同一份参数在手机上泡泡小 2~4 倍，容差也跟着小 2~4 倍，
+         * 再叠上手机摄像头分辨率更低、关键点更抖，就成了「怎么戳都不破」。
+         *
+         * 下限按**掌宽**算而不是按画面算：它是手自己的尺寸，人退远手变小、
+         * 容差跟着变小，符合直觉；而且横屏竖屏都成立。
+         */
         for (const tip of tips) {
+          const pr = Math.max(b.r * p.popRadius, tip.reach);
           if (Math.hypot(tip.x - x, tip.y - y) < pr) {
             b.poppedAt = t;
             break;

@@ -28,6 +28,14 @@ function hash1(i: number, seed: number): number {
   return x - Math.floor(x);
 }
 
+/**
+ * 指尖的戳破容差，相对掌宽。
+ *
+ * 0.28 ≈ 一根手指的粗细量级。给太小的话手机上戳不中（见 bubbles.ts 的注释），
+ * 给太大则整只手扫过去像橡皮擦，一次抹掉一片 —— 而「一个一个戳破」是这个玩具的玩法。
+ */
+const TIP_REACH = 0.28;
+
 /** 文字统一按这个字号栅格化一次，再按 size 缩放 mesh。避免人一动就重新栅格化。 */
 const TEXT_RASTER_PX = 64;
 
@@ -963,13 +971,20 @@ export class ElementRenderer {
          * 只认食指的话玩起来很别扭 —— 参考素材里用户就是整只手划过去的。
          * 没有手时传空数组：泡泡照常飘，只是没人戳。
          */
-        const tips: { x: number; y: number }[] = [];
+        const tips: { x: number; y: number; reach: number }[] = [];
         if (handTracker) {
           for (const hf of handTracker.frames(nowMs)) {
+            /*
+             * 每个指尖带一个「容差半径」，按掌宽算。
+             *
+             * 泡泡自己的判定半径是按**画布宽度**来的，而手机竖屏的宽度是短边 ——
+             * 小泡泡在手机上会小到怎么戳都不中。掌宽是手自己的尺寸，
+             * 横屏竖屏都成立，人退远时也会跟着缩。
+             */
+            const reach = hf.palmWidth * TIP_REACH;
             for (const name of FINGER_TIPS) {
               const lm = handTracker.landmarkAt(hf, name);
-              // 和背景平面、人脸守同一个镜像约定：0.5 - x
-              if (lm) tips.push({ x: this.nx2wx(lm.x), y: this.ny2wy(lm.y) });
+              if (lm) tips.push({ x: this.nx2wx(lm.x), y: this.ny2wy(lm.y), reach });
             }
           }
         }
