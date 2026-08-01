@@ -178,6 +178,7 @@ export class ElementRenderer {
             labelRatio: a.labelRatio,
             density: a.density,
             lineReach: a.lineReach,
+            fillRatio: a.fillRatio,
             digits: a.digits,
             color: a.color,
             opacity: elem.opacity ?? 1,

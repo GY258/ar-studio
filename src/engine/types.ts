@@ -253,6 +253,12 @@ export type ElementAsset =
       density: number;
       /** 多少比例的线拉出画面 0~1。给大了满屏横贯的斜线会盖掉人体上的网 */
       lineReach: number;
+      /**
+       * 多少比例的**小**框是实心的 0~1。
+       * 全描边的话画面太均质，实心的那几个是节奏上的重音。
+       * 只作用在小于平均大小的框上 —— 大框填实会糊掉半个身子。
+       */
+      fillRatio: number;
       /** 编号位数。参考素材是 5 位 */
       digits: number;
       color: string;

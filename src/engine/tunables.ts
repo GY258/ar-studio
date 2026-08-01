@@ -13,7 +13,7 @@
  * 拖一下滑块就重建一次几何，手感和开销都不对。
  */
 export const TUNABLE_PARAMS: Record<string, readonly string[]> = {
-  fluidity: ["detectHz", "density", "jitter", "boxSize", "boxSizeSpread", "labelRatio", "lineReach", "opacity"],
+  fluidity: ["detectHz", "density", "jitter", "boxSize", "boxSizeSpread", "labelRatio", "lineReach", "fillRatio", "opacity"],
   bubbles: ["rise", "wobble", "popRadius", "refraction", "iridescence", "opacity"],
 };
 

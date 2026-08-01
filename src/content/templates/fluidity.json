@@ -28,6 +28,7 @@
         "labelRatio": 0.78,
         "digits": 5,
         "lineReach": 0.08,
+        "fillRatio": 0.22,
         "color": "#FFFFFF",
         "seed": 41
       },

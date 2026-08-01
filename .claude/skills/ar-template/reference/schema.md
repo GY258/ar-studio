@@ -59,7 +59,8 @@ type ElementAsset =
   | { kind: "fluidity";   boxes: number; lines: number;      // 检测框 + 连线，见下
       detectHz: number; density: number; jitter: number;
       boxSize: number; boxSizeSpread: number;
-      labelRatio: number; digits: number; lineReach: number;
+      labelRatio: number; digits: number;
+      lineReach: number; fillRatio: number;
       color: string; seed: number }
   | { kind: "bubbles";    count: number; rise: number;       // 肥皂泡，见下
       size: [number, number]; wobble: number; popRadius: number;
@@ -164,7 +165,8 @@ svg 和 gradient 只有宽度一种含义，写 `fit: "font"` 也按宽度处理
   "asset": { "kind": "fluidity", "boxes": 64, "lines": 48, "detectHz": 22,
              "density": 0.3, "jitter": 0.3,
              "boxSize": 0.13, "boxSizeSpread": 0.85,
-             "labelRatio": 0.78, "digits": 5, "lineReach": 0.08,
+             "labelRatio": 0.78, "digits": 5,
+             "lineReach": 0.08, "fillRatio": 0.22,
              "color": "#FFFFFF", "seed": 41 },
   "anchor": { "space": "screen", "nx": 0.5, "ny": 0.5 },
   "size": { "ref": "vw", "scale": 1 } }
@@ -188,10 +190,15 @@ svg 和 gradient 只有宽度一种含义，写 `fit: "font"` 也按宽度处理
 - `labelRatio` 控制多少框带编号。全带的话数字比框还抢眼，
   而它本来是「检测 id」这种次要信息
 - `lineReach` 是多少比例的线拉出画面。给大了满屏横贯的斜线会盖掉人体上的网
+- `fillRatio` 是多少比例的**中小号**框填实。参考素材里散着几个实心的白色小方块 ——
+  全描边的话画面太均质，实心的那几个是节奏上的重音。大框不填（会糊掉半个身子），
+  最小的那批也不填（只有几个像素点，看不出是方块）
 - 编号走 `hash(第几个框, 第几个检测帧, seed)`，看着像每帧重新分配的检测 id，
-  实际是纯函数。数字是 shader 里的 3×5 程序化点阵，不用字体 ——
-  系统字体会让 golden 只在录它的机器上成立
-- 字号和框都**吸附到整像素**。像素风的字不落在整像素上，笔画粗细不匀、边上泛色
+  实际是纯函数。数字是 shader 里的 **5×7** 程序化点阵，不用字体 ——
+  系统字体会让 golden 只在录它的机器上成立。3×5 试过，太方太粗，
+  参考素材里的编号明显更高更瘦
+- 字号和框都**吸附到整像素**（字高吸到 7 的倍数）。像素风的字不落在整像素上，
+  笔画粗细不匀、边上泛色
 
 ### bubbles —— 肥皂泡，指尖戳破
 

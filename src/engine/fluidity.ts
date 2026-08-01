@@ -47,24 +47,38 @@ function hash1(i: number, seed: number): number {
 }
 
 /**
- * 3×5 点阵数字，每个数字 15 位。
+ * 5×7 点阵数字。
  *
- * 位序：bit(row * 3 + col)，row 0 在上，col 0 在左。
- * 写成常量而不是运行时画出来：shader 里要用，而且它得跨机器逐位一致。
+ * 原来是 3×5 —— 太方太粗，参考素材里的编号明显**更高更瘦**，
+ * 是那种技术感的等宽小字。5×7 是点阵字库里最常见的数字字身比，
+ * 笔画能细到 1 像素而字仍然读得出来。
+ *
+ * 位序：bit(row * 5 + col)，row 0 在上，col 0 在**左**（和 3×5 那版相反，
+ * 那版把二进制串的低位当成了左列，整个字形水平镜像 —— 这次直接按左到右写）。
+ *
+ * 35 位放不进一个 float32（整数只精确到 2^24），所以拆成两半：
+ * 前 4 行进 A（20 位），后 3 行进 B（15 位）。
  */
 const GLYPH_ROWS: number[][] = [
-  [7, 5, 5, 5, 7], // 0
-  [2, 6, 2, 2, 7], // 1
-  [7, 1, 7, 4, 7], // 2
-  [7, 1, 7, 1, 7], // 3
-  [5, 5, 7, 1, 1], // 4
-  [7, 4, 7, 1, 7], // 5
-  [7, 4, 7, 5, 7], // 6
-  [7, 1, 1, 1, 1], // 7
-  [7, 5, 7, 5, 7], // 8
-  [7, 5, 7, 1, 7], // 9
+  [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110], // 0
+  [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110], // 1
+  [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111], // 2
+  [0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110], // 3
+  [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010], // 4
+  [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110], // 5
+  [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110], // 6
+  [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000], // 7
+  [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110], // 8
+  [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100], // 9
 ];
-const GLYPHS = GLYPH_ROWS.map((rows) => rows.reduce((acc, r, i) => acc + r * Math.pow(2, i * 3), 0));
+/** 每行的位是「col 0 在最高位」写的，翻成「col 0 在最低位」好在 shader 里按位取 */
+const rev5 = (r: number) => {
+  let out = 0;
+  for (let c = 0; c < 5; c++) if (r & (1 << (4 - c))) out |= 1 << c;
+  return out;
+};
+const GLYPH_A = GLYPH_ROWS.map((rows) => rows.slice(0, 4).reduce((a, r, i) => a + rev5(r) * Math.pow(2, i * 5), 0));
+const GLYPH_B = GLYPH_ROWS.map((rows) => rows.slice(4).reduce((a, r, i) => a + rev5(r) * Math.pow(2, i * 5), 0));
 
 export interface FluidityParams {
   /** 最多几个框 */
@@ -88,6 +102,8 @@ export interface FluidityParams {
   density: number;
   /** 多少比例的线拉出画面 0~1 */
   lineReach: number;
+  /** 多少比例的**小**框是实心的 0~1 */
+  fillRatio: number;
   /** 编号位数 */
   digits: number;
   color: string;
@@ -108,9 +124,11 @@ export class FluidityField {
   private readonly bPos: Float32Array;
   private readonly bSize: Float32Array;
   private readonly bAlp: Float32Array;
+  private readonly bFill: Float32Array;
   private readonly dPos: Float32Array;
   private readonly dSize: Float32Array;
-  private readonly dGlyph: Float32Array;
+  private readonly dGlyphA: Float32Array;
+  private readonly dGlyphB: Float32Array;
   private readonly dAlp: Float32Array;
   private readonly lPos: Float32Array;
   private readonly attrs: Record<string, THREE.InstancedBufferAttribute> = {};
@@ -126,9 +144,11 @@ export class FluidityField {
     this.bPos = new Float32Array(maxBoxes * 2);
     this.bSize = new Float32Array(maxBoxes * 2);
     this.bAlp = new Float32Array(maxBoxes);
+    this.bFill = new Float32Array(maxBoxes);
     this.dPos = new Float32Array(maxDigits * 2);
     this.dSize = new Float32Array(maxDigits);
-    this.dGlyph = new Float32Array(maxDigits);
+    this.dGlyphA = new Float32Array(maxDigits);
+    this.dGlyphB = new Float32Array(maxDigits);
     this.dAlp = new Float32Array(maxDigits);
     this.lPos = new Float32Array(params.lines * 2 * 3);
 
@@ -143,6 +163,7 @@ export class FluidityField {
       ["iPos", this.bPos, 2],
       ["iSize", this.bSize, 2],
       ["iAlp", this.bAlp, 1],
+      ["iFill", this.bFill, 1],
     ] as [string, Float32Array, number][]) {
       const a = new THREE.InstancedBufferAttribute(arr, n);
       a.setUsage(THREE.DynamicDrawUsage);
@@ -157,18 +178,26 @@ export class FluidityField {
       depthTest: false,
       uniforms: { uColor: { value: color }, uOpacity: { value: params.opacity } },
       vertexShader: `
-        attribute vec2 iPos; attribute vec2 iSize; attribute float iAlp;
-        varying vec2 vLocal; varying vec2 vSize; varying float vA;
+        attribute vec2 iPos; attribute vec2 iSize; attribute float iAlp; attribute float iFill;
+        varying vec2 vLocal; varying vec2 vSize; varying float vA; varying float vFill;
         void main(){
           vLocal = position.xy * 2.0;   // -1..1
-          vSize = iSize; vA = iAlp;
+          vSize = iSize; vA = iAlp; vFill = iFill;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(iPos + position.xy * iSize, 0.0, 1.0);
         }`,
       fragmentShader: `
         uniform vec3 uColor; uniform float uOpacity;
-        varying vec2 vLocal; varying vec2 vSize; varying float vA;
+        varying vec2 vLocal; varying vec2 vSize; varying float vA; varying float vFill;
         void main(){
           if (vA < 0.004) discard;
+          /*
+           * 一部分框是**实心**的。参考素材里散着一些填实的白色小方块 ——
+           * 全是描边的话画面读起来太均质，实心的那几个是节奏上的重音。
+           */
+          if (vFill > 0.5) {
+            gl_FragColor = vec4(uColor, vA * uOpacity);
+            return;
+          }
           /*
            * 1px 描边。线宽按**像素**算而不是按框大小的比例 ——
            * 按比例的话小框的边细到看不见、大框的边粗成色块，
@@ -191,7 +220,8 @@ export class FluidityField {
     for (const [name, arr, n] of [
       ["iPos", this.dPos, 2],
       ["iSize", this.dSize, 1],
-      ["iGlyph", this.dGlyph, 1],
+      ["iGlyphA", this.dGlyphA, 1],
+      ["iGlyphB", this.dGlyphB, 1],
       ["iAlp", this.dAlp, 1],
     ] as [string, Float32Array, number][]) {
       const a = new THREE.InstancedBufferAttribute(arr, n);
@@ -207,18 +237,19 @@ export class FluidityField {
       depthTest: false,
       uniforms: { uColor: { value: color }, uOpacity: { value: params.opacity } },
       vertexShader: `
-        attribute vec2 iPos; attribute float iSize; attribute float iGlyph; attribute float iAlp;
-        varying vec2 vUv; varying float vGlyph; varying float vA;
+        attribute vec2 iPos; attribute float iSize; attribute float iGlyphA; attribute float iGlyphB;
+        attribute float iAlp;
+        varying vec2 vUv; varying float vGA; varying float vGB; varying float vA;
         void main(){
           vUv = position.xy + 0.5;      // 0..1
-          vGlyph = iGlyph; vA = iAlp;
-          // 3:5 的字身比。等宽点阵，不是字体
+          vGA = iGlyphA; vGB = iGlyphB; vA = iAlp;
+          // 5:7 的字身比。等宽点阵，不是字体
           gl_Position = projectionMatrix * modelViewMatrix
-            * vec4(iPos + position.xy * vec2(iSize * 0.6, iSize), 0.0, 1.0);
+            * vec4(iPos + position.xy * vec2(iSize * 5.0 / 7.0, iSize), 0.0, 1.0);
         }`,
       fragmentShader: `
         uniform vec3 uColor; uniform float uOpacity;
-        varying vec2 vUv; varying float vGlyph; varying float vA;
+        varying vec2 vUv; varying float vGA; varying float vGB; varying float vA;
         void main(){
           if (vA < 0.004) discard;
           /*
@@ -228,8 +259,8 @@ export class FluidityField {
            * floor(1.0 * 5.0) = 5，越界被丢掉 —— **每个数字的最底下一行都没了**，
            * 0 看着像 ⊓、5 看着像 S。在 11px 的字上这个缺口不明显但确实是错的。
            */
-          int col = int(floor(clamp(vUv.x, 0.0, 0.999) * 3.0));
-          int row = int(floor(clamp(1.0 - vUv.y, 0.0, 0.999) * 5.0));
+          int col = int(floor(clamp(vUv.x, 0.0, 0.999) * 5.0));
+          int row = int(floor(clamp(1.0 - vUv.y, 0.0, 0.999) * 7.0));
           /*
            * 取第 (row * 3 + col) 位。GLSL ES 1.0 没有整数位运算，
            * 用 floor(v / 2^k) 的奇偶性代替 —— 这是这类点阵字形的标准写法。
@@ -242,8 +273,10 @@ export class FluidityField {
            * 最低位落到最左列 —— 整个字形水平镜像。
            * 对称的 0 和 8 看着正常，2、5、7 全反了，低分辨率下极难发现。
            */
-          float bit = float(row * 3 + (2 - col));
-          float v = floor(vGlyph / pow(2.0, bit));
+          // 前 4 行在 A，后 3 行在 B —— 35 位放不进一个 float32
+          float packed = row < 4 ? vGA : vGB;
+          float bit = float((row < 4 ? row : row - 4) * 5 + col);
+          float v = floor(packed / pow(2.0, bit));
           if (mod(v, 2.0) < 0.5) discard;
           gl_FragColor = vec4(uColor, vA * uOpacity);
         }`,
@@ -393,6 +426,18 @@ export class FluidityField {
       this.bSize[bi * 2] = Math.round(w);
       this.bSize[bi * 2 + 1] = Math.round(hgt);
       this.bAlp[bi] = 1;
+      /*
+       * 一部分框填实。参考素材里散着几个实心的白色小方块 ——
+       * 全描边的话画面太均质，实心的那几个是节奏上的重音。
+       *
+       * 只挑**中小号**的填（0.45~1.3 倍均值）：
+       *   - 大框填实会糊掉半个身子
+       *   - 最小的那批填实只是几个像素点，看不出是方块 ——
+       *     第一版写的是「小于均值」，结果全落在最小的那批上
+       */
+      const mean = p.boxSize * sw;
+      const fillable = w > mean * 0.45 && w < mean * 1.3;
+      this.bFill[bi] = fillable && hash1(i * 5171 + f * 37, p.seed) < p.fillRatio ? 1 : 0;
       centers.push({ x: cx, y: cy });
 
       /*
@@ -415,21 +460,24 @@ export class FluidityField {
       /*
        * 字号**吸附到 5 的整数倍**，位置也吸附到整像素。
        *
-       * 3×5 的点阵，字高不是 5 的倍数时每个格子占 1.8 个像素 ——
+       * 5×7 的点阵，字高不是 7 的倍数时每行占不满整数个像素 ——
        * 格线落在半个像素上，笔画粗细不匀、边上泛色。纯白本身没问题
        * （实测最亮像素就是 255,255,255），糊的是**边缘的采样**。
        * 像素风的字必须落在整像素上，这是这类字体的基本要求。
        */
-      const ds = Math.max(10, Math.round((sw * 0.05) / 5) * 5);
+      // 5×7 的字：高度要吸到 **7** 的倍数，每行才正好占整数个像素。
+      // 换字形时忘了改这个数的话，格线又会落回半像素上（笔画粗细不匀、边上泛色）
+      const ds = Math.max(14, Math.round((sw * 0.055) / 7) * 7);
       const snap = (v: number) => Math.round(v);
       const num = Math.floor(hash1(i * 7919 + f * 13, p.seed) * Math.pow(10, p.digits));
       for (let k = 0; k < p.digits && di < this.maxBoxes * p.digits; k++) {
         const digit = Math.floor(num / Math.pow(10, p.digits - 1 - k)) % 10;
         // 每个数字的宽度也吸到 3 的倍数，字距用整数，不然列宽还是会不匀
-        this.dPos[di * 2] = snap(cx - w / 2) + Math.round(ds * 0.72) * k;
+        this.dPos[di * 2] = snap(cx - w / 2) + Math.round((ds * 5) / 7 + 1) * k;
         this.dPos[di * 2 + 1] = snap(cy + hgt / 2 + ds * 0.7);
         this.dSize[di] = ds;
-        this.dGlyph[di] = GLYPHS[digit];
+        this.dGlyphA[di] = GLYPH_A[digit];
+        this.dGlyphB[di] = GLYPH_B[digit];
         this.dAlp[di] = 1;
         di++;
       }
