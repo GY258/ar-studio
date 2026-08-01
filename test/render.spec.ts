@@ -1050,6 +1050,45 @@ test("泡泡：一开场就满屏、在动、指尖真的能戳破", async () =>
    */
   expect(trail[trail.length - 1], `跑够久该只剩边角上碰不到的几个（${trail.join(" → ")}）`).toBeLessThan(8);
 
+  /*
+   * --- 泡泡再小也要戳得中 ---
+   *
+   * 泡泡半径是 size × **画布宽度**，而手机竖屏的宽度是短边（约 390~780），
+   * 桌面横屏是长边（1280+）—— 同一份参数在手机上泡泡小 2~4 倍，
+   * 只按泡泡半径算容差的话就成了「怎么戳都不破」，Gary 在手机上就是这个现象。
+   * 现在容差取「泡泡半径 × popRadius」和「掌宽 × 0.28」中大的那个。
+   *
+   * 这里把 size 压到很小来模拟那个处境：如果容差还跟着泡泡缩，这条会红。
+   */
+  const tiny = path.join(ARTIFACTS, "__bubbles-tiny.json");
+  const rawTiny = JSON.parse(fs.readFileSync(tpl, "utf8"));
+  // 压到 schema 允许的最小半径：960 宽的画布上只有 ~5px，
+  // 只按泡泡半径算的话容差不到 6px，指尖抖一下就错过
+  rawTiny.elements[0].asset.size = [0.005, 0.006];
+  fs.writeFileSync(tiny, JSON.stringify(rawTiny));
+  await loadTemplate(harness.page, tiny, "hands");
+  await capture(harness.page, 0);
+  const tinyBefore = await alive();
+  await capture(harness.page, 3.0);
+  const tinyAfter = await alive();
+  /*
+   * 判据是「小泡泡被戳破的数量**接近**常规尺寸」，不是「大于 0」。
+   *
+   * 「大于 0」抓不到问题：fixture 里那只手在 3 秒里机会太多，
+   * 哪怕容差只有 6px 也总能碰中两个 —— 我第一版就是这么写的，突变照样绿。
+   * 实测：有下限时小泡泡戳破 22 个，没下限时只有 2 个，常规尺寸两种情况都是 25。
+   * 所以比值是这里唯一有区分度的量。
+   */
+  const tinyPopped = tinyBefore - tinyAfter;
+  const normalPopped = noHands - withHands;
+  expect(
+    tinyPopped / Math.max(1, normalPopped),
+    `小泡泡被戳破的数量该接近常规尺寸（小 ${tinyPopped} / 常规 ${normalPopped}）`,
+  ).toBeGreaterThan(0.5);
+
+  await loadTemplate(harness.page, tpl, "hands");
+  await capture(harness.page, 3.0);
+
   // 同一个 t 再来一次：戳破是仅有的可变状态，它必须可回放
   await capture(harness.page, 3.0);
   const again = await capture(harness.page, 3.0);
