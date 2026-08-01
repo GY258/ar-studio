@@ -202,6 +202,35 @@ async function checkMobile(browser: Browser, baseUrl: string, slug: string): Pro
     }
 
     /*
+     * 摄像头**不能一直重开**。
+     *
+     * 真踩过：我在 resize 里加了「方向和视口对不上就重开摄像头」，
+     * 而设备只给横向流时这个条件**永远成立** —— 每次 resize 都重开，
+     * 而 startCamera 末尾又调 resize，于是无限循环。
+     * 表现是画面乱跳、切前后置的请求被正在飞的重开覆盖掉（「按了没反应」）。
+     *
+     * 这里的假摄像头是横向的、模拟视口是竖屏，正好是那个组合 ——
+     * 等一会儿看 getUserMedia 的调用次数还涨不涨就抓得到。
+     * 「重试」必须有终点，否则它就是个循环。
+     */
+    const n1 = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum.length)) as number;
+    /*
+     * 手动发几次 resize。
+     *
+     * headless 里视口是固定的，resize 事件不会自己发 —— 而真机上它非常频繁
+     * （滚动时地址栏收起、软键盘、转屏都会触发）。不主动发的话这条断言是空的：
+     * 我第一版就没发，突变（去掉重试的终点）照样绿。
+     */
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+      await page.waitForTimeout(800);
+    }
+    const n2 = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum.length)) as number;
+    if (n2 > n1) {
+      problems.push(`摄像头在反复重开（3 秒里又开了 ${n2 - n1} 次）—— 方向对不上时的重试没有终点`);
+    }
+
+    /*
      * 竖屏必须请求竖向流。
      *
      * 断言的是**请求里带了方向信息**，不是拿到了什么 —— 假摄像头强制流的尺寸，

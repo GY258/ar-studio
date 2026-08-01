@@ -133,6 +133,15 @@ export class ArEngine {
   /** 正在重开摄像头。防止 resize 连续触发时叠着开好几路流 */
   private reopening = false;
   /**
+   * 这台设备**能不能**给出和视口方向一致的流。
+   *
+   * 三档都试完还对不上就置 false，之后转屏也不再重开 —— 这是一个真的踩过的
+   * 死循环：方向永远对不上 → 每次 resize 都重开 → startCamera 末尾又调 resize
+   * → 无限重开。表现是画面乱跳、切前后置的请求被正在飞的重开覆盖掉，
+   * 「按了没反应」。**「重试」必须有终点**，否则它就是个循环。
+   */
+  private canMatchOrientation = true;
+  /**
    * 数字缩放倍率。1 = 原始取景。
    *
    * 为什么自己做而不是用摄像头的硬件变焦：`track.getCapabilities().zoom`
@@ -346,6 +355,7 @@ export class ArEngine {
      * 不用 exact：拿不到就抛异常，整个页面开不了摄像头 —— 而「方向不对但能用」
      * 比「什么都没有」好得多。所以是**尽力而为 + 兜底**，最后一档一定会成功。
      */
+    let matched = false;
     for (const strategy of ["auto", "aspect", "explicit"] as const) {
       try {
         const s = await this.openStream(facing, deviceId, strategy, portraitView);
@@ -354,12 +364,25 @@ export class ArEngine {
         tried.push(`${strategy}:${st?.width}x${st?.height}`);
         if (stream) stream.getTracks().forEach((t) => t.stop());
         stream = s;
-        if (portraitStream === portraitView) break;
+        if (portraitStream === portraitView) {
+          matched = true;
+          break;
+        }
       } catch {
         tried.push(`${strategy}:失败`);
       }
     }
     if (!stream) throw new Error("开不了摄像头");
+    this.canMatchOrientation = matched;
+
+    /*
+     * 设备给不了对得上的方向时，**默认缩到 0.5**。
+     *
+     * 16:9 横向流塞进 9:16 竖屏，cover 只显示宽度的 26% —— 一上来就是大特写。
+     * 缩到 0.5 能看到接近两倍宽的场景（代价是上下黑边），这是这种设备上
+     * 唯一合理的默认取景。用户仍然可以点回 1×。
+     */
+    if (!matched && this.zoom === 1) this.setZoom(0.5);
 
     this.video.srcObject = stream;
     await this.video.play();
@@ -936,7 +959,7 @@ export class ArEngine {
      * 软键盘弹出时都会触发，每次都重开摄像头会闪成一片。
      * reopening 这个锁是必须的，否则连续 resize 会叠着开好几路流。
      */
-    if (this.video && !this.reopening) {
+    if (this.video && !this.reopening && this.canMatchOrientation) {
       const vw = this.video.videoWidth;
       const vh = this.video.videoHeight;
       const r = canvas.getBoundingClientRect();
