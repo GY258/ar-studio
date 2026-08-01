@@ -27,6 +27,7 @@ import {
   capture,
   templatePeriod,
   captureDirect,
+  setControl,
   type FixtureName,
   type Harness,
 } from "../scripts/harness-driver";
@@ -730,6 +731,63 @@ test("轨迹：状态层确定，且带真的在长", async () => {
   // 再来一次同一个 t。走的是「时间倒流 → 清状态 → 重新按定步长积到 2.4」
   const again = await capture(harness.page, 2.7);
   expect(again.equals(lateBuf), "同一个 t 渲染两次必须逐位相同，否则状态没清干净或步长不定").toBe(true);
+});
+
+test("滑块对非 particle 模板真的有用", async () => {
+  /*
+   * 这条堵的是又一个**静默失效**：`controls` 原来只在 particle 模板的分支里
+   * 被 resolveControls 消费，overlay / facetrack 模板写了 controls ——
+   * 能过校验、面板上画得出滑块、拖了什么都不发生、也不报错。
+   * 和当初的 blur、hands、posterize 是同一类。
+   *
+   * 断言必须**拨完之后看东西真的变了**。只断言「setControls 不抛异常」的话，
+   * 什么都没接上的实现照样能过。
+   */
+  const tpl = path.join(TEMPLATES, "fluidity.json");
+  const boxes = () =>
+    harness.page.evaluate(
+      () =>
+        (window as unknown as { harness: { engine: { debugStats(): { fluidityBoxes: number } } } }).harness.engine
+          .debugStats().fluidityBoxes,
+    );
+
+  // baseFrame 会**换模板**（装一个空的去拍底图），所以必须先取、再把待测模板装回来。
+  // 中途调它的话后面全在拿空模板做断言 —— 第一版就是这么翻的车，覆盖率直接 0
+  await loadTemplate(harness.page, tpl, "body");
+  const base = await baseFrame("body");
+  await loadTemplate(harness.page, tpl, "body");
+
+  await capture(harness.page, 0);
+  const before = await boxes();
+
+  // intensity 是离散四档，绑在 element.fluidity.density 上
+  await setControl(harness.page, "intensity", 0.85);
+  await capture(harness.page, 0);
+  const after = await boxes();
+  expect(after, `拨到「爆」档框该变多（${before} → ${after}）`).toBeGreaterThan(before);
+
+  await setControl(harness.page, "intensity", 0.12);
+  await capture(harness.page, 0);
+  expect(await boxes(), "拨回「轻」档框该变少").toBeLessThan(after);
+
+  /*
+   * 连续滑块也要真的作用：把框调大，画面覆盖率该涨。
+   *
+   * 先把编号关掉（labels → 0）再量。覆盖率里混着线和编号，它们不随 boxSize 变，
+   * 会把信号稀释到 1.36 —— 那时候不该去调阈值迁就它，该把噪声去掉。
+   * 顺带这也验了 labels 那个滑块是接上的：关掉之后覆盖率必须先掉一截。
+   */
+  await setControl(harness.page, "intensity", 0.85);
+  const withLabels = coverage(decode(await capture(harness.page, 0)), base);
+  await setControl(harness.page, "labels", 0);
+  const small = coverage(decode(await capture(harness.page, 0)), base);
+  expect(small, `关掉编号覆盖率该掉一截（${withLabels.toFixed(4)} → ${small.toFixed(4)}）`).toBeLessThan(
+    withLabels * 0.92,
+  );
+
+  await setControl(harness.page, "boxSize", 0.35);
+  const big = coverage(decode(await capture(harness.page, 0)), base);
+  expect(big / small, `把框调大覆盖率该涨（${small.toFixed(4)} → ${big.toFixed(4)}）`).toBeGreaterThan(1.5);
 });
 
 test("Fluidity：框挂在全身关节上，密度跟着姿态爆发", async () => {

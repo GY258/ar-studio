@@ -50,7 +50,15 @@ export type SubstanceKnob =
   | "spread"
   | "splash";
 
-export type ControlTarget = "rate" | "wind" | "stick" | `substance.${SubstanceKnob}`;
+/**
+ * 滑块绑到哪。
+ *
+ * `element.<元素 id>.<参数名>` 让 overlay / facetrack 模板的元素参数也能上滑块 ——
+ * 在这之前 `controls` 对非 particle 模板是**静默失效**的：写了能过校验、
+ * 面板上也会画出滑块，拖了什么都不发生，而且不报错。
+ * 能挂的参数名见 engine/tunables.ts。
+ */
+export type ControlTarget = "rate" | "wind" | "stick" | `substance.${SubstanceKnob}` | `element.${string}.${string}`;
 
 export interface Control {
   key: string;
@@ -61,6 +69,14 @@ export interface Control {
   step?: number;
   target?: ControlTarget;
   mode?: "absolute" | "scale";
+  /**
+   * 离散档位。给了就渲染成一排按钮而不是滑块。
+   *
+   * 「强度四档」这种诉求用连续滑块表达不了 —— 用户要的是「选一个预设」，
+   * 不是「在 0~100 之间找一个数」。min/max/default 仍然要写，
+   * default 必须是某一档的 value。
+   */
+  options?: { label: LocalizedText; value: number }[];
 }
 
 export type Perception = "segmentation" | "face" | "hands" | "pose";

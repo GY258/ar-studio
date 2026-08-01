@@ -370,6 +370,36 @@ jitter?: {
 
 写 `lower_eyelid`，不是 `lower_eyelid_left`。
 
+## controls —— 给用户拖的滑块
+
+particle 模板绑 `substance.*` 和三个内置旋钮；**overlay / facetrack 模板绑元素参数**：
+
+```jsonc
+"controls": [
+  { "key": "intensity", "label": { "zh": "强度", "en": "Intensity" },
+    "min": 0.1, "max": 0.85, "default": 0.3,
+    "target": "element.fluidity.density",
+    "options": [                                  // 给了 options 就渲染成一排按钮
+      { "label": { "zh": "轻" }, "value": 0.12 },
+      { "label": { "zh": "中" }, "value": 0.3 },
+      { "label": { "zh": "强" }, "value": 0.55 },
+      { "label": { "zh": "爆" }, "value": 0.85 } ] },
+  { "key": "boxSize", "label": { "zh": "框大小" },
+    "min": 0.05, "max": 0.4, "step": 0.01, "default": 0.13,
+    "target": "element.fluidity.boxSize" }
+]
+```
+
+- `target` 是 `element.<元素 id>.<参数名>`。能挂哪些参数由 `engine/tunables.ts`
+  这张表决定 —— 没列进来的多半是**改了要重建 mesh** 的（容量、编号位数这类），
+  拖一下滑块就重建一次几何，手感和开销都不对
+- 每个元素都有 `opacity`，任何 asset 都能挂
+- `options` 给离散档位。「强度四档」这种诉求用连续滑块表达不了 ——
+  用户要的是选一个预设，不是在 0~100 之间找一个数。`default` 必须正好是某一档的 value
+
+⚠️ 在这之前 `controls` 对非 particle 模板是**静默失效**的：写了能过校验、
+面板上画得出滑块、拖了什么都不发生、也不报错。现在引擎会分发，校验器会拦。
+
 ## 帧效果 source
 
 和 `elements` 平级。元素是「画在上面的东西」，source 是「源视频怎么被画出来」，两回事。

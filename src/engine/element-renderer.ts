@@ -775,6 +775,18 @@ export class ElementRenderer {
     return n;
   }
 
+  /**
+   * 滑块改某个元素的 asset 参数。找不到元素或那个 asset 不支持就静默忽略 ——
+   * 校验器已经在装载前拦过一遍了（见 tunables.ts），这里再报错也没人看。
+   */
+  setElementParam(elementId: string, param: string, value: number) {
+    for (const it of this.items) {
+      if (it.elem.id !== elementId) continue;
+      it.fluidity?.setParam(param, value);
+      it.bubbles?.setParam(param, value);
+    }
+  }
+
   /** 最低那个 fluidity 框的归一化 y。测试用来断言框铺到了腿和脚上 */
   fluidityLowestY(): number {
     let y = 0;

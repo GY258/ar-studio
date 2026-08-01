@@ -272,6 +272,20 @@ export class FluidityField {
     this.H = h;
   }
 
+  /**
+   * 滑块实时改一个参数。名单见 tunables.ts —— 只收**不需要重建 mesh** 的那些。
+   * 颜色和不透明度直接写 uniform，其余下一帧读 params 就生效。
+   */
+  setParam(name: string, value: number) {
+    if (name === "opacity") {
+      (this.boxMesh.material as THREE.ShaderMaterial).uniforms.uOpacity.value = value;
+      (this.digitMesh.material as THREE.ShaderMaterial).uniforms.uOpacity.value = value;
+      (this.lineSeg.material as THREE.LineBasicMaterial).opacity = value;
+      return;
+    }
+    (this.params as unknown as Record<string, number>)[name] = value;
+  }
+
   /** 这一帧画了几个框。测试靠它断言「舒展时炸开、收拢时骤减」 */
   private lastBoxCount = 0;
   /** 最低那个框的归一化 y（0 = 画面顶，1 = 画面底） */

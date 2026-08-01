@@ -4,6 +4,7 @@ import { FACE_ANCHORS, ANCHOR_PAIRS } from "@/engine/anchors";
 import { HAND_ANCHORS } from "@/engine/hand-anchors";
 import { listSvgKeys } from "@/engine/svg-assets";
 import { IMPLEMENTED_EFFECTS } from "@/engine/source-effects";
+import { TUNABLE_PARAMS, parseElementTarget } from "@/engine/tunables";
 import { sanitizeSvg } from "@/engine/svg-sanitize";
 import { migrateElements } from "./migrate";
 
@@ -56,6 +57,7 @@ export function validateTemplate(raw: Raw): string[] {
   if (templateType === "overlay" || templateType === "facetrack") {
     validateElementSection(raw, templateType, p);
     validateSource(raw, p);
+    validateElementControls(raw, p);
     return p;
   }
 
@@ -136,7 +138,7 @@ export function validateTemplate(raw: Raw): string[] {
       if (target !== undefined) {
         const builtin = ["rate", "wind", "stick"].includes(target);
         const sub = target.startsWith("substance.") && KNOBS.includes(target.slice(10));
-        if (!builtin && !sub) p.push(`${at}.target "${target}" 无效`);
+        if (!builtin && !sub && !parseElementTarget(target)) p.push(`${at}.target "${target}" 无效`);
       } else if (!["rate", "wind", "stick"].includes(c.key)) {
         p.push(`${at} 的 key "${c.key}" 不是内置语义，必须显式声明 target`);
       }
@@ -144,6 +146,86 @@ export function validateTemplate(raw: Raw): string[] {
   }
 
   return p;
+}
+
+/**
+ * 非 particle 模板的 controls。
+ *
+ * 在这之前这一段**完全没校验**，而引擎那边也不认 —— 写了 controls 能过校验、
+ * 面板上画得出滑块、拖了什么都不发生、也不报错。和当初的 blur、hands 一模一样。
+ * 现在两件事一起补上：引擎会分发，校验器会拦。
+ */
+function validateElementControls(raw: Raw, p: string[]) {
+  const cs = raw.controls;
+  if (cs === undefined) return;
+  if (!Array.isArray(cs)) {
+    p.push("controls 必须是数组");
+    return;
+  }
+  // 元素 id → asset.kind，用来查这个参数在那种 asset 上存不存在
+  const kinds = new Map<string, string>();
+  for (const e of (raw.elements as Raw[]) ?? []) {
+    const a = e?.asset as Raw | undefined;
+    if (typeof e?.id === "string" && typeof a?.kind === "string") kinds.set(e.id, a.kind);
+  }
+
+  for (const [i, c0] of cs.entries()) {
+    const c = c0 as Raw;
+    const at = `controls[${i}]`;
+    if (typeof c.key !== "string" || !c.key) {
+      p.push(`${at}.key 必填`);
+      continue;
+    }
+    const lb = c.label as Raw | undefined;
+    if (!lb || typeof lb.zh !== "string") p.push(`${at}.label.zh 必填`);
+    if (!num(c.min) || !num(c.max) || !num(c.default)) {
+      p.push(`${at} 的 min / max / default 都得是数字`);
+    } else if ((c.min as number) >= (c.max as number)) {
+      p.push(`${at}.min 必须小于 max`);
+    }
+
+    const target = c.target;
+    if (typeof target !== "string") {
+      p.push(`${at}.target 必填，形如 "element.<元素 id>.<参数名>"`);
+      continue;
+    }
+    const et = parseElementTarget(target);
+    if (!et) {
+      p.push(`${at}.target "${target}" 无效。非 particle 模板只能绑元素参数：\"element.<元素 id>.<参数名>\"`);
+      continue;
+    }
+    const kind = kinds.get(et.elementId);
+    if (!kind) {
+      p.push(`${at}.target 指向的元素 "${et.elementId}" 不存在。现有的：${[...kinds.keys()].join(", ") || "（无）"}`);
+      continue;
+    }
+    const allowed = TUNABLE_PARAMS[kind];
+    if (!allowed) {
+      p.push(`${at}.target 指向的元素是 ${kind}，这种 asset 没有可实时调的参数`);
+    } else if (!allowed.includes(et.param) && et.param !== "opacity") {
+      p.push(
+        `${at}.target 的参数 "${et.param}" 不能实时调。${kind} 可调的有：${allowed.join(", ")}。` +
+          `没列进来的多半是改了要重建 mesh 的（容量、位数这类），走 JSON 不走滑块`,
+      );
+    }
+
+    if (c.options !== undefined) {
+      const opts = c.options as Raw[];
+      if (!Array.isArray(opts) || opts.length < 2) {
+        p.push(`${at}.options 至少要两档，形如 [{ "label": { "zh": "轻" }, "value": 0.2 }, ...]`);
+      } else {
+        const vals = opts.map((o) => o?.value);
+        for (const [j, o] of opts.entries()) {
+          const ol = o?.label as Raw | undefined;
+          if (!ol || typeof ol.zh !== "string") p.push(`${at}.options[${j}].label.zh 必填`);
+          if (!num(o?.value)) p.push(`${at}.options[${j}].value 必须是数字`);
+        }
+        if (num(c.default) && !vals.includes(c.default)) {
+          p.push(`${at}.default 必须正好是某一档的 value —— 离散控件没有「中间值」`);
+        }
+      }
+    }
+  }
 }
 
 export function checkWiring(cfg: TemplateConfig): string[] {

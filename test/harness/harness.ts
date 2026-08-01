@@ -136,6 +136,15 @@ class Harness {
   }
 
   /**
+   * 拨一个滑块。测试用来验「controls 真的接上了」——
+   * 这个洞的性质是「拖了没反应而且不报错」，只有把值推进去再看画面变没变才抓得到。
+   */
+  setControl(key: string, value: number) {
+    if (!this.engine) throw new Error("先调 setup()");
+    this.engine.setControls({ [key]: value });
+  }
+
+  /**
    * 直接渲染 t 时刻，**不**按定步长积过去。
    *
    * 只给「证明某个机制是纯函数」用：茎的长度由当前帧的手指弯曲度决定，

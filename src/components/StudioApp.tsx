@@ -374,6 +374,29 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
         {config?.controls.map((c) => (
           <label key={c.key} className="flex items-center gap-2 text-[13px] text-muted">
             {t(c.label)}
+            {/*
+              离散档位渲染成一排按钮，不是滑块。
+              「强度四档」这种诉求用连续滑块表达不了 —— 用户要的是选一个预设，
+              不是在 0~100 之间找一个数。
+            */}
+            {c.options ? (
+              <span className="flex gap-1">
+                {c.options.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => setValue(c.key, o.value)}
+                    className={`rounded-full px-2.5 py-1 text-[12px] border transition-colors ${
+                      (values[c.key] ?? c.default) === o.value
+                        ? "border-fg bg-fg text-bg"
+                        : "border-line text-muted hover:text-fg"
+                    }`}
+                  >
+                    {t(o.label)}
+                  </button>
+                ))}
+              </span>
+            ) : (
             <input
               type="range"
               min={c.min}
@@ -383,9 +406,12 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
               onChange={(e) => setValue(c.key, Number(e.target.value))}
               className="w-24"
             />
-            <span className="min-w-[30px] text-right font-mono text-[11px] text-fg">
-              {values[c.key] ?? c.default}
-            </span>
+            )}
+            {!c.options && (
+              <span className="min-w-[30px] text-right font-mono text-[11px] text-fg">
+                {values[c.key] ?? c.default}
+              </span>
+            )}
           </label>
         ))}
         <span className="h-6 w-px bg-line" />
@@ -517,18 +543,39 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
             {config?.controls.map((c) => (
               <label key={c.key} className="flex items-center gap-3 text-[14px] text-muted">
                 <span className="w-16 shrink-0">{t(c.label)}</span>
-                <input
-                  type="range"
-                  min={c.min}
-                  max={c.max}
-                  step={c.step ?? 1}
-                  value={values[c.key] ?? c.default}
-                  onChange={(e) => setValue(c.key, Number(e.target.value))}
-                  className="flex-1"
-                />
-                <span className="w-10 text-right font-mono text-[12px] text-fg">
-                  {values[c.key] ?? c.default}
-                </span>
+                {c.options ? (
+                  <span className="flex flex-1 gap-1.5">
+                    {c.options.map((o) => (
+                      <button
+                        key={o.value}
+                        type="button"
+                        onClick={() => setValue(c.key, o.value)}
+                        className={`flex-1 rounded-full px-2 py-1.5 text-[12px] border transition-colors ${
+                          (values[c.key] ?? c.default) === o.value
+                            ? "border-fg bg-fg text-bg"
+                            : "border-line text-muted"
+                        }`}
+                      >
+                        {t(o.label)}
+                      </button>
+                    ))}
+                  </span>
+                ) : (
+                  <>
+                    <input
+                      type="range"
+                      min={c.min}
+                      max={c.max}
+                      step={c.step ?? 1}
+                      value={values[c.key] ?? c.default}
+                      onChange={(e) => setValue(c.key, Number(e.target.value))}
+                      className="flex-1"
+                    />
+                    <span className="w-10 text-right font-mono text-[12px] text-fg">
+                      {values[c.key] ?? c.default}
+                    </span>
+                  </>
+                )}
               </label>
             ))}
           </div>

@@ -18,6 +18,7 @@ import { HandTracker, MediaPipeHandProvider, type HandLandmarkProvider } from ".
 import { PoseTracker, MediaPipePoseProvider, type PoseLandmarkProvider } from "./pose-tracker";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
+import { parseElementTarget } from "./tunables";
 import { EFFECT_COMBINE, EFFECT_SNIPPETS } from "./source-effects";
 import type { ControlValues, TemplateConfig, TemplateType } from "./types";
 
@@ -347,6 +348,10 @@ export class ArEngine {
     if (this.perception.includes("pose")) {
       this.loadPose().catch((e) => this.onError?.(e as Error));
     }
+
+    // 元素刚建好，把当前滑块值推一遍。不推的话滑块显示的是 default，
+    // 而元素用的是 JSON 里的初值 —— 两者不一致时要拖一下才「对上」
+    this.elements.ready().then(() => this.setControls(this.controls));
   }
 
   private setupSourceEffect(source?: import("./types").SourceEffect) {
@@ -577,6 +582,19 @@ export class ArEngine {
   /** 切模板不丢已调好的参数：调用方只覆盖新模板有的 key（PRD 4.2 非功能要求）。 */
   setControls(values: ControlValues) {
     this.controls = { ...this.controls, ...values };
+    /*
+     * 元素参数的滑块在这里分发。
+     *
+     * particle 那条线是每帧在渲染循环里 resolveControls 一次，而元素参数
+     * 没必要每帧解算 —— 拖动时才变，直接推到对应的 field 上就行。
+     * 顺带这也是 `controls` 对非 particle 模板从「静默失效」变成真的有用的那一步。
+     */
+    for (const c of this.cfg?.controls ?? []) {
+      const v = values[c.key];
+      if (typeof v !== "number" || !c.target) continue;
+      const et = parseElementTarget(c.target);
+      if (et) this.elements.setElementParam(et.elementId, et.param, v);
+    }
   }
 
   setEmitterPos(x: number, y: number) {
