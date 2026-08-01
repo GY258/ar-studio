@@ -142,6 +142,8 @@ export class FluidityField {
 
   private W = 1280;
   private H = 720;
+  /** 画面是不是镜像的。前置摄像头是，后置不是 —— 见 element-renderer 的 nx2wx */
+  private mirror = true;
   /**
    * 检测相位。**不是 floor(t * rate)**。
    *
@@ -321,6 +323,10 @@ export class FluidityField {
     this.H = h;
   }
 
+  setMirror(m: boolean) {
+    this.mirror = m;
+  }
+
   /**
    * 滑块实时改一个参数。名单见 tunables.ts —— 只收**不需要重建 mesh** 的那些。
    * 颜色和不透明度直接写 uniform，其余下一帧读 params 就生效。
@@ -441,8 +447,8 @@ export class FluidityField {
       if (!lm) continue;
 
       const h = (k: number) => hash1(i * 613 + f * 101 + k, p.seed);
-      // 和背景平面、人脸、手部守同一个镜像约定：0.5 - x
-      const cx = (0.5 - lm.x) * this.W + (h(1) - 0.5) * p.jitter * sw;
+      // 镜像与否唯一的换算，和 element-renderer 的 nx2wx 守同一条规则
+      const cx = (this.mirror ? 0.5 - lm.x : lm.x - 0.5) * this.W + (h(1) - 0.5) * p.jitter * sw;
       const cy = (0.5 - lm.y) * this.H + (h(2) - 0.5) * p.jitter * sw;
       /*
        * 尺寸：给「平均大小」和「差异程度」两个旋钮，不给 min/max。

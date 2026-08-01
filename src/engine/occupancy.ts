@@ -10,6 +10,13 @@ export const GW = 112;
 export const GH = 63;
 
 export class OccupancyField {
+  /** 画面是不是镜像的。前置是，后置不是 —— 见 element-renderer 的 nx2wx */
+  private mirror = true;
+
+  setMirror(m: boolean) {
+    this.mirror = m;
+  }
+
   readonly grid = new Float32Array(GW * GH); // 时间平滑后的占据度 0~1
   private readonly raw = new Float32Array(GW * GH);
   private readonly tmp = new Float32Array(GW * GH);
@@ -79,7 +86,7 @@ export class OccupancyField {
    * 改一个就得改另一个，否则人和特效会反向。
    */
   at(wx: number, wy: number): number {
-    const u = 0.5 - wx / this.w;
+    const u = this.mirror ? 0.5 - wx / this.w : wx / this.w + 0.5;
     const v = 0.5 - wy / this.h;
     if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
     const gx = u * (GW - 1);

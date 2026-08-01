@@ -95,6 +95,8 @@ export class ArEngine {
   /** 丢人兜底策略，来自 source.mask.onLost */
   private onLost: "clear" | "hold" | "full" = "clear";
   private applyOutside = true;
+  /** 画面是不是镜像的。前置摄像头是（自拍看着才自然），后置不是 */
+  private mirrored = true;
   /** source.effect.blocks，短边格数。resize 时要按新比例重算长边格数 */
   private blocks = 0;
   /** source.effect.radius，归一化到长边。resize 时要按新比例重算 uv 步长 */
@@ -226,23 +228,55 @@ export class ArEngine {
   }
 
   /** 不强制比例，让摄像头用原生分辨率，cover 模式负责显示裁剪。 */
-  async startCamera(deviceId?: string): Promise<void> {
+  /**
+   * 开摄像头。
+   *
+   * facing 决定用前置还是后置，**同时决定画面镜不镜像**：
+   * 前置自拍不镜像的话抬左手看着是右手动，人立刻别扭；
+   * 后置拍别人镜像了则整个世界左右反了。
+   *
+   * 镜像这一位会一路传到元素定位、占据场、泡泡折射 ——
+   * 漏掉任何一处的表现都是「贴在了镜像的位置上」，而且**只有换到后置才看得出来**。
+   * 所以这里只设一个 setMirrored，具体换算集中在各自的一个函数里。
+   */
+  async startCamera(facing: "user" | "environment" = "user", deviceId?: string): Promise<void> {
     if (!this.video) throw new Error("startCamera 需要一个 video 元素；离线模式请用 setSource()");
     this.degraded = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
+    this.stopCamera();
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: this.degraded ? 1280 : 1920 },
         height: { ideal: this.degraded ? 960 : 1080 },
-        facingMode: "user",
+        facingMode: facing,
         ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
       },
       audio: false,
     });
+    this.setMirrored(facing === "user");
     this.video.srcObject = stream;
     await this.video.play();
     // videoWidth/videoHeight 在 play 后才可靠，再 resize 一次确保 cover 比例正确
     this.video.addEventListener("loadedmetadata", () => this.resize(), { once: true });
     this.resize();
+  }
+
+  /** 关掉当前的摄像头轨道。切前后置时必须先关，否则有的手机拿不到第二个流 */
+  private stopCamera() {
+    const st = this.video?.srcObject as MediaStream | null;
+    st?.getTracks().forEach((t) => t.stop());
+    if (this.video) this.video.srcObject = null;
+  }
+
+  /** 画面是不是镜像的。只有 startCamera 该调它 —— 它和摄像头朝向是一回事 */
+  setMirrored(m: boolean) {
+    this.mirrored = m;
+    this.elements.setMirror(m);
+    this.field.setMirror(m);
+    this.resize();
+  }
+
+  isMirrored(): boolean {
+    return this.mirrored;
   }
 
   start() {
@@ -769,7 +803,7 @@ export class ArEngine {
       bgH = this.W / vidAspect;
     }
     // 镜像和占据场的 u 映射是一对，改一个就得改另一个
-    this.bg.scale.set(-bgW, bgH, 1);
+    this.bg.scale.set(this.mirrored ? -bgW : bgW, bgH, 1);
     // 占据场要用 cover 后的尺寸，不是 viewport 尺寸。
     // 分割遮罩覆盖整个视频帧，视频通过 cover 显示在 bgW×bgH 的区域内，
     // 粒子碰撞要对齐这个实际显示区域。

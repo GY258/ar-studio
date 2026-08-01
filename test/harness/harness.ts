@@ -135,6 +135,12 @@ class Harness {
     this.engine.stepTo(t);
   }
 
+  /** 切镜像（等价于换前后置摄像头）。给「镜像约定」那条断言用 */
+  setMirrored(m: boolean) {
+    if (!this.engine) throw new Error("先调 setup()");
+    this.engine.setMirrored(m);
+  }
+
   /**
    * 拨一个滑块。测试用来验「controls 真的接上了」——
    * 这个洞的性质是「拖了没反应而且不报错」，只有把值推进去再看画面变没变才抓得到。

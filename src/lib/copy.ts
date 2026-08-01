@@ -51,6 +51,7 @@ export const COPY = {
     retry: "Try again",
     dragHint: "Drag anywhere to move the prop",
     micLabel: "Record audio",
+    flipCamera: "Flip camera",
     record: "Record",
     stop: "Stop",
     tracking: "Person locked",

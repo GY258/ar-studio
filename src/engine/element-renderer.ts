@@ -100,6 +100,15 @@ export class ElementRenderer {
    * 而那正是想要的效果，不需要读回帧缓冲。
    */
   private sourceTex: THREE.Texture | null = null;
+  /**
+   * 画面是不是镜像的。前置摄像头是（自拍看着才自然），后置不是。
+   *
+   * **这是这个仓库踩过三次的坑**，所以集中成一个函数：归一化 x → 世界 x
+   * 全部走 nx2wx()，任何一处直接写 `0.5 - x` 都是新的 bug 源。
+   * 漏掉一处的表现是「元素贴在了镜像的位置上」—— 画面里人在左边，
+   * 框却扣在右边，而且只有换到后置摄像头才看得出来。
+   */
+  private mirror = true;
 
   constructor(scene: THREE.Scene) {
     this.group.renderOrder = 5;
@@ -112,6 +121,24 @@ export class ElementRenderer {
     for (const it of this.items) {
       it.bubbles?.setViewport(w, h);
       it.fluidity?.setViewport(w, h);
+    }
+  }
+
+  /** 归一化 x（0 在画面左）→ 世界 x。镜像与否唯一的换算入口 */
+  private nx2wx(nx: number): number {
+    return (this.mirror ? 0.5 - nx : nx - 0.5) * this.W;
+  }
+
+  /** 归一化 y → 世界 y。y 从不镜像，单独一个函数只是为了成对读着清楚 */
+  private ny2wy(ny: number): number {
+    return (0.5 - ny) * this.H;
+  }
+
+  setMirror(m: boolean) {
+    this.mirror = m;
+    for (const it of this.items) {
+      it.fluidity?.setMirror(m);
+      it.bubbles?.setMirror(m);
     }
   }
 
@@ -189,6 +216,7 @@ export class ElementRenderer {
           Math.min(200, a.boxes),
         );
         field.setViewport(this.W, this.H);
+        field.setMirror(this.mirror);
         this.group.add(field.group);
         this.items.push({
           mesh: field.group as unknown as THREE.Mesh,
@@ -228,6 +256,7 @@ export class ElementRenderer {
         );
         field.setViewport(this.W, this.H);
         field.setSource(this.sourceTex);
+        field.setMirror(this.mirror);
         this.group.add(field.mesh);
         this.items.push({
           mesh: field.mesh,
@@ -470,7 +499,7 @@ export class ElementRenderer {
     }
 
     // 归一化 → 世界。和背景平面、人脸、手部守同一个镜像约定：0.5 - x
-    const pw = pts.map((p) => ({ x: (0.5 - p.x) * this.W, y: (0.5 - p.y) * this.H }));
+    const pw = pts.map((p) => ({ x: this.nx2wx(p.x), y: this.ny2wy(p.y) }));
     // 越老越淡。年龄按**时间**算而不是按下标：低帧率下点少，按下标算会让淡出速度变快
     const newest = pts[pts.length - 1].t;
     const alpha = pts.map(
@@ -511,8 +540,8 @@ export class ElementRenderer {
     }
 
     const segs = Math.max(4, Math.min(64, asset.segments ?? 24));
-    const tx = (0.5 - tip.x) * this.W;
-    const ty = (0.5 - tip.y) * this.H;
+    const tx = this.nx2wx(tip.x);
+    const ty = this.ny2wy(tip.y);
     const baseY = -this.H / 2; // 画面底边
     /*
      * 弯的方向由 seed 定，不由手的左右定。
@@ -741,7 +770,7 @@ export class ElementRenderer {
       const pop = p < 0.25 ? p / 0.25 : 1;
       const s = basePx * asset.grow * (0.35 + 0.65 * pop) * (1 + p * 0.45);
       m.scale.set(s, s, 1);
-      m.position.set((0.5 - ev.x) * this.W, (0.5 - ev.y) * this.H, 6);
+      m.position.set(this.nx2wx(ev.x), this.ny2wy(ev.y), 6);
       (m.material as THREE.MeshBasicMaterial).opacity = 1 - p * p;
     }
   }
@@ -940,7 +969,7 @@ export class ElementRenderer {
             for (const name of FINGER_TIPS) {
               const lm = handTracker.landmarkAt(hf, name);
               // 和背景平面、人脸守同一个镜像约定：0.5 - x
-              if (lm) tips.push({ x: (0.5 - lm.x) * this.W, y: (0.5 - lm.y) * this.H });
+              if (lm) tips.push({ x: this.nx2wx(lm.x), y: this.ny2wy(lm.y) });
             }
           }
         }
@@ -972,17 +1001,18 @@ export class ElementRenderer {
       let roll = 0;
 
       if (elem.anchor.space === "screen") {
+        // screen 空间的 nx 说的就是屏幕位置，**永远不镜像** ——
+        // 镜像的是「摄像头画面」这一层，不是「贴在屏幕上的东西」那一层
         cx = (elem.anchor.nx - 0.5) * this.W;
-        cy = (0.5 - elem.anchor.ny) * this.H;
+        cy = this.ny2wy(elem.anchor.ny);
       } else if (elem.anchor.space === "hand") {
         const lm = handTracker!.landmarkAt(hand!, elem.anchor.landmark);
         if (!lm) {
           mesh.visible = false;
           continue;
         }
-        // 和人脸、背景平面守同一个镜像约定：0.5 - x，不是 x - 0.5
-        cx = (0.5 - lm.x) * this.W;
-        cy = (0.5 - lm.y) * this.H;
+        cx = this.nx2wx(lm.x);
+        cy = this.ny2wy(lm.y);
         // 手部元素默认**不**跟手转：emoji 立着好看，而且手的 roll 抖动比头大得多。
         // 要跟就显式写 followRoll: true
         roll = elem.followRoll ? hand!.roll : 0;
@@ -999,9 +1029,8 @@ export class ElementRenderer {
           mesh.visible = false;
           continue;
         }
-        // 0.5 - x 而不是 x - 0.5：背景平面是 scale.x = -1 的镜像，元素必须守同一个约定
-        cx = (0.5 - lm.x) * this.W;
-        cy = (0.5 - lm.y) * this.H;
+        cx = this.nx2wx(lm.x);
+        cy = this.ny2wy(lm.y);
         roll = face!.roll;
 
         const [ox, oy] = elem.anchor.offset ?? [0, 0];

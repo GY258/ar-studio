@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import type { PNG } from "pngjs";
+import { PNG } from "pngjs";
 import { expandGenerators } from "../src/engine/generators";
 import { applyEase, evaluateAnimations } from "../src/engine/animations";
 import { PinchDetector } from "../src/engine/trail";
@@ -28,6 +28,7 @@ import {
   templatePeriod,
   captureDirect,
   setControl,
+  setMirrored,
   type FixtureName,
   type Harness,
 } from "../scripts/harness-driver";
@@ -327,6 +328,18 @@ test("lowres-life：蒙版内与原帧逐像素相同，蒙版外被真正抹掉
     0.5,
   );
 });
+
+/** 水平翻转一张图。换到非镜像模式后，底图也得跟着翻才比得了 */
+function flipX(img: PNG): PNG {
+  const out = new PNG({ width: img.width, height: img.height });
+  for (let y = 0; y < img.height; y++)
+    for (let x = 0; x < img.width; x++) {
+      const s = (y * img.width + (img.width - 1 - x)) << 2;
+      const d = (y * img.width + x) << 2;
+      for (let k = 0; k < 4; k++) out.data[d + k] = img.data[s + k];
+    }
+  return out;
+}
 
 /**
  * 「存在周期为 period 的竖直网格」有多强。
@@ -767,6 +780,44 @@ test("Fluidity：人一动线条就加速，站着不动就慢下来", async () 
   expect(moving, "手臂挥到一半时该跑满速率").toBeGreaterThan(10);
   expect(peakPose, `姿态最舒展但速度为 0 时该慢下来（挥动 ${moving.toFixed(1)} → 峰值 ${peakPose.toFixed(1)}）`)
     .toBeLessThan(moving * 0.6);
+});
+
+test("换后置摄像头：元素跟着不镜像，不能贴到镜像的位置上", async () => {
+  /*
+   * 前置摄像头画面是镜像的（自拍抬左手看着是左手动），后置不是。
+   * 这一位要一路传到**元素定位、占据场、泡泡折射**，漏掉任何一处的表现都是
+   * 「元素贴在了镜像的位置上」—— 画面里人在左边，框却扣在右边。
+   *
+   * **而且只有换到后置才看得出来**：一直用前置的话，漏掉的那一处和其余部分
+   * 恰好都用同一个约定，永远不会暴露。这个仓库的镜像约定已经踩过三次，
+   * 所以这条断言必须存在。
+   *
+   * 判据：元素的重心 x 应该关于画面中心翻过去。
+   * 如果元素忘了跟着翻，背景翻了而元素没动 —— 重心留在原处，这条立刻红。
+   */
+  const tpl = path.join(TEMPLATES, "black-lodge.json");
+  await loadTemplate(harness.page, tpl, "front");
+  const base = await baseFrame("front");
+  await loadTemplate(harness.page, tpl, "front");
+
+  const mirrored = decode(await capture(harness.page, 0));
+  const cm = maskCentroid(mirrored, base);
+  expect(cm, "镜像模式下该有元素").toBeTruthy();
+
+  await setMirrored(harness.page, false);
+  const plain = decode(await capture(harness.page, 0));
+  /*
+   * 底图也要重新拍：背景平面跟着翻了，拿镜像那张底图比的话
+   * 整个画面都算「和底图不同」，重心会落在画面正中，什么都测不出来。
+   */
+  const baseFlipped = flipX(base);
+  const cp = maskCentroid(plain, baseFlipped);
+  expect(cp, "非镜像模式下该有元素").toBeTruthy();
+
+  // 重心 x 关于中心翻过去。容差 0.06 屏宽：元素本身不翻转（文字要正着读），
+  // 所以两边的包围盒不会严格对称
+  expect(Math.abs(cm!.x + cp!.x - 1), `重心该关于中心翻过去（${cm!.x.toFixed(3)} / ${cp!.x.toFixed(3)}）`)
+    .toBeLessThan(0.06);
 });
 
 test("滑块对非 particle 模板真的有用", async () => {
