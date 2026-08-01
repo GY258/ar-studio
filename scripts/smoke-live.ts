@@ -46,10 +46,13 @@ interface Result {
   problems: string[];
 }
 
-/** 模板需要什么画面输入。手部模板必须喂有手的那张，否则永远检测不到 */
-function inputFor(raw: Record<string, unknown>): "hands" | "front" {
+/** 模板需要什么画面输入。喂错了永远检测不到，冒烟会「过了但什么都没验到」 */
+function inputFor(raw: Record<string, unknown>): "hands" | "front" | "body" {
   const p = raw.perception;
-  return Array.isArray(p) && p.includes("hands") ? "hands" : "front";
+  if (!Array.isArray(p)) return "front";
+  if (p.includes("pose")) return "body";
+  if (p.includes("hands")) return "hands";
+  return "front";
 }
 
 async function freePort(): Promise<number> {
@@ -245,7 +248,7 @@ async function main() {
      * 明显的竖条拉丝，之后看冒烟截图时容易把那个当成效果的 bug。
      * 0.22 屏在 0.75 秒里走完，对轨迹来说已经够长。
      */
-    const pan = input === "hands" ? { frames: 45, panY: 0.22 } : { frames: 4 };
+    const pan = input === "front" ? { frames: 4 } : { frames: 45, panY: 0.22 };
     const info = pngToY4m(src, dst, pan);
     console.log(
       `假摄像头 ${input}: ${info.w}x${info.h} × ${info.frames} 帧` +

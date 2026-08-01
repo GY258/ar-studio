@@ -23,12 +23,13 @@ import { PNG } from "pngjs";
 
 const ROOT = process.cwd();
 const FIXTURES = path.join(ROOT, "test/fixtures");
-const DEFAULT_NAMES = ["front", "side", "far", "noface", "hands"];
+const DEFAULT_NAMES = ["front", "side", "far", "noface", "hands", "body"];
 
 interface Recorded {
   landmarks: { x: number; y: number; z: number }[] | null;
   mask: { data: number[]; w: number; h: number } | null;
   hands: { hand: "left" | "right"; points: { x: number; y: number; z: number }[] }[] | null;
+  pose: { x: number; y: number; z: number }[][] | null;
 }
 
 async function main() {
@@ -122,6 +123,17 @@ async function main() {
 
     // 手部单独一个文件。没检测到手就不写 —— 空文件和「这张 fixture 本来就没手」
     // 分不开，而 harness 靠文件存不存在决定要不要注入 provider
+    const poseFile = path.join(FIXTURES, `${name}.pose.json`);
+    if (rec.pose) {
+      fs.writeFileSync(poseFile, JSON.stringify(rec.pose));
+      console.log(`  ${name}.pose.json  ${rec.pose[0].length} 点`);
+    } else if (fs.existsSync(poseFile)) {
+      // 这张图这次没检测到人，但上次录的还在 —— 留着会让「没人」的 fixture
+      // 悄悄带着一份旧姿态，测试就测不出「丢人时该隐藏」了
+      fs.unlinkSync(poseFile);
+      console.log(`  ${name}.pose.json  这次没检测到人，已删掉旧的`);
+    }
+
     const handsFile = path.join(FIXTURES, `${name}.hands.json`);
     if (rec.hands?.length) {
       fs.writeFileSync(handsFile, JSON.stringify(rec.hands));

@@ -15,6 +15,7 @@ import {
   type LandmarkProvider,
 } from "./face-tracker";
 import { HandTracker, MediaPipeHandProvider, type HandLandmarkProvider } from "./hand-tracker";
+import { PoseTracker, MediaPipePoseProvider, type PoseLandmarkProvider } from "./pose-tracker";
 import { propCanvas } from "./props";
 import { resolveControls } from "./resolve";
 import { EFFECT_COMBINE, EFFECT_SNIPPETS } from "./source-effects";
@@ -86,6 +87,7 @@ export class ArEngine {
   private readonly elements: ElementRenderer;
   private readonly faceTracker = new FaceTracker();
   private readonly handTracker = new HandTracker();
+  private readonly poseTracker = new PoseTracker();
   private templateType: TemplateType = "particle";
   private perception: string[] = ["segmentation"];
   private segProvider: SegmentationProvider | null = null;
@@ -181,6 +183,11 @@ export class ArEngine {
     this.handTracker.setProvider(p);
   }
 
+  /** 注入姿态来源。不调用则用 MediaPipe，测试里注入 fixture 回放。 */
+  setPoseProvider(p: PoseLandmarkProvider) {
+    this.poseTracker.setProvider(p);
+  }
+
   /** 注入分割来源。不调用则用 MediaPipe，测试里注入 fixture 回放。 */
   setSegmentationProvider(p: SegmentationProvider) {
     this.segProvider?.close?.();
@@ -194,6 +201,13 @@ export class ArEngine {
     const provider = new MediaPipeSegmentationProvider();
     await provider.load();
     this.segProvider = provider;
+  }
+
+  async loadPose(): Promise<void> {
+    if (this.poseTracker.hasProvider()) return; // 已注入 fixture provider 就别再拉模型
+    const provider = new MediaPipePoseProvider();
+    await provider.load();
+    this.poseTracker.setProvider(provider);
   }
 
   async loadHands(): Promise<void> {
@@ -312,6 +326,7 @@ export class ArEngine {
     // 差别只在每个元素自己的 anchor.space。
     if (cfg.elements?.length) {
       this.elements.setViewport(this.W, this.H);
+    this.poseTracker.setViewport(this.W, this.H);
       this.elements.setElements(cfg.elements).catch((e) => this.onError?.(e as Error));
     }
 
@@ -328,6 +343,9 @@ export class ArEngine {
     }
     if (this.perception.includes("hands")) {
       this.loadHands().catch((e) => this.onError?.(e as Error));
+    }
+    if (this.perception.includes("pose")) {
+      this.loadPose().catch((e) => this.onError?.(e as Error));
     }
   }
 
@@ -610,6 +628,8 @@ export class ArEngine {
        */
       elementObjects: this.elements.objectCount(),
       bubblesAlive: this.elements.bubbleAlive(),
+      fluidityBoxes: this.elements.fluidityBoxes(),
+      fluidityLowestY: this.elements.fluidityLowestY(),
       /**
        * 解不出素材、被跳过的元素。**非空就是有东西没画出来**。
        * smoke:live 据此判失败 —— 这个失效模式以前是完全静默的。
@@ -744,6 +764,7 @@ export class ArEngine {
     }
     this.particles.setPixelRatio(dpr);
     this.elements.setViewport(this.W, this.H);
+    this.poseTracker.setViewport(this.W, this.H);
     this.faceTracker.setViewport(this.W, this.H);
     this.handTracker.setViewport(this.W, this.H);
     this.layoutProp();
@@ -891,7 +912,15 @@ export class ArEngine {
     this.updateMask();
     this.setEffectTime(t);
     this.setFaceProtect(nowMs);
-    this.elements.update(t, this.faceTracker, this.faceTracker.frame(nowMs), this.handTracker, nowMs);
+    this.elements.update(
+      t,
+      this.faceTracker,
+      this.faceTracker.frame(nowMs),
+      this.handTracker,
+      nowMs,
+      this.poseTracker,
+      this.poseTracker.frame(nowMs),
+    );
     this.simT = t;
   }
 
@@ -978,6 +1007,7 @@ export class ArEngine {
     const checks: boolean[] = [];
     if (this.perception.includes("face")) checks.push(this.faceTracker.frame(nowMs) !== null);
     if (this.perception.includes("hands")) checks.push(this.handTracker.frames(nowMs).length > 0);
+    if (this.perception.includes("pose")) checks.push(this.poseTracker.frame(nowMs) !== null);
     if (this.perception.includes("segmentation")) checks.push(this.field.seen);
     return checks.some(Boolean);
   }
@@ -985,6 +1015,7 @@ export class ArEngine {
   private perceive(nowMs: number) {
     if (this.perception.includes("face")) this.faceTracker.detect(this.source, nowMs);
     if (this.perception.includes("hands")) this.handTracker.detect(this.source, nowMs);
+    if (this.perception.includes("pose")) this.poseTracker.detect(this.source, nowMs);
     if (this.perception.includes("segmentation")) this.runSegmentation(nowMs);
   }
 
@@ -1066,7 +1097,15 @@ export class ArEngine {
     this.setFaceProtect(now);
 
     if (this.cfg?.elements?.length) {
-      this.elements.update(t, this.faceTracker, this.faceTracker.frame(now), this.handTracker, now);
+      this.elements.update(
+        t,
+        this.faceTracker,
+        this.faceTracker.frame(now),
+        this.handTracker,
+        now,
+        this.poseTracker,
+        this.poseTracker.frame(now),
+      );
     }
 
     if (this.templateType === "particle" && this.cfg && this.cfg.emitter && this.cfg.substance) {

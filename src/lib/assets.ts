@@ -26,4 +26,13 @@ export const HAND_MODEL =
   process.env.NEXT_PUBLIC_HAND_MODEL ||
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
+/**
+ * 全身姿态。**这是第四个模型** —— 每加一个，「国内加载不出来」的面就大一分，
+ * 见 docs/ROADMAP.md 的「模型自托管」。lite 而不是 full：这个效果要的是
+ * 关节大致位置，不是毫米级精度，而 full 在移动端明显更慢。
+ */
+export const POSE_MODEL =
+  process.env.NEXT_PUBLIC_POSE_MODEL ||
+  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+
 export const SELF_HOSTED = WASM_BASE.startsWith("/");

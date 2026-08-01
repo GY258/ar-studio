@@ -16,6 +16,8 @@ import { extractAspect } from "./svg-sanitize";
 import { evaluateAnimations } from "./animations";
 import { PinchDetector, TRAIL_RATE, TrailBuffer } from "./trail";
 import { BubbleField } from "./bubbles";
+import { FluidityField } from "./fluidity";
+import type { PoseFrame, PoseTracker } from "./pose-tracker";
 import { FINGER_TIPS } from "./hand-anchors";
 import type { FaceFrame, FaceTracker } from "./face-tracker";
 import type { HandFrame, HandTracker } from "./hand-tracker";
@@ -80,6 +82,7 @@ interface Item {
   trail?: RibbonParts;
   bloom?: BloomParts;
   bubbles?: BubbleField;
+  fluidity?: FluidityField;
 }
 
 export class ElementRenderer {
@@ -106,7 +109,10 @@ export class ElementRenderer {
   setViewport(w: number, h: number) {
     this.W = w;
     this.H = h;
-    for (const it of this.items) it.bubbles?.setViewport(w, h);
+    for (const it of this.items) {
+      it.bubbles?.setViewport(w, h);
+      it.fluidity?.setViewport(w, h);
+    }
   }
 
   /** 引擎换源（摄像头 ↔ 离线静态图）时要重新传，否则泡泡里是上一张画面 */
@@ -156,6 +162,40 @@ export class ElementRenderer {
             trail: parts,
           });
         }
+        continue;
+      }
+
+      if (elem.asset.kind === "fluidity") {
+        const a = elem.asset;
+        const field = new FluidityField(
+          {
+            boxes: a.boxes,
+            lines: a.lines,
+            detectHz: a.detectHz,
+            jitter: a.jitter,
+            boxScale: a.boxScale,
+            digits: a.digits,
+            color: a.color,
+            opacity: elem.opacity ?? 1,
+            seed: a.seed,
+          },
+          Math.min(200, a.boxes),
+        );
+        field.setViewport(this.W, this.H);
+        this.group.add(field.group);
+        this.items.push({
+          mesh: field.group as unknown as THREE.Mesh,
+          elem,
+          aspect: 1,
+          textPxWidth: 0,
+          userDx: 0,
+          userDy: 0,
+          userScale: 1,
+          lastW: 0,
+          lastH: 0,
+          owned: [field.group],
+          fluidity: field,
+        });
         continue;
       }
 
@@ -724,6 +764,20 @@ export class ElementRenderer {
    * 当前还活着的泡泡数。测试靠它断言「真的在冒」和「指尖真的戳破了」——
    * 戳破是这个模拟里唯一可变的状态，只看画面很难把它和「飘走了」区分开。
    */
+  /** 这一帧 fluidity 画了几个框。测试靠它断言「舒展时炸开、收拢时骤减」 */
+  fluidityBoxes(): number {
+    let n = 0;
+    for (const it of this.items) n += it.fluidity?.boxCount() ?? 0;
+    return n;
+  }
+
+  /** 最低那个 fluidity 框的归一化 y。测试用来断言框铺到了腿和脚上 */
+  fluidityLowestY(): number {
+    let y = 0;
+    for (const it of this.items) y = Math.max(y, it.fluidity?.lowestBoxY() ?? 0);
+    return y;
+  }
+
   bubbleAlive(): number {
     let n = 0;
     for (const it of this.items) n += it.bubbles?.aliveCount() ?? 0;
@@ -813,6 +867,8 @@ export class ElementRenderer {
     face: FaceFrame | null,
     handTracker?: HandTracker,
     nowMs = t * 1000,
+    poseTracker?: PoseTracker,
+    pose: PoseFrame | null = null,
   ) {
     for (const item of this.items) {
       const { mesh, elem, aspect, textPxWidth } = item;
@@ -837,6 +893,12 @@ export class ElementRenderer {
         continue;
       }
       mesh.visible = true;
+
+      if (item.fluidity) {
+        if (poseTracker && pose) item.fluidity.update(t, poseTracker, pose);
+        else item.fluidity.hide();
+        continue;
+      }
 
       if (item.bubbles) {
         /*

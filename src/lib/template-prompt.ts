@@ -74,6 +74,9 @@ type ElementAsset =
       leaf?: { key: string; spacing: number; scale: number; seed: number };
       flower?: { key: string; scale: number };              // 长在茎顶端，跟着生长的那头走
       seed: number }                                        // 必填：定弯的方向和叶子的左右
+  | { kind: "fluidity";   boxes: number; lines: number;      // 检测框 + 连线，见下
+      detectHz: number; jitter: number; boxScale: [number, number];
+      digits: number; color: string; seed: number }
   | { kind: "bubbles";    count: number; rise: number;       // 肥皂泡，见下
       size: [number, number]; wobble: number; popRadius: number;
       refraction: number; iridescence: number; seed: number }
@@ -169,6 +172,34 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 采样落在固定的 12Hz 时间网格上，不是每帧一次 —— 每帧一次的话同一段手势在
 60fps 和 20fps 下会生成不同的带。相邻采样点位移超过 0.18 屏会**断开重新起一条**：
 手划出画面再进来、检测短暂丢失重新锁定，都会瞬移，连起来就是一条横跨画面的假线。
+
+### fluidity —— 带编号的检测框 + 连线，跟着人体运动
+
+\`\`\`jsonc
+{ "id": "fluidity",
+  "asset": { "kind": "fluidity", "boxes": 64, "lines": 48, "detectHz": 22,
+             "jitter": 0.3, "boxScale": [0.055, 1.05], "digits": 5,
+             "color": "#FFFFFF", "seed": 41 },
+  "anchor": { "space": "screen", "nx": 0.5, "ny": 0.5 },
+  "size": { "ref": "vw", "scale": 1 } }
+\`\`\`
+
+需要 \`perception: ["pose"]\`（全身 33 点），锚点必须 \`space: "screen"\`。
+框的大小相对**肩宽**，人退远会一起缩。
+
+**密度由姿态驱动，不由运动速度驱动。** 参考素材里「张开手臂时框和线爆发式增多」
+看起来像在响应快慢，其实差别在姿态本身 —— 慢慢张开一样该炸。所以取
+\`双腕间距 / 肩宽\`，是当前帧的纯函数，renderAt(t) 的无历史性照旧成立。
+
+- \`detectHz\` 是**一帧一检测**那种生硬跳变的节奏，编号和抖动都 key 在它上面，
+  不做任何插值。平滑插值会让它变成柔顺的装饰动画，完全是另一个东西
+- \`boxScale\` 的分布是**偏小的**（2.5 次幂），不是均匀 —— 参考里是
+  「大量小框贴在关节上 + 少数几个大框罩住躯干」，均匀分布出来全是中等框，
+  读起来像网格不像检测结果
+- 编号走 \`hash(第几个框, 第几个检测帧, seed)\`，看着像每帧重新分配的检测 id，
+  实际是纯函数。数字是 shader 里的 3×5 程序化点阵，不用字体 ——
+  系统字体会让 golden 只在录它的机器上成立
+- 字号和框都**吸附到整像素**。像素风的字不落在整像素上，笔画粗细不匀、边上泛色
 
 ### bubbles —— 肥皂泡，指尖戳破
 

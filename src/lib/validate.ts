@@ -8,7 +8,7 @@ import { sanitizeSvg } from "@/engine/svg-sanitize";
 import { migrateElements } from "./migrate";
 
 const SHAPES = ["cloud", "shower", "glass", "cup"];
-const PERCEPTIONS = ["segmentation", "face", "hands"];
+const PERCEPTIONS = ["segmentation", "face", "hands", "pose"];
 const KNOBS = ["gravity", "friction", "streak", "size", "speed", "spread", "splash"];
 const MODES = ["absolute", "scale"];
 const TEMPLATE_TYPES = ["particle", "overlay", "facetrack"];
@@ -168,7 +168,7 @@ const ANIM_PRESETS = ["float", "fall", "pulse", "spin", "emit-fall-fade"];
 const EASES = ["linear", "in", "out", "inout", "gravity", "bounce"];
 /** 只有「0→1 走一趟」的原语能缓动。周期性原语套 ease 会在接缝处顿一下，见 animations.ts */
 const EASE_PRESETS = ["fall", "emit-fall-fade"];
-const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "stem", "bubbles", "pinch-bloom"];
+const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "stem", "bubbles", "fluidity", "pinch-bloom"];
 const FINGER_NAMES = ["thumb", "index", "middle", "ring", "pinky"];
 const HAND_ANCHOR_NAMES = Object.keys(HAND_ANCHORS);
 const SIZE_REFS = ["vw", "iod", "eye_width", "face_width", "palm_width"];
@@ -325,6 +325,30 @@ function validateAsset(a: unknown, at: string, p: string[]) {
         }
         if (!inRange(fl.scale, 0.02, 3)) p.push(`${at}.asset.flower.scale 应在 [0.02, 3]`);
       }
+    }
+  }
+
+  if (kind === "fluidity") {
+    if (!inRange(asset.boxes, 1, 200)) p.push(`${at}.asset.boxes 应在 [1, 200]（最多几个框）`);
+    if (!inRange(asset.lines, 0, 400)) p.push(`${at}.asset.lines 应在 [0, 400]（最多几条线）`);
+    if (!inRange(asset.detectHz, 1, 60)) {
+      p.push(`${at}.asset.detectHz 应在 [1, 60]（每秒重检测几次。这是「一帧一检测」那种跳动的节奏）`);
+    }
+    if (!inRange(asset.jitter, 0, 2)) p.push(`${at}.asset.jitter 应在 [0, 2]（框位置抖动，相对肩宽）`);
+    if (!pair(asset.boxScale)) {
+      p.push(`${at}.asset.boxScale 必须是 [最小, 最大]，相对肩宽`);
+    } else {
+      const [lo, hi] = asset.boxScale as [number, number];
+      if (!inRange(lo, 0.01, 3) || !inRange(hi, 0.01, 3)) p.push(`${at}.asset.boxScale 两端都应在 [0.01, 3]`);
+      if (lo > hi) p.push(`${at}.asset.boxScale 的最小值大于最大值了`);
+    }
+    if (!inRange(asset.digits, 1, 8)) p.push(`${at}.asset.digits 应在 [1, 8]（编号位数，参考素材是 5）`);
+    if (typeof asset.color !== "string") p.push(`${at}.asset.color 必填`);
+    if (!num(asset.seed)) {
+      p.push(
+        `${at}.asset.seed 必填。编号和抖动都是 hash(第几个, 第几个检测帧, seed) 的纯函数 —— ` +
+          `用随机数的话 renderAt(t) 不再确定，整套渲染回归就不成立了`,
+      );
     }
   }
 
@@ -494,6 +518,12 @@ function validateElement(e: Raw, at: string, p: string[], ids: Set<string>) {
     p.push(
       `${at} 的 asset 是 pinch-bloom 但锚不在 hand 空间 —— 捏合是手的动作，` +
         `要靠拇指尖和食指尖的距离判定，别的空间没有这两个点`,
+    );
+  }
+  if (assetKind === "fluidity" && space !== "screen") {
+    p.push(
+      `${at} 的 asset 是 fluidity 但锚不在 screen 空间 —— 它是满屏的效果，` +
+        `框挂在全身关节上，不挂在某一个锚点。写 { "space": "screen", "nx": 0.5, "ny": 0.5 }`,
     );
   }
   if (assetKind === "bubbles" && space !== "screen") {

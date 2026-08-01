@@ -18,7 +18,7 @@ const HARNESS_DIR = path.join(ROOT, "test/harness");
 const FIXTURES_DIR = path.join(ROOT, "test/fixtures");
 
 export const VIEWPORT = { width: 960, height: 540 };
-export type FixtureName = "front" | "side" | "far" | "noface" | "hands";
+export type FixtureName = "front" | "side" | "far" | "noface" | "hands" | "body";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",

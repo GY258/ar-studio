@@ -63,7 +63,7 @@ export interface Control {
   mode?: "absolute" | "scale";
 }
 
-export type Perception = "segmentation" | "face" | "hands";
+export type Perception = "segmentation" | "face" | "hands" | "pose";
 
 export interface TemplateListing {
   slug: string;
@@ -198,7 +198,34 @@ export type ElementAsset =
       seed: number;
     }
   /**
-   * 肥皂泡：从画面下方缓缓飘起，指尖划过去戳破。
+   * Fluidity：带编号的检测框 + 互相连接的细线，跟着人体运动实时抖动重组。
+   *
+   * anchor 写 screen（满屏的效果，不挂在某一个点上），元素自己的 size 会被忽略 ——
+   * 框的大小由 asset.boxScale 相对**肩宽**决定，人退远会一起缩。
+   *
+   * 需要 perception: ["pose"]。密度由**姿态**驱动（双腕间距 / 肩宽）而不是运动速度，
+   * 所以它仍然是当前帧的纯函数，见 fluidity.ts 的文件头。
+   */
+  | {
+      kind: "fluidity";
+      /** 最多几个框 */
+      boxes: number;
+      /** 最多几条线 */
+      lines: number;
+      /** 每秒重检测几次。编号跳变和抖动的节奏，不做插值 */
+      detectHz: number;
+      /** 框位置抖动幅度，相对肩宽 */
+      jitter: number;
+      /** 框大小范围 [最小, 最大]，相对肩宽 */
+      boxScale: [number, number];
+      /** 编号位数。参考素材是 5 位 */
+      digits: number;
+      color: string;
+      /** 必填。编号和抖动都是 hash(第几个, 第几个检测帧, seed) 的纯函数 */
+      seed: number;
+    }
+  /**
+   * 肥皂泡：一开场就满屏浮着，指尖划过去戳破。破了不再生，所以能清空。
    *
    * anchor 写 screen（它是满屏的模拟，不挂在任何一个点上），size 会被忽略 ——
    * 泡泡的大小由 asset.size 这个区间决定，因为一屏里本来就要有大有小。

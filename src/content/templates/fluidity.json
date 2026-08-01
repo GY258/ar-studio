@@ -1,0 +1,44 @@
+{
+  "slug": "fluidity",
+  "name": {
+    "zh": "流动性",
+    "en": "Fluidity"
+  },
+  "category": "fun",
+  "sort_order": 20,
+  "price_cents": 0,
+  "schema_version": 2,
+  "template_type": "overlay",
+  "perception": [
+    "pose"
+  ],
+  "preview": {},
+  "elements": [
+    {
+      "id": "fluidity",
+      "asset": {
+        "kind": "fluidity",
+        "boxes": 64,
+        "lines": 48,
+        "detectHz": 22,
+        "jitter": 0.3,
+        "boxScale": [
+          0.055,
+          1.05
+        ],
+        "digits": 5,
+        "color": "#FFFFFF",
+        "seed": 41
+      },
+      "anchor": {
+        "space": "screen",
+        "nx": 0.5,
+        "ny": 0.5
+      },
+      "size": {
+        "ref": "vw",
+        "scale": 1
+      }
+    }
+  ]
+}
