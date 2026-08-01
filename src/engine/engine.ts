@@ -60,6 +60,9 @@ export interface EngineStats {
    * 还是比例算错了。
    */
   camera: string;
+  /** 当前缩放倍率。UI 靠它让档位按钮跟着捏合走 —— 两套控件不同步的话
+   *  捏完之后高亮的还是旧档位，看着像坏了 */
+  zoom: number;
 }
 
 export interface EngineOptions {
@@ -123,6 +126,8 @@ export class ArEngine {
    * 猜是猜不出来的，所以把它显示出来。
    */
   private camInfo = "";
+  /** 设备**支持**什么（不是这次拿到了什么）。见 startCamera 里的注释 */
+  private camCaps = "";
   /**
    * 数字缩放倍率。1 = 原始取景。
    *
@@ -305,8 +310,27 @@ export class ArEngine {
     this.setMirrored(facing === "user");
     this.video.srcObject = stream;
     await this.video.play();
-    const st = stream.getVideoTracks()[0]?.getSettings?.();
+    /*
+     * 记下**实际拿到的**和**设备到底支持什么**。
+     *
+     * 「iOS 给不了竖向流」这个结论不该从一次观察推出来 —— ideal 只是偏好，
+     * 浏览器按自己的距离函数挑最近的档位，而 1080x1920 和 1920x1080
+     * 像素数完全一样，「最近」这件事上是平手，于是它保持了原生方向。
+     * 真正能证明「给不了」的是 getCapabilities()：它列出设备支持的
+     * 宽高范围和长宽比范围。竖向档位存不存在，看那个才知道。
+     */
+    const track = stream.getVideoTracks()[0];
+    const st = track?.getSettings?.();
     if (st) this.camInfo = `${st.width}x${st.height}@${Math.round(st.frameRate ?? 0)}`;
+    const caps = track?.getCapabilities?.() as
+      | { width?: { max?: number }; height?: { max?: number }; aspectRatio?: { min?: number; max?: number } }
+      | undefined;
+    if (caps?.aspectRatio) {
+      // 长宽比下限小于 1 就说明设备**能**给竖向流，那样的话该改约束而不是让用户缩
+      this.camCaps = `ar ${caps.aspectRatio.min?.toFixed(2) ?? "?"}~${caps.aspectRatio.max?.toFixed(2) ?? "?"}`;
+    } else if (caps?.width?.max) {
+      this.camCaps = `max ${caps.width.max}x${caps.height?.max ?? "?"}`;
+    }
     // videoWidth/videoHeight 在 play 后才可靠，再 resize 一次确保 cover 比例正确
     this.video.addEventListener("loadedmetadata", () => this.resize(), { once: true });
     this.resize();
@@ -331,9 +355,21 @@ export class ArEngine {
     return this.mirrored;
   }
 
-  /** 设置数字缩放。夹在 1~4 倍：小于 1 会露出画布外的黑边，大于 4 已经全是马赛克 */
+  /**
+   * 设置数字缩放。**允许小于 1**。
+   *
+   * 实测 iOS 会忽略「请求竖向分辨率」直接给 1920x1080 的横向流
+   * （状态栏里显示的就是这个数）。竖屏画布 cover 之后只显示视频宽度的 26% ——
+   * 这就是「取景比系统相机窄得多」的全部原因，不是比例算错。
+   *
+   * 拿不到竖向流就只能让用户往回缩：0.5 倍时能看到接近两倍宽的场景，
+   * 代价是上下出现黑边。这和系统相机的 0.5x 是同一个意思 ——
+   * 那边是切到超广角镜头，这边是把画面缩回来，观感目的一样。
+   *
+   * 下限 0.3：再小主体已经小到没法用，而黑边占了大半个屏幕。
+   */
   setZoom(z: number) {
-    const next = Math.max(1, Math.min(4, z));
+    const next = Math.max(0.3, Math.min(4, z));
     if (next === this.zoom) return;
     this.zoom = next;
     this.elements.setZoom(next);
@@ -735,6 +771,7 @@ export class ArEngine {
       tracking: this.isTracking(performance.now()),
       degraded: this.degraded,
       camera: this.camInfo,
+      zoom: this.zoom,
       perception: this.perception.join(","),
       templateType: this.templateType,
       elementCount: this.elements.count(),
@@ -766,6 +803,11 @@ export class ArEngine {
    * 前者多半是 seen=false 走了 onLost 兜底（整张蒙版被填成「哪里都不作用」），
    * 后者才是蒙版本身的问题。光看画面区分不了，看这几个数字一眼就知道。
    */
+  /** 摄像头能力。诊断「竖向流到底是给不了还是没要对」用 */
+  debugCameraCaps(): string {
+    return this.camCaps;
+  }
+
   debugMaskStats() {
     const src = this.maskField.data;
     let min = 255;
@@ -1303,6 +1345,7 @@ export class ArEngine {
         tracking: this.isTracking(now),
         degraded: this.degraded,
       camera: this.camInfo,
+      zoom: this.zoom,
         needsTracking: this.perception.length > 0,
       });
     }
