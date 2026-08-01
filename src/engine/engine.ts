@@ -30,6 +30,15 @@ import type { ControlValues, TemplateConfig, TemplateType } from "./types";
  */
 const SIM_STEP = 1 / 60;
 
+/**
+ * 手机上检测最多每秒跑几次。
+ *
+ * 20 是个折中：一帧姿态检测在手机上要二三十毫秒，30fps 全跑等于把主线程占满；
+ * 而低于 15 的话快速动作会看出覆盖层「跟不上手」。
+ * 桌面不限速 —— 那边一帧检测几毫秒，限了反而白白丢精度。
+ */
+const DETECT_HZ_MOBILE = 20;
+
 export interface EngineStats {
   fps: number;
   tracking: boolean;
@@ -43,6 +52,14 @@ export interface EngineStats {
    * 把「不适用」和「没追上」分开，UI 才有可能说对话。
    */
   needsTracking: boolean;
+  /**
+   * 摄像头**实际**给的分辨率和帧率，形如 "1080x1920@30"。
+   *
+   * 显示出来是为了让「缩放不对」「掉帧」这类反馈能落到具体数字上 ——
+   * 请求什么和拿到什么经常对不上，而只看画面根本分不清是取景问题
+   * 还是比例算错了。
+   */
+  camera: string;
 }
 
 export interface EngineOptions {
@@ -97,6 +114,26 @@ export class ArEngine {
   private applyOutside = true;
   /** 画面是不是镜像的。前置摄像头是（自拍看着才自然），后置不是 */
   private mirrored = true;
+  /**
+   * 摄像头**实际**给了什么，不是我们请求了什么。
+   *
+   * 这两个经常对不上：手机可能忽略 ideal 直接给自己的档位，也可能给一个
+   * 带旋转的横向流（videoWidth/Height 是横的，画面却是竖的）——
+   * 后者会让 cover 的比例算错，表现就是「缩放不对」。
+   * 猜是猜不出来的，所以把它显示出来。
+   */
+  private camInfo = "";
+  /**
+   * 数字缩放倍率。1 = 原始取景。
+   *
+   * 为什么自己做而不是用摄像头的硬件变焦：`track.getCapabilities().zoom`
+   * 在 **iOS Safari 上不支持**（Android Chrome 才有）。而整条渲染管线在我们手里 ——
+   * 背景平面放大多少，归一化坐标转世界坐标就跟着放大多少，元素自然还贴在人身上。
+   *
+   * 代价是**数字缩放不增加细节**：放大 2 倍就是把像素放大 2 倍。
+   * 不过摄像头给的是 1080 宽、屏幕才 390pt，有足够余量。
+   */
+  private zoom = 1;
   /** source.effect.blocks，短边格数。resize 时要按新比例重算长边格数 */
   private blocks = 0;
   /** source.effect.radius，归一化到长边。resize 时要按新比例重算 uv 步长 */
@@ -111,6 +148,8 @@ export class ArEngine {
   private simT = -1;
   private lastT = 0;
   private lastVideoTime = -1;
+  /** 上一次真正跑检测的时刻，秒。手机上用它限速 */
+  private lastDetectT = -1e9;
   private fpsAcc = 0;
   private fpsN = 0;
   private fps = 0;
@@ -266,6 +305,8 @@ export class ArEngine {
     this.setMirrored(facing === "user");
     this.video.srcObject = stream;
     await this.video.play();
+    const st = stream.getVideoTracks()[0]?.getSettings?.();
+    if (st) this.camInfo = `${st.width}x${st.height}@${Math.round(st.frameRate ?? 0)}`;
     // videoWidth/videoHeight 在 play 后才可靠，再 resize 一次确保 cover 比例正确
     this.video.addEventListener("loadedmetadata", () => this.resize(), { once: true });
     this.resize();
@@ -288,6 +329,20 @@ export class ArEngine {
 
   isMirrored(): boolean {
     return this.mirrored;
+  }
+
+  /** 设置数字缩放。夹在 1~4 倍：小于 1 会露出画布外的黑边，大于 4 已经全是马赛克 */
+  setZoom(z: number) {
+    const next = Math.max(1, Math.min(4, z));
+    if (next === this.zoom) return;
+    this.zoom = next;
+    this.elements.setZoom(next);
+    this.field.setZoom(next);
+    this.resize();
+  }
+
+  getZoom(): number {
+    return this.zoom;
   }
 
   start() {
@@ -679,6 +734,7 @@ export class ArEngine {
       needsTracking: this.perception.length > 0,
       tracking: this.isTracking(performance.now()),
       degraded: this.degraded,
+      camera: this.camInfo,
       perception: this.perception.join(","),
       templateType: this.templateType,
       elementCount: this.elements.count(),
@@ -815,7 +871,12 @@ export class ArEngine {
       bgH = this.W / vidAspect;
     }
     // 镜像和占据场的 u 映射是一对，改一个就得改另一个
-    this.bg.scale.set(this.mirrored ? -bgW : bgW, bgH, 1);
+    /*
+     * 缩放作用在背景平面上，元素那边走 nx2wx 用同一个倍率 ——
+     * 两边必须同步，否则放大之后框会从人身上滑开。
+     */
+    const z = this.zoom;
+    this.bg.scale.set((this.mirrored ? -bgW : bgW) * z, bgH * z, 1);
     // 占据场要用 cover 后的尺寸，不是 viewport 尺寸。
     // 分割遮罩覆盖整个视频帧，视频通过 cover 显示在 bgW×bgH 的区域内，
     // 粒子碰撞要对齐这个实际显示区域。
@@ -857,6 +918,8 @@ export class ArEngine {
 
     let grabbed: ReturnType<ElementRenderer["hitTest"]> = null;
     let lastPointer = { x: 0, y: 0 };
+
+
 
     canvas.addEventListener("pointerdown", (ev) => {
       const w = toWorld(ev);
@@ -911,30 +974,53 @@ export class ArEngine {
       { passive: false },
     );
 
-    // 触屏双指捏合
+    /*
+     * 触屏双指捏合，两种含义共存：
+     *   捏在**可缩放的道具**上 → 缩那个道具（原有行为，粒子模板的喷头）
+     *   捏在**别处**           → 缩整个画面，和系统相机一个手势
+     *
+     * 按落点区分而不是加个模式开关：用户不该先想「我现在要缩什么」。
+     * 道具是稀疏的几个，捏中它的概率本来就低，所以「别处」是绝大多数情况。
+     *
+     * passive: false 是必须的 —— 不 preventDefault 的话 Safari 会把捏合
+     * 当成页面缩放，整个 UI 跟着放大。
+     */
     let pinchStart = 0;
     let pinchTarget: ReturnType<ElementRenderer["hitTest"]> = null;
+    let zoomStart = 1;
     const touchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-    canvas.addEventListener("touchstart", (ev) => {
-      if (ev.touches.length !== 2) return;
-      const r = canvas.getBoundingClientRect();
-      const mx = (ev.touches[0].clientX + ev.touches[1].clientX) / 2;
-      const my = (ev.touches[0].clientY + ev.touches[1].clientY) / 2;
-      pinchTarget = this.elements.hitTest(
-        ((mx - r.left) / r.width - 0.5) * this.W,
-        (0.5 - (my - r.top) / r.height) * this.H,
-      );
-      if (pinchTarget?.elem.interactive?.resize) pinchStart = touchDist(ev.touches);
-      else pinchTarget = null;
-    });
+    canvas.addEventListener(
+      "touchstart",
+      (ev) => {
+        if (ev.touches.length !== 2) return;
+        ev.preventDefault();
+        const r = canvas.getBoundingClientRect();
+        const mx = (ev.touches[0].clientX + ev.touches[1].clientX) / 2;
+        const my = (ev.touches[0].clientY + ev.touches[1].clientY) / 2;
+        const hit = this.elements.hitTest(
+          ((mx - r.left) / r.width - 0.5) * this.W,
+          (0.5 - (my - r.top) / r.height) * this.H,
+        );
+        pinchTarget = hit?.elem.interactive?.resize ? hit : null;
+        pinchStart = touchDist(ev.touches);
+        zoomStart = this.zoom;
+      },
+      { passive: false },
+    );
     canvas.addEventListener(
       "touchmove",
       (ev) => {
-        if (!pinchTarget || ev.touches.length !== 2 || pinchStart === 0) return;
+        if (ev.touches.length !== 2 || pinchStart === 0) return;
         ev.preventDefault();
         const d = touchDist(ev.touches);
-        this.elements.zoomBy(pinchTarget, d / pinchStart);
-        pinchStart = d;
+        if (pinchTarget) {
+          // 道具：按增量缩，所以每次更新基准
+          this.elements.zoomBy(pinchTarget, d / pinchStart);
+          pinchStart = d;
+        } else {
+          // 画面：按**起始距离**算绝对倍率，手指来回捏不会累积漂移
+          this.setZoom(zoomStart * (d / pinchStart));
+        }
       },
       { passive: false },
     );
@@ -1151,9 +1237,21 @@ export class ArEngine {
     // 检测和渲染解耦：感知只在有新视频帧时跑，渲染仍然满帧。
     // 按 perception 驱动，不再按 templateType 锁死 —— 一个模板同时要人脸和分割
     // 在旧写法里根本表达不出来。
+    /*
+     * 检测除了「有新视频帧」之外，手机上还要**限速**。
+     *
+     * 原来只要摄像头出了新帧就跑一次检测。桌面上没问题，手机上一帧姿态检测
+     * 要二三十毫秒，30fps 的摄像头等于每帧都把主线程占满 —— 渲染跟着掉，
+     * 录出来的视频也跟着卡。
+     *
+     * 渲染仍然满帧，只是覆盖层的更新慢一点。这在观感上几乎看不出来：
+     * fluidity 的 detectHz 本来就只有 14，泡泡和手部也不需要 30Hz 的位置更新。
+     */
     const frameTime = this.video ? this.video.currentTime : t;
-    if (frameTime !== this.lastVideoTime) {
+    const minGap = this.degraded ? 1 / DETECT_HZ_MOBILE : 0;
+    if (frameTime !== this.lastVideoTime && t - this.lastDetectT >= minGap) {
       this.lastVideoTime = frameTime;
+      this.lastDetectT = t;
       this.perceive(now);
     }
 
@@ -1204,6 +1302,7 @@ export class ArEngine {
         fps: this.fps,
         tracking: this.isTracking(now),
         degraded: this.degraded,
+      camera: this.camInfo,
         needsTracking: this.perception.length > 0,
       });
     }

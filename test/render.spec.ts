@@ -29,6 +29,7 @@ import {
   captureDirect,
   setControl,
   setMirrored,
+  setZoom,
   type FixtureName,
   type Harness,
 } from "../scripts/harness-driver";
@@ -820,6 +821,63 @@ test("Fluidity：人一动线条就加速，站着不动就慢下来", async () 
   expect(moving / detectHz, `手臂挥到一半时该跑到较高速率（${moving.toFixed(1)} / ${detectHz}）`).toBeGreaterThan(0.4);
   expect(peakPose, `姿态最舒展但速度为 0 时该慢下来（挥动 ${moving.toFixed(1)} → 峰值 ${peakPose.toFixed(1)}）`)
     .toBeLessThan(moving * 0.6);
+});
+
+test("数字缩放：放大之后元素还得贴在人身上", async () => {
+  /*
+   * 缩放要同时作用在**背景平面**和**归一化坐标转世界坐标**上。
+   * 只放大背景的话画面是放大了，但框还钉在原来的像素位置 —— 人往外走、
+   * 框留在原地，一眼就散架。
+   *
+   * **底图必须在同一个缩放下拍。** 第一版拿 1 倍的底图去比 2 倍的画面，
+   * 结果整个背景都被算成「元素」，重心完全失去意义（量出来反而变小了）。
+   * 缩放改的是背景，diff 的基准也得跟着改。
+   */
+  const tpl = path.join(TEMPLATES, "black-lodge.json");
+  const empty = path.join(ARTIFACTS, "__zoom-empty.json");
+  fs.writeFileSync(
+    empty,
+    JSON.stringify({
+      slug: "zoom-empty",
+      name: { zh: "空" },
+      category: "test",
+      price_cents: 0,
+      template_type: "overlay",
+      perception: [],
+      elements: [],
+    }),
+  );
+
+  /** 在指定缩放下量一次「元素重心离画面中心多远」 */
+  const spread = async (z: number) => {
+    await loadTemplate(harness.page, empty, "front");
+    await setZoom(harness.page, z);
+    const bg = decode(await capture(harness.page, 0));
+    await loadTemplate(harness.page, tpl, "front");
+    await setZoom(harness.page, z);
+    const shot = decode(await capture(harness.page, 0));
+    const c = maskCentroid(shot, bg);
+    expect(c, `${z} 倍时该有元素`).toBeTruthy();
+    /*
+     * y 的中心不是 0.5。maskCentroid 的 **y 也是按宽度归一化的**，
+     * 所以画面中心在 (0.5, 0.5 * 高/宽)。拿 0.5 当中心的话量出来的「距离」
+     * 几乎全是那个常数偏差，缩放带来的变化被淹没 —— 第一版就是这样，
+     * 1.25 倍量出来的比值只有 1.03。
+     */
+    const cy0 = (0.5 * shot.height) / shot.width;
+    return Math.hypot(c!.x - 0.5, c!.y - cy0);
+  };
+
+  const d1 = await spread(1);
+  const d2 = await spread(2);
+  await setZoom(harness.page, 1);
+
+  /*
+   * 不断言正好 2 倍：放大之后一部分元素被推出画面（black-lodge 的王冠本来就
+   * 贴着上沿），重心是**可见部分**算的，实测 2 倍时只到 1.47。
+   * 1.25 是「确实跟着放大了」和「纹丝不动（比值 1）」之间有区分度的门槛。
+   */
+  expect(d2 / d1, `重心该跟着缩放推远（${d1.toFixed(3)} → ${d2.toFixed(3)}）`).toBeGreaterThan(1.25);
 });
 
 test("换后置摄像头：元素跟着不镜像，不能贴到镜像的位置上", async () => {

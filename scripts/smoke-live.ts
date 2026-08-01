@@ -164,6 +164,41 @@ async function checkMobile(browser: Browser, baseUrl: string, slug: string): Pro
       if ((await save.count()) === 0) {
         problems.push("录完之后结果弹层里没有「Save to Photos」—— 手机上只剩下载这条麻烦路");
       }
+      /*
+       * 关掉结果弹层再往下走。它是 fixed inset-0 的，留着会盖住整个界面 ——
+       * 后面「切模板」那步会一直点不到，超时 30 秒才报错，而报出来的是
+       * 「locator timeout」这种和真实原因毫无关系的信息。
+       */
+      const retake = page.getByRole("button", { name: /retake|再拍/i });
+      if (await retake.count()) await retake.first().click();
+      await page.waitForTimeout(500);
+    }
+
+    /*
+     * 切模板**不能**重开摄像头。
+     *
+     * iOS Safari 每次页面加载问一次权限；如果切模板还要重新 getUserMedia，
+     * 用户就会觉得「权限一直在弹」。现在的实现是对的（切模板走客户端的
+     * applyTemplate，只换渲染管线），但没有任何东西拦着以后有人加一行
+     * startCamera 进去 —— 那种回归在桌面上一点感觉都没有，只有手机上才难受。
+     */
+    const before = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum.length)) as number;
+    /*
+     * 必须限定 `:visible`。
+     *
+     * 桌面那一排也渲染了同名的模板按钮（只是被 CSS 隐藏），不加限定的话
+     * .first() 命中的是隐藏的那个，然后一直等它可见 —— 报出来是
+     * 「locator timeout」，和真实原因（选错了元素）毫无关系。
+     * 「同一个东西在桌面和手机各有一份」在这个仓库里已经咬过好几次了。
+     */
+    const otherTpl = page.locator("button:visible").filter({ hasText: /shower|soap bubbles/i });
+    if (await otherTpl.count()) {
+      await otherTpl.first().click({ timeout: 8000 });
+      await page.waitForTimeout(2500);
+      const after = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum.length)) as number;
+      if (after > before) {
+        problems.push(`切模板又调了一次 getUserMedia（${before} → ${after}）—— iOS 上这会表现成权限反复弹`);
+      }
     }
 
     const calls = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum)) as {
@@ -183,7 +218,13 @@ async function checkMobile(browser: Browser, baseUrl: string, slug: string): Pro
       }
     }
   } catch (e) {
-    problems.push(`手机端检查失败：${(e as Error).message.split("\n")[0]}`);
+    /*
+     * 失败时把当时的画面存下来。
+     * 只报「locator timeout」的话和真实原因毫无关系 —— 上一次卡住是因为
+     * 结果弹层盖住了整个界面，光看错误信息完全猜不到。
+     */
+    await page.screenshot({ path: path.join(OUT, "mobile-fail.png") }).catch(() => {});
+    problems.push(`手机端检查失败：${(e as Error).message.split("\n")[0]}（画面见 .smoke/mobile-fail.png）`);
   }
   await ctx.close();
   return problems;

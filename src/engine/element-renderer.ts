@@ -117,6 +117,8 @@ export class ElementRenderer {
    * 框却扣在右边，而且只有换到后置摄像头才看得出来。
    */
   private mirror = true;
+  /** 数字缩放倍率。必须和背景平面用同一个值，否则放大后元素会从人身上滑开 */
+  private zoom = 1;
 
   constructor(scene: THREE.Scene) {
     this.group.renderOrder = 5;
@@ -134,12 +136,17 @@ export class ElementRenderer {
 
   /** 归一化 x（0 在画面左）→ 世界 x。镜像与否唯一的换算入口 */
   private nx2wx(nx: number): number {
-    return (this.mirror ? 0.5 - nx : nx - 0.5) * this.W;
+    return (this.mirror ? 0.5 - nx : nx - 0.5) * this.W * this.zoom;
   }
 
   /** 归一化 y → 世界 y。y 从不镜像，单独一个函数只是为了成对读着清楚 */
   private ny2wy(ny: number): number {
-    return (0.5 - ny) * this.H;
+    return (0.5 - ny) * this.H * this.zoom;
+  }
+
+  setZoom(z: number) {
+    this.zoom = z;
+    for (const it of this.items) it.fluidity?.setZoom(z);
   }
 
   setMirror(m: boolean) {

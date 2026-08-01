@@ -5,6 +5,16 @@ export const metadata: Metadata = {
   title: "AR Studio · AR camera filters in your browser",
   description:
     "Pick a template, shoot into your camera, download the clip. No install. Your footage never uploads — everything runs on your device.",
+  /*
+   * iOS 上「添加到主屏幕」之后要以 standalone 打开，靠的是这个 meta。
+   * manifest 里的 display: "standalone" 对 iOS Safari **不生效** ——
+   * 它只认 apple-mobile-web-app-capable。两个都写才两边都对。
+   */
+  appleWebApp: {
+    capable: true,
+    title: "AR Studio",
+    statusBarStyle: "black-translucent",
+  },
   openGraph: {
     title: "AR Studio",
     description: "AR camera filters in your browser. Recording built in.",
