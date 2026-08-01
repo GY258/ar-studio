@@ -49,6 +49,16 @@ type ElementAsset =
   | { kind: "gradient";   shape: "ellipse"; color: string; opacity?: number }
   | { kind: "trail";      color: string; seconds: number;   // 锚点走过的路，画成一条带
       leaf?: { key: string; spacing: number; scale: number; seed: number } }
+  | { kind: "stem";       color: string;                    // 从画面底边长到指尖的一根茎
+      finger: "thumb" | "index" | "middle" | "ring" | "pinky";  // 哪根手指的弯曲度驱动它
+      bow?: number;                                         // 弯曲程度，占画面宽度；0 = 笔直
+      segments?: number;                                    // 采样点数，默认 24
+      leaf?: { key: string; spacing: number; scale: number; seed: number };
+      flower?: { key: string; scale: number };              // 长在茎顶端，跟着生长的那头走
+      seed: number }                                        // 必填：定弯的方向和叶子的左右
+  | { kind: "bubbles";    count: number; rise: number;       // 肥皂泡，见下
+      size: [number, number]; wobble: number; popRadius: number;
+      refraction: number; iridescence: number; seed: number }
   | { kind: "pinch-bloom"; key: string; seconds: number; grow: number }  // 捏合时开一朵
 
 type ElementAnchor =
@@ -84,17 +94,52 @@ svg 和 gradient 只有宽度一种含义，写 `fit: "font"` 也按宽度处理
 
 贴在脸上的半透明东西默认就该考虑 `multiply` 或 `screen`，别一律用 normal。
 
-### trail —— 锚点走过的路
+### trail vs stem —— 先分清要哪个
+
+两个都画成一条带，但**驱动它的东西完全不同**，选错了做出来不是那个效果：
+
+| | trail | stem |
+|---|---|---|
+| 画的是 | 锚点走过的路 | 画面底边到指尖的一条曲线 |
+| 长度由什么定 | 过去 `seconds` 秒走了多远 | **这根手指弯了多少** |
+| 用户要做什么 | 挥动，停下就开始淡出 | 弯一下手指，弯多少长多少 |
+| 状态 | 跨帧历史，离线渲染必须走 `stepTo` | 当前帧的纯函数，跳到任意 t 都对 |
+
+「弯一下手指从底部长一根花出来」是 **stem**。用 trail 做的话得一直挥手，
+手一停花就开始消失 —— 完全是另一个交互。
+
+### stem —— 弯手指长出来
 
 ```jsonc
 { "id": "stem-l-index",
+  "asset": { "kind": "stem", "color": "#4FAE52", "finger": "index",
+             "bow": 0.05, "segments": 26, "seed": 107,
+             "leaf":   { "key": "emoji-leaf", "spacing": 0.85, "scale": 0.3, "seed": 11 },
+             "flower": { "key": "emoji-sunflower", "scale": 0.62 } },
+  "anchor": { "space": "hand", "hand": "left", "landmark": "index_tip" },
+  "size": { "ref": "palm_width", "scale": 0.055 } }   // scale 是茎的宽度
+```
+
+- `finger` 必填，是**驱动**这根茎的手指。一般和 anchor 的指尖对应，
+  但不强制 —— 不写茎永远不会长，所以校验器会拦
+- 必须锚在 `space: "hand"`。别的空间没有手指
+- 伸直时读到的弯曲度在 0.06 以下整根不画，免得指尖下面挂一小截毛刺
+- `flower` 长在**生长的那一头**，茎没长出来时它也不显示 ——
+  所以不用再单独写一个指尖贴纸元素，写了反而会在茎没长时孤零零挂着
+- `bow` 给一点弯是必要的：十根笔直的竖线读起来像条形码，不像植物。
+  方向由 `seed` 定，不由左右手定 —— 按左右手分会镜像般一起倒，像装饰边框
+
+### trail —— 锚点走过的路
+
+```jsonc
+{ "id": "sparkle-tail",
   "asset": { "kind": "trail", "color": "#FFD54F", "seconds": 2.6,
              "leaf": { "key": "emoji-leaf", "spacing": 0.75, "scale": 0.24, "seed": 11 } },
   "anchor": { "space": "hand", "hand": "left", "landmark": "index_tip" },
   "size": { "ref": "palm_width", "scale": 0.035 } }   // scale 是带的宽度
 ```
 
-**这是唯一一个几何形状依赖时间历史的 asset。** 别的都是「当前帧」的纯函数，
+**几何形状依赖时间历史。** 别的 asset 都是「当前帧」的纯函数，
 它是「这一段时间里锚点去过哪」。所以：
 
 - 必须锚在**会动**的东西上（`space` 是 `hand` 或 `face`）。锚在 screen 上是
@@ -106,6 +151,47 @@ svg 和 gradient 只有宽度一种含义，写 `fit: "font"` 也按宽度处理
 采样落在固定的 12Hz 时间网格上，不是每帧一次 —— 每帧一次的话同一段手势在
 60fps 和 20fps 下会生成不同的带。相邻采样点位移超过 0.18 屏会**断开重新起一条**：
 手划出画面再进来、检测短暂丢失重新锁定，都会瞬移，连起来就是一条横跨画面的假线。
+
+### bubbles —— 肥皂泡，指尖戳破
+
+```jsonc
+{ "id": "bubbles",
+  "asset": { "kind": "bubbles", "count": 30, "rise": 0.05,
+             "size": [0.028, 0.085], "wobble": 0.02, "popRadius": 1.15,
+             "refraction": 0.34, "iridescence": 0.9, "seed": 23 },
+  "anchor": { "space": "screen", "nx": 0.5, "ny": 0.5 },
+  "size": { "ref": "vw", "scale": 1 } }
+```
+
+一开场就满屏浮着，**十根指尖**（两只手）划过去都能戳破。泡泡纵向**绕回**
+（飘出顶端就从底端接着进来），所以没人戳的话一个都不会少。
+
+**破掉的不再生**，所以这个玩具有终局：全部戳完屏幕就空了。
+会不停补充的话它只是个屏保，没有「玩完了」这件事。
+必须 `perception: ["hands"]`，锚点必须是 `space: "screen"` ——
+它是满屏的模拟，不挂在任何一个点上，元素自己的 `size` 会被忽略
+（泡泡大小由 `asset.size` 这个区间决定，一屏里本来就要有大有小）。
+
+**位置是时刻的闭式函数**，不是逐帧积分：
+
+    y(t) = wrap(y0 + vy * (t - t0))
+    x(t) = x0 + sin(t * 0.21Hz + phase) * wobble
+
+所以一个泡泡从生到死只存 `{ t0, x0, r, vy, phase }` 这几个不变量，
+每帧不修改任何东西 —— 没有「浮点求和顺序敏感」，也不会因为掉帧而漂。
+真正可变的只有**破没破**一个单调位。
+
+- `popRadius` 是相对泡泡半径的倍数，给 >1 是因为**指尖 landmark 本身有抖动**，
+  按几何半径判会经常戳不中，玩起来很挫
+- `refraction` 直接采源视频纹理，不读回帧缓冲 —— 泡泡背后就是摄像头画面，
+  那正是想要的效果
+- `iridescence` 的彩虹只出现在最外那一圈。铺满整个球会得到一个饱和的彩虹环，
+  一眼假：真实肥皂泡的色散集中在掠射角，正面看几乎无色
+- 初始位置是**分层**撒的（每个槽位固定一个格子，格内抖动），不是纯随机。
+  纯随机撒 30 个点必然结块 —— 一半屏幕空着，另一半挤成一坨
+- `size` 那个区间别给太大：0.16 的泡泡在 1080p 上是 300px，几个就糊满半屏
+- 没做泡泡之间的碰撞。参考素材里它们本来就是互相穿过的，
+  做碰撞要放弃闭式位置、回到逐帧积分，把上面那一整段简单性都赔进去
 
 ### pinch-bloom —— 捏合绽放
 
@@ -260,6 +346,9 @@ jitter?: {
         | { kind: "desaturate"; amount: number }   // [0, 1]，1 = 全灰
         | { kind: "glitch"; blocks; displace; channelSplit;        // 数字信号损坏，见下
                             scanline; colorNoise; darkBias; speed; seed }
+        | { kind: "voxel"; blocks; palette; levels;               // 方块世界，见下
+                           smooth?; saturate?; faceShade; outline;
+                           grain?; ambient?; seed }
         | { kind: "mask-debug" }                   // 调试视图，见下
 }
 ```
@@ -290,6 +379,47 @@ inside 时脸上不作用，outside 时脸上保持原样。丢脸时自动关�
 
 **别拿亮度当「不是脸」的代理。** glitch 的 `darkBias` 只是让损坏偏向暗部，
 对深色皮肤、昏暗房间、浓妆阴影都会误伤；要真正保护脸就用这个字段。
+
+### voxel —— 把画面重建成 Minecraft 那样的方块世界
+
+```jsonc
+{ "kind": "voxel", "blocks": 44, "palette": 0.8, "levels": 5, "smooth": 0.7,
+  "saturate": 0.35, "faceShade": 0.42, "outline": 0.28, "grain": 0.09, "seed": 11 }
+```
+
+配 `mask.provider: "person"` + `apply: "outside"` 就是「人完全不动，只有背景变方块」。
+
+**块色来自当前帧的真实像素**，不是贴一张事先做好的场景图 ——
+所以构图和光照是按构造就匹配的，不需要任何对齐工作。代价也在这里：
+它是「你的房间被方块化」，不是「Minecraft 的瑞士山谷」。要后者得换成
+预渲染场景板，那是另一个效果。
+
+和 `pixelate` 的区别不在网格。**只做网格得到的是马赛克**（「画面糊了」），
+方块世界还需要三样东西，缺一样就不像：
+
+- `palette` 往 MC 方块色靠拢的强度。吸附时**保住原块的亮度**，
+  所以调到 1 也不会把光照拍平 —— 颜色是 MC 的，明暗还是这一帧的
+- `faceShade` 顶边提亮 / 底边压暗。这是「这是个立方体」唯一读得出来的线索，
+  给 0 的话只是彩色瓷砖
+- `outline` 块间接缝。方块要能一个个数出来
+
+调参上踩过的两个坑：
+
+0. **`blocks` 和 `smooth` 是两个独立的选择，别绑在一起。**
+   辨识度来自**大片连续的同一种方块**（一整面石头墙、一片草地），
+   不来自「每块颜色量化」—— 逐块独立量化一张有噪点的照片，出来必然是椒盐点。
+   连贯靠 `smooth`（相邻块共享采样窗口 → 落到同一个调色板项），
+   不靠把块调大。我一开始把这两件事绑在一起，为了压椒盐点把块调到 20，
+   结果背景里什么都认不出来了。**先用 `smooth` 压噪，再单独选块大小。**
+1. **`levels` 会把暗部量化成纯黑。** 真实房间的暗部是 0.02~0.05，
+   `levels: 5` 一量化直接归零，半个背景死黑。`ambient`（缺省 0.16）是暗部地板，
+   MC 的世界里没有纯黑 —— 别把它调到 0。
+2. **提饱和是在平均之后做的**，别指望 `saturate` 去救灰扑扑的画面 ——
+   放在平均之前提的是传感器噪点的彩度，一面米色的墙会长出淡紫、淡黄、
+   淡蓝的杂色方块，正好是最毁效果的那种椒盐点。
+3. **`palette` 和 `levels` 一起调猛会把整面墙压成同一块石头。**
+   `levels: 4` + `palette: 0.85` 出来是一片均匀的灰，原来的色彩变化全没了。
+   先把 `levels` 放到 6~8，再调 `palette`。
 
 ### glitch
 

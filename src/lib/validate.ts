@@ -168,7 +168,8 @@ const ANIM_PRESETS = ["float", "fall", "pulse", "spin", "emit-fall-fade"];
 const EASES = ["linear", "in", "out", "inout", "gravity", "bounce"];
 /** 只有「0→1 走一趟」的原语能缓动。周期性原语套 ease 会在接缝处顿一下，见 animations.ts */
 const EASE_PRESETS = ["fall", "emit-fall-fade"];
-const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "pinch-bloom"];
+const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "stem", "bubbles", "pinch-bloom"];
+const FINGER_NAMES = ["thumb", "index", "middle", "ring", "pinky"];
 const HAND_ANCHOR_NAMES = Object.keys(HAND_ANCHORS);
 const SIZE_REFS = ["vw", "iod", "eye_width", "face_width", "palm_width"];
 const SIZE_FITS = ["width", "font"];
@@ -178,7 +179,7 @@ const GENERATORS = ["mirrorPair", "trail", "columns", "scatter", "ring", "spread
 const JITTER_GENERATORS = ["mirrorPair", "trail", "ring", "spread"];
 const MASK_PROVIDERS = ["person", "face-ellipse", "none"];
 /** schema 认识的 kind。是不是**实现了**另说，见下面的 IMPLEMENTED_EFFECTS */
-const EFFECT_KINDS = ["pixelate", "blur", "desaturate", "glitch", "mask-debug", "posterize", "pixel-art"];
+const EFFECT_KINDS = ["pixelate", "blur", "desaturate", "glitch", "voxel", "mask-debug", "posterize", "pixel-art"];
 
 /** 展开后的元素数硬上限。生成器很容易写出爆炸的数量。 */
 const MAX_ELEMENTS = 120;
@@ -244,6 +245,28 @@ function validateAnimations(anims: unknown[], at: string, p: string[]) {
   }
 }
 
+/** 沿途叶子。trail 和 stem 共用同一份 schema，别写两遍 */
+function validateLeaf(leaf: unknown, at: string, p: string[]) {
+  if (leaf === undefined) return;
+  const lf = leaf as Raw;
+  if (typeof lf !== "object" || lf === null) {
+    p.push(`${at}.asset.leaf 形如 { "key": "emoji-leaf", "spacing": 0.9, "scale": 0.34, "seed": 11 }`);
+    return;
+  }
+  const keys = svgKeys();
+  if (typeof lf.key !== "string" || (keys.length && !keys.includes(lf.key))) {
+    p.push(`${at}.asset.leaf.key "${lf.key}" 不在素材库里。相近的有：${nearest(String(lf.key), keys).join(", ")}`);
+  }
+  if (!inRange(lf.spacing, 0.05, 5)) p.push(`${at}.asset.leaf.spacing 应在 [0.05, 5]（相邻两片的间距，单位 size.ref）`);
+  if (!inRange(lf.scale, 0.02, 3)) p.push(`${at}.asset.leaf.scale 应在 [0.02, 3]`);
+  if (!num(lf.seed)) {
+    p.push(
+      `${at}.asset.leaf.seed 必填。叶子的位置和大小是 hash(第几片, seed) 的纯函数，` +
+        `没有 seed 每次长的地方都不一样，golden 对比就不成立`,
+    );
+  }
+}
+
 function validateAsset(a: unknown, at: string, p: string[]) {
   const asset = a as Raw | undefined;
   if (!asset || typeof asset !== "object") {
@@ -270,24 +293,62 @@ function validateAsset(a: unknown, at: string, p: string[]) {
     if (!inRange(asset.seconds, 0.2, 8)) {
       p.push(`${at}.asset.seconds 应在 [0.2, 8]（保留多久的历史，也就是这条带有多长）`);
     }
-    if (asset.leaf !== undefined) {
-      const lf = asset.leaf as Raw;
-      if (typeof lf !== "object" || lf === null) {
-        p.push(`${at}.asset.leaf 形如 { "key": "emoji-leaf", "spacing": 0.9, "scale": 0.34, "seed": 11 }`);
+    validateLeaf(asset.leaf, at, p);
+  }
+
+  if (kind === "stem") {
+    if (typeof asset.color !== "string") p.push(`${at}.asset.color 必填，茎的颜色`);
+    if (typeof asset.finger !== "string" || !FINGER_NAMES.includes(asset.finger)) {
+      p.push(
+        `${at}.asset.finger 必填，是驱动这根茎的手指。可选：${FINGER_NAMES.join(" / ")}。` +
+          `不写的话茎永远不会长 —— 长度完全由这根手指的弯曲度决定`,
+      );
+    }
+    if (asset.bow !== undefined && !inRange(asset.bow, 0, 0.4)) {
+      p.push(`${at}.asset.bow 应在 [0, 0.4]（弯曲程度，占画面宽度的比例；0 = 笔直的竖线）`);
+    }
+    if (asset.segments !== undefined && !inRange(asset.segments, 4, 64)) {
+      p.push(`${at}.asset.segments 应在 [4, 64]`);
+    }
+    if (!num(asset.seed)) {
+      p.push(`${at}.asset.seed 必填。它定弯的方向和叶子的左右，没它同一个模板每次加载都不一样`);
+    }
+    validateLeaf(asset.leaf, at, p);
+    if (asset.flower !== undefined) {
+      const fl = asset.flower as Raw;
+      if (typeof fl !== "object" || fl === null) {
+        p.push(`${at}.asset.flower 形如 { "key": "emoji-sunflower", "scale": 0.55 }`);
       } else {
         const keys = svgKeys();
-        if (typeof lf.key !== "string" || (keys.length && !keys.includes(lf.key))) {
-          p.push(`${at}.asset.leaf.key "${lf.key}" 不在素材库里。相近的有：${nearest(String(lf.key), keys).join(", ")}`);
+        if (typeof fl.key !== "string" || (keys.length && !keys.includes(fl.key))) {
+          p.push(`${at}.asset.flower.key "${fl.key}" 不在素材库里。相近的有：${nearest(String(fl.key), keys).join(", ")}`);
         }
-        if (!inRange(lf.spacing, 0.05, 5)) p.push(`${at}.asset.leaf.spacing 应在 [0.05, 5]（相邻两片的间距，单位 size.ref）`);
-        if (!inRange(lf.scale, 0.02, 3)) p.push(`${at}.asset.leaf.scale 应在 [0.02, 3]`);
-        if (!num(lf.seed)) {
-          p.push(
-            `${at}.asset.leaf.seed 必填。叶子的位置和大小是 hash(第几片, seed) 的纯函数，` +
-              `没有 seed 每次长的地方都不一样，golden 对比就不成立`,
-          );
-        }
+        if (!inRange(fl.scale, 0.02, 3)) p.push(`${at}.asset.flower.scale 应在 [0.02, 3]`);
       }
+    }
+  }
+
+  if (kind === "bubbles") {
+    if (!inRange(asset.count, 1, 120)) p.push(`${at}.asset.count 应在 [1, 120]（同时最多几个）`);
+    if (!inRange(asset.rise, 0.01, 1)) p.push(`${at}.asset.rise 应在 [0.01, 1]（每秒走过画面高度的比例）`);
+    if (!pair(asset.size)) {
+      p.push(`${at}.asset.size 必须是 [最小, 最大]，占画面宽度的比例`);
+    } else {
+      const [lo, hi] = asset.size as [number, number];
+      if (!inRange(lo, 0.005, 0.5) || !inRange(hi, 0.005, 0.5)) p.push(`${at}.asset.size 的两端都应在 [0.005, 0.5]`);
+      if (lo > hi) p.push(`${at}.asset.size 的最小值大于最大值了`);
+    }
+    if (!inRange(asset.wobble, 0, 0.3)) p.push(`${at}.asset.wobble 应在 [0, 0.3]（横向摆动幅度）`);
+    if (!inRange(asset.popRadius, 0.2, 4)) {
+      p.push(`${at}.asset.popRadius 应在 [0.2, 4]（戳破判定半径，相对泡泡半径。>1 是因为指尖 landmark 本身有抖动）`);
+    }
+    if (!inRange(asset.refraction, 0, 1)) p.push(`${at}.asset.refraction 应在 [0, 1]（把背后画面推开多少）`);
+    if (!inRange(asset.iridescence, 0, 2)) p.push(`${at}.asset.iridescence 应在 [0, 2]（边缘彩虹强度）`);
+    if (!num(asset.seed)) {
+      p.push(
+        `${at}.asset.seed 必填。冒泡的位置、大小、速度都是 hash(第几个, seed) 的纯函数 —— ` +
+          `用随机数的话 renderAt(t) 不再确定，整套渲染回归就不成立了`,
+      );
     }
   }
 
@@ -433,6 +494,18 @@ function validateElement(e: Raw, at: string, p: string[], ids: Set<string>) {
     p.push(
       `${at} 的 asset 是 pinch-bloom 但锚不在 hand 空间 —— 捏合是手的动作，` +
         `要靠拇指尖和食指尖的距离判定，别的空间没有这两个点`,
+    );
+  }
+  if (assetKind === "bubbles" && space !== "screen") {
+    p.push(
+      `${at} 的 asset 是 bubbles 但锚不在 screen 空间 —— 它是满屏的模拟，` +
+        `不挂在任何一个点上。写 { "space": "screen", "nx": 0.5, "ny": 0.5 }`,
+    );
+  }
+  if (assetKind === "stem" && space !== "hand") {
+    p.push(
+      `${at} 的 asset 是 stem 但锚不在 hand 空间 —— 茎的长度由手指弯曲度决定，` +
+        `别的空间没有手指。要「从底边长到某个点」而不看手，用 trail 或者普通贴纸`,
     );
   }
   if (assetKind === "trail" && space === "screen") {
@@ -771,6 +844,34 @@ function validateSource(raw: Raw, p: string[]) {
     if (!num(eff.seed)) {
       p.push(
         "source.effect.seed 必填。损坏必须是 hash(块, 帧号, seed) 的纯函数 —— " +
+          "用随机数的话 renderAt(t) 不再确定，整套渲染回归就不成立了",
+      );
+    }
+  }
+
+  if (kind === "voxel") {
+    if (!inRange(eff.blocks, 8, 200)) p.push("source.effect.blocks 应在 [8, 200]（短边分几格）");
+    for (const [k, hi, hint] of [
+      ["palette", 1, "往 Minecraft 方块色靠拢的强度。0 = 只方块化不改色"],
+      ["faceShade", 1, "立方体的面：顶边提亮 / 底边压暗"],
+      ["outline", 1, "块间接缝压暗多少"],
+    ] as const) {
+      if (!inRange(eff[k], 0, hi)) p.push(`source.effect.${k} 应在 [0, ${hi}]（${hint}）`);
+    }
+    if (!inRange(eff.levels, 2, 32)) p.push("source.effect.levels 应在 [2, 32]（每通道量化到几级）");
+    if (eff.saturate !== undefined && !inRange(eff.saturate, 0, 2)) {
+      p.push("source.effect.saturate 应在 [0, 2]（量化前先提多少饱和度）");
+    }
+    if (eff.grain !== undefined && !inRange(eff.grain, 0, 1)) p.push("source.effect.grain 应在 [0, 1]（块内颗粒）");
+    if (eff.smooth !== undefined && !inRange(eff.smooth, 0, 1)) {
+      p.push("source.effect.smooth 应在 [0, 1]（用多大范围的颜色填一个块。和 blocks 是两个独立的选择）");
+    }
+    if (eff.ambient !== undefined && !inRange(eff.ambient, 0, 0.6)) {
+      p.push("source.effect.ambient 应在 [0, 0.6]（暗部地板。MC 的世界里没有纯黑）");
+    }
+    if (!num(eff.seed)) {
+      p.push(
+        "source.effect.seed 必填。块内颗粒是 hash(块坐标, seed) 的纯函数 —— " +
           "用随机数的话 renderAt(t) 不再确定，整套渲染回归就不成立了",
       );
     }

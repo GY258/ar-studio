@@ -1,0 +1,44 @@
+{
+  "slug": "soap-bubbles",
+  "name": {
+    "zh": "肥皂泡",
+    "en": "Soap Bubbles"
+  },
+  "category": "fun",
+  "sort_order": 25,
+  "price_cents": 0,
+  "schema_version": 2,
+  "template_type": "overlay",
+  "perception": [
+    "hands"
+  ],
+  "preview": {},
+  "elements": [
+    {
+      "id": "bubbles",
+      "asset": {
+        "kind": "bubbles",
+        "count": 30,
+        "rise": 0.05,
+        "size": [
+          0.028,
+          0.085
+        ],
+        "wobble": 0.02,
+        "popRadius": 1.15,
+        "refraction": 0.34,
+        "iridescence": 0.9,
+        "seed": 23
+      },
+      "anchor": {
+        "space": "screen",
+        "nx": 0.5,
+        "ny": 0.5
+      },
+      "size": {
+        "ref": "vw",
+        "scale": 1
+      }
+    }
+  ]
+}

@@ -26,6 +26,7 @@ import {
   switchTemplate,
   capture,
   templatePeriod,
+  captureDirect,
   type FixtureName,
   type Harness,
 } from "../scripts/harness-driver";
@@ -159,6 +160,22 @@ async function baseFrame(fixture: FixtureName) {
   return decode(await capture(harness.page, 0));
 }
 
+/**
+ * 这些模板在 t=0 画面是空的 —— 内容由 fixture 序列中段的手势触发。
+ *
+ * 茎的长度完全由手指弯曲度决定，而序列的第 0 帧是伸开的手（按设计就该没有茎）。
+ * 在 t=0 取 golden 会得到一张空图，然后「覆盖率 > 0.001」和掩膜 IoU
+ * 全都在拿空集比空集 —— 断言还在，但已经什么都不保证了。
+ * 所以把 golden 和三个探针一起平移到手势真正发生的时刻。
+ */
+const GOLDEN_AT: Record<string, number> = {
+  // 弯曲扫动窗口是全程的 0.32~0.72，序列 3 秒 → 1.5s 落在峰值附近
+  "finger-flowers": 1.5,
+  "hand-stem": 1.5,
+  // 轨迹在 t=0 只有一个采样点，画不出带。2.0s 时带已经长起来了
+  "hand-trail": 2.0,
+};
+
 for (const file of templatesWithElements()) {
   const slug = path.basename(file, ".json");
   const templatePath = path.join(TEMPLATES, file);
@@ -166,19 +183,20 @@ for (const file of templatesWithElements()) {
   test(`${slug} · 渲染回归`, async () => {
     const { period: P, closes } = templatePeriod(templatePath);
     const fx = fixtureFor(templatePath);
+    const t0At = GOLDEN_AT[slug] ?? 0;
     const count = await loadTemplate(harness.page, templatePath, fx);
     expect(count, "展开后应该有元素").toBeGreaterThan(0);
 
-    const t0 = decode(await capture(harness.page, 0));
+    const t0 = decode(await capture(harness.page, t0At));
     // 探针取 P/4 而不是 P/2：float 和 pulse 都是正弦，半周期正好又回到起点，
     // 用 P/2 会把「动画在动」误判成「没动」。P/4 是正弦的峰值。
-    const tQuarter = decode(await capture(harness.page, P / 4));
-    const tFull = decode(await capture(harness.page, P));
+    const tQuarter = decode(await capture(harness.page, t0At + P / 4));
+    const tFull = decode(await capture(harness.page, t0At + P));
 
     const goldenPath = path.join(GOLDEN, `${slug}-t0.png`);
 
     if (UPDATE || !fs.existsSync(goldenPath)) {
-      fs.writeFileSync(goldenPath, await capture(harness.page, 0));
+      fs.writeFileSync(goldenPath, await capture(harness.page, t0At));
       test.info().annotations.push({ type: "golden", description: `已写入 ${slug}-t0.png，请人工过目后提交` });
     }
 
@@ -216,7 +234,9 @@ for (const file of templatesWithElements()) {
     // 没有任何动画的模板是合法的（lowres-life 就是一块静态假 UI），
     // 对它断言「必须有差异」永远会红。显式跳过并记一笔，不要默默放过。
     if (hasAnimations(templatePath)) {
-      expect(diffRatio(t0, tQuarter, 0.05), `t=0 与 t=P/4（P=${P}s）应该有差异`).toBeGreaterThan(MOTION_MIN);
+      expect(diffRatio(t0, tQuarter, 0.05), `t=${t0At} 与 t=${t0At}+P/4（P=${P}s）应该有差异`).toBeGreaterThan(
+        MOTION_MIN,
+      );
     } else {
       test.info().annotations.push({
         type: "skipped-assertion",
@@ -227,7 +247,9 @@ for (const file of templatesWithElements()) {
 
     // --- 周期闭合：相位算对了才闭得上 ---
     if (closes) {
-      expect(diffRatio(t0, tFull, 0.05), `t=0 与 t=P（P=${P}s）应该几乎重合`).toBeLessThanOrEqual(CLOSURE_MAX);
+      expect(diffRatio(t0, tFull, 0.05), `t=${t0At} 与 t=${t0At}+P（P=${P}s）应该几乎重合`).toBeLessThanOrEqual(
+        CLOSURE_MAX,
+      );
     } else {
       // 各元素 period 两两互质，不存在可用的公共周期。挑一个数字假装闭合
       // 只会得到一条永远红或永远无意义的断言，所以显式跳过并说明。
@@ -301,6 +323,63 @@ test("lowres-life：蒙版内与原帧逐像素相同，蒙版外被真正抹掉
 });
 
 /**
+ * 「存在周期为 period 的竖直网格」有多强。
+ *
+ * 做法：逐列算和左邻列的平均差，然后按 period 做相位扫描，
+ * 取「落在网格线上的列」和「块内部的列」的平均差之比，选最好的相位。
+ * 有规则网格时接缝那几列的差远大于内部，比值会明显 > 1；
+ * 照片上无论怎么扫都找不到这样的相位，比值贴近 1。
+ *
+ * 为什么不用「横向同色能连多远」：那个判据会被**我自己加的**块内渐变
+ * （左侧高光、上下亮暗边）破坏 —— 块是实打实分了，但块内部并不是纯平色，
+ * 于是连续同色长度上不去。判据得对得上真正做出来的东西，
+ * 而这个效果真正保证的是「网格是规则的、周期等于声明的块大小」。
+ */
+function gridScore(
+  img: { width: number; data: Uint8Array | Uint8ClampedArray },
+  x0: number,
+  y0: number,
+  w: number,
+  h: number,
+  period: number,
+) {
+  const W = img.width;
+  const colDiff: number[] = [];
+  for (let x = x0 + 1; x < x0 + w; x++) {
+    let acc = 0;
+    for (let y = y0; y < y0 + h; y++) {
+      const o = (y * W + x) << 2;
+      const q = (y * W + x - 1) << 2;
+      acc +=
+        Math.abs(img.data[o] - img.data[q]) +
+        Math.abs(img.data[o + 1] - img.data[q + 1]) +
+        Math.abs(img.data[o + 2] - img.data[q + 2]);
+    }
+    colDiff.push(acc / h);
+  }
+
+  let best = 0;
+  const P = Math.max(2, Math.round(period));
+  for (let phase = 0; phase < P; phase++) {
+    let onSum = 0;
+    let onN = 0;
+    let offSum = 0;
+    let offN = 0;
+    for (let i = 0; i < colDiff.length; i++) {
+      if (i % P === phase) {
+        onSum += colDiff[i];
+        onN++;
+      } else {
+        offSum += colDiff[i];
+        offN++;
+      }
+    }
+    if (onN && offN && offSum > 0) best = Math.max(best, onSum / onN / (offSum / offN));
+  }
+  return best;
+}
+
+/**
  * 帧效果必须真的作用。
  *
  * 这条挡的是一类静默失效：`blur` 曾经能过校验、能正常渲染、什么效果都没有、
@@ -311,6 +390,10 @@ test("lowres-life：蒙版内与原帧逐像素相同，蒙版外被真正抹掉
 for (const [kind, effect] of [
   ["blur", { kind: "blur", radius: 0.02 }],
   ["desaturate", { kind: "desaturate", amount: 1 }],
+  [
+    "voxel",
+    { kind: "voxel", blocks: 30, palette: 0.55, levels: 7, saturate: 0.5, faceShade: 0.4, outline: 0.26, grain: 0.09, seed: 11 },
+  ],
 ] as const) {
   test(`帧效果 ${kind}：蒙版外真的变了，蒙版内逐像素不变`, async () => {
     const file = path.join(ARTIFACTS, `__effect-${kind}.json`);
@@ -376,6 +459,24 @@ for (const [kind, effect] of [
       expect(after / before, `蒙版外的高频能量应该被模糊抹掉（${before.toFixed(1)} → ${after.toFixed(1)}）`).toBeLessThan(
         0.6,
       );
+    } else if (kind === "voxel") {
+      /*
+       * 判据是**横向色块的平均长度**，不是「像素变了多少」。
+       *
+       * 体素化的产出必须是「成片的方块」。只看像素变化的话，一个只改了颜色、
+       * 根本没分块的实现照样能过 —— 而那正是这个效果最可能的失败形态
+       * （网格算错、blocks 传成 0、uniform 没接上，画面都还是「变了」的）。
+       * 色块长度直接量「一行上连续同色能连多远」，分辨率无关，
+       * 而且只有真的分块了才会涨上去。
+       */
+      // blocks 是「短边分几格」，harness 画布是横的，所以块边长 = 高 / blocks
+      const period = frame.height / 30;
+      const before = gridScore(base, bx, by, 120, 120, period);
+      const after = gridScore(frame, bx, by, 120, 120, period);
+      expect(after, `蒙版外应该出现周期 ${period.toFixed(1)}px 的规则网格（网格强度 ${after.toFixed(2)}）`).toBeGreaterThan(
+        2.5,
+      );
+      expect(before, "原帧上不该找得到这个周期的网格，否则这条断言证明不了是效果做的").toBeLessThan(1.6);
     } else {
       expect(outside.chroma, "amount=1 时蒙版外应该没有彩度了").toBeLessThan(2);
     }
@@ -559,14 +660,18 @@ test("手部感知：有手时元素显示，没手时隐藏", async () => {
    */
   const tpl = path.join(TEMPLATES, "finger-flowers.json");
 
+  // 取 GOLDEN_AT 那个时刻而不是 t=0：茎的长度由手指弯曲度决定，
+  // 序列第 0 帧是伸开的手，按设计就该一根茎都没有 —— 在 t=0 断言「应该画出来」
+  // 会永远红，而把它改成 t=0 断言「覆盖率 > 0」又等于什么都不验
+  const at = GOLDEN_AT["finger-flowers"];
   await loadTemplate(harness.page, tpl, "hands");
-  const withHands = decode(await capture(harness.page, 0));
+  const withHands = decode(await capture(harness.page, at));
   const handsBase = await baseFrame("hands");
   expect(coverage(withHands, handsBase), "有手时指尖元素应该画出来").toBeGreaterThan(0.002);
 
   // front 那张照片里没有手，fixture 也没录 hands.json
   await loadTemplate(harness.page, tpl, "front");
-  const noHands = decode(await capture(harness.page, 0));
+  const noHands = decode(await capture(harness.page, at));
   const frontBase = await baseFrame("front");
   expect(coverage(noHands, frontBase), "没有手时手部元素必须全部隐藏").toBeLessThan(0.0005);
 });
@@ -585,23 +690,198 @@ test("轨迹：状态层确定，且带真的在长", async () => {
    *           这恰好是最容易出错的路径：只要有一点状态没清干净，两张图就不一样
    *   非空 —— 带真的画出了像素，不是几何算对了但顶点全塌在一起
    */
-  const tpl = path.join(TEMPLATES, "finger-flowers.json");
+  /*
+   * 用专门的探针模板 hand-trail，不用 finger-flowers。
+   *
+   * finger-flowers 换成 stem 之后一个 trail 元素都不剩了，而这条测试当时**还是绿的** ——
+   * covEarly 在 t=0.3 恰好是 0（弯曲窗口还没开始），比值成了 Infinity；
+   * covLate 在 t=2.4 量到的是捏合开出来的花（2.4/3 正好落在第二段捏合窗口里）。
+   * 也就是说它在拿捏合的像素证明轨迹在长。
+   *
+   * trail 这个 asset 引擎里还实现着，没有模板用它就等于零覆盖 —— 所以留一个
+   * hidden 的探针模板专门钉它，而不是把断言删掉。
+   */
+  const tpl = path.join(TEMPLATES, "hand-trail.json");
   await loadTemplate(harness.page, tpl, "hands");
   const base = await baseFrame("hands");
   await loadTemplate(harness.page, tpl, "hands");
 
-  const early = decode(await capture(harness.page, 0.3));
-  const lateBuf = await capture(harness.page, 2.4);
+  // 0.9 / 2.7：探针锚在手腕和指根上，只受下落影响。下落是 p^1.25、起步慢，
+  // 所以 early 不能太早（0.6s 时只有几百个像素，那个量级下比值和除以零没区别）
+  const early = decode(await capture(harness.page, 0.9));
+  const lateBuf = await capture(harness.page, 2.7);
   const late = decode(lateBuf);
 
   const covEarly = coverage(early, base);
   const covLate = coverage(late, base);
-  expect(covLate, "带应该画出成规模的像素").toBeGreaterThan(0.01);
+  expect(covEarly, "早期就该有一小段带了，否则下面的比值是在除以零").toBeGreaterThan(0.0015);
+  // 0.006 ≈ 3000 个像素，肉眼一眼能看到的一条带。
+  // 这个数是按 hand-trail 这个探针（4 条带、宽 0.11 掌宽）定的，
+  // 不是沿用原来 finger-flowers 十条带时代的 0.01 —— 那个数对这里已经没有依据，
+  // 而「为了压过一个陈旧的阈值去调模板参数」是把断言调成必过，不是验证
+  expect(covLate, "带应该画出成规模的像素").toBeGreaterThan(0.006);
   expect(covLate / covEarly, `带应该随时间变长（${covEarly.toFixed(4)} → ${covLate.toFixed(4)}）`).toBeGreaterThan(1.5);
 
   // 再来一次同一个 t。走的是「时间倒流 → 清状态 → 重新按定步长积到 2.4」
-  const again = await capture(harness.page, 2.4);
+  const again = await capture(harness.page, 2.7);
   expect(again.equals(lateBuf), "同一个 t 渲染两次必须逐位相同，否则状态没清干净或步长不定").toBe(true);
+});
+
+test("泡泡：一开场就满屏、在动、指尖真的能戳破", async () => {
+  /*
+   * 四件事一起验，因为**光看画面分不清它们**：泡泡少了，可能是被戳破了，
+   * 也可能是飘走了；泡泡没动，可能是模拟停了，也可能是恰好那一帧。
+   * 所以「戳破」那条直接读活着的泡泡数，不看像素。
+   *
+   * 第一条钉的是这次改的需求：泡泡**不从画面底边冒出来**，t=0 时整屏就该是满的。
+   * 上一版是从底部一个个飘上来的，那条路上 t=0 画面几乎是空的 ——
+   * 只断言「整帧覆盖率 > 0」的话，两种实现都能过。
+   */
+  const tpl = path.join(TEMPLATES, "soap-bubbles.json");
+  const alive = () =>
+    harness.page.evaluate(
+      () =>
+        (window as unknown as { harness: { engine: { debugStats(): { bubblesAlive: number } } } }).harness.engine
+          .debugStats().bubblesAlive,
+    );
+
+  /** 指定横条里有多少像素和底图不同 */
+  const bandCov = (
+    img: { width: number; height: number; data: Uint8Array | Uint8ClampedArray },
+    base: { width: number; data: Uint8Array | Uint8ClampedArray },
+    y0f: number,
+    y1f: number,
+  ) => {
+    let n = 0;
+    let total = 0;
+    for (let y = Math.floor(img.height * y0f); y < Math.floor(img.height * y1f); y++) {
+      for (let x = 0; x < img.width; x++) {
+        const o = (y * img.width + x) << 2;
+        const d =
+          Math.abs(img.data[o] - base.data[o]) +
+          Math.abs(img.data[o + 1] - base.data[o + 1]) +
+          Math.abs(img.data[o + 2] - base.data[o + 2]);
+        if (d > 12) n++;
+        total++;
+      }
+    }
+    return n / total;
+  };
+
+  await loadTemplate(harness.page, tpl, "front");
+  const base = await baseFrame("front");
+  await loadTemplate(harness.page, tpl, "front");
+
+  // --- 一开场就满屏：t=0 的**上四分之一**就该有泡泡 ---
+  const t0 = decode(await capture(harness.page, 0));
+  expect(bandCov(t0, base, 0, 0.25), "t=0 时画面顶部就该有泡泡，不是从底边冒上来").toBeGreaterThan(0.05);
+
+  // --- 在动 ---
+  const later = decode(await capture(harness.page, 4.0));
+  expect(diffRatio(t0, later, 0.05), "泡泡应该在飘").toBeGreaterThan(0.05);
+
+  await capture(harness.page, 3.0);
+  const noHands = await alive();
+  expect(noHands, "没有手时一个都不该破").toBe(30);
+
+  /*
+   * --- 有手：每个槽位的位置是 hash(槽位, 第几代, seed) 的纯函数，
+   *     两次跑的冒泡序列完全一样，所以活着的变少只可能是被戳破了 ---
+   */
+  await loadTemplate(harness.page, tpl, "hands");
+  const buf = await capture(harness.page, 3.0);
+  const withHands = await alive();
+  expect(withHands, `指尖划过去应该戳破一些（无手 ${noHands} → 有手 ${withHands}）`).toBeLessThan(noHands);
+
+  /*
+   * --- 破了不再生，所以最终能清空。这是这个玩具的终局，也是它和屏保的区别 ---
+   *
+   * 泡泡纵向绕回（飘出顶端从底端进来），fixture 里那只手是张开的手掌 ——
+   * 所以只要跑得够久，每个泡泡都会飘过手掌被戳破。
+   * 断言是**单调递减**加上最终清空：会补充的实现过不了单调那一条。
+   */
+  const trail: number[] = [];
+  for (const tt of [6, 12, 20, 30, 42]) {
+    await capture(harness.page, tt);
+    trail.push(await alive());
+  }
+  for (let i = 1; i < trail.length; i++) {
+    expect(trail[i], `活着的泡泡只能变少不能变多（${trail.join(" → ")}）`).toBeLessThanOrEqual(trail[i - 1]);
+  }
+  /*
+   * 断言「剩得很少」而不是「归零」。
+   *
+   * 归零离线达不到，而且**原因在 fixture 不在代码**：泡泡横向只摆动 2% 画面宽，
+   * 而 fixture 里那只手固定在画面中间 —— 最左最右两列的泡泡永远碰不到它。
+   * 真机上手能划到任何地方，全戳完是做得到的。
+   *
+   * 写成 toBe(0) 的话这条会一直红，而红的原因和被测行为无关；
+   * 放宽到「没有补充」+「掉到个位数」才是这个环境能证明的事。
+   */
+  expect(trail[trail.length - 1], `跑够久该只剩边角上碰不到的几个（${trail.join(" → ")}）`).toBeLessThan(8);
+
+  // 同一个 t 再来一次：戳破是仅有的可变状态，它必须可回放
+  await capture(harness.page, 3.0);
+  const again = await capture(harness.page, 3.0);
+  expect(again.equals(buf), "同一个 t 渲染两次必须逐位相同 —— 戳破的状态没清干净就会不一样").toBe(true);
+});
+
+test("时间倒流之后，同一个 t 必须和顺着走到 t 完全一样", async () => {
+  /*
+   * 这条钉的是一个真的踩过的 bug：stepTo 在倒流时调了 resetSim()，
+   * 而 resetSim 把 simT 设成 -1 —— 又正好被「首次调用不从 0 补一整段」
+   * 那条优化当成首次调用，于是倒流回 t 只喂了一个采样点，轨迹是空的。
+   *
+   * 表现是「同一个 t，之前渲染过更晚的时刻再回来，画面不一样」。
+   * 离线 harness 到处在跳时刻（golden 在 t0、探针在 t0+P/4 和 t0+P，
+   * 然后回头再取 t0），所以这不是个理论问题 —— 它当场让 hand-trail 的
+   * golden 录不出来。
+   *
+   * 用有状态的 hand-trail 测：无状态模板走哪条路都一样，证明不了任何事。
+   */
+  const tpl = path.join(TEMPLATES, "hand-trail.json");
+  await loadTemplate(harness.page, tpl, "hands");
+  const base = await baseFrame("hands");
+  await loadTemplate(harness.page, tpl, "hands");
+
+  const first = await capture(harness.page, 1.5);
+  expect(coverage(decode(first), base), "这个时刻带必须真的画出来了").toBeGreaterThan(0.004);
+
+  await capture(harness.page, 2.7); // 先走到更晚的时刻
+  const rewound = await capture(harness.page, 1.5); // 再倒回来
+
+  expect(rewound.equals(first), "倒流回同一个 t 必须逐位相同 —— 否则状态清了但没重积").toBe(true);
+});
+
+test("茎是纯函数：直接跳到 t 和逐步积到 t 必须一模一样", async () => {
+  /*
+   * 这条钉的是**换掉轨迹机制的全部理由**。
+   *
+   * 参考视频里的动作是「弯一下手指，从画面底部长一根上来」。原来那版用的是轨迹
+   * （锚点走过的路），要求你挥手才有东西看、手一停就开始淡出，而且它带跨帧状态 ——
+   * 所以整个离线验证都得走 stepTo 一步步积过去。
+   *
+   * 新的茎把长度直接绑在**当前帧**的手指弯曲度上：弯多少长多少。
+   * 这让它回到「renderAt(t) 是无历史的纯函数」——而那正是 golden 回归、
+   * CI 不用摄像头、LLM 能拿到反馈的地基。
+   *
+   * 所以断言是：同一个 t，直接跳过去 和 按定步长积过去，两张图**逐位相同**。
+   * 只要有人往茎里塞了一点历史（比如「长出来要有个生长动画」），这条立刻红。
+   *
+   * 用 hand-stem 探针而不是 finger-flowers：后者还带着 pinch-bloom，
+   * 那个是真有状态的，会让这条断言必红 —— 而且红的原因和茎无关。
+   */
+  const tpl = path.join(TEMPLATES, "hand-stem.json");
+  await loadTemplate(harness.page, tpl, "hands");
+  const base = await baseFrame("hands");
+  await loadTemplate(harness.page, tpl, "hands");
+
+  // 1.5s 落在弯曲扫动的峰值附近，茎是长着的 —— 拿一张空图比空图证明不了纯函数
+  const stepped = await capture(harness.page, 1.5);
+  expect(coverage(decode(stepped), base), "这个时刻茎必须真的画出来了").toBeGreaterThan(0.004);
+
+  const direct = await captureDirect(harness.page, 1.5);
+  expect(direct.equals(stepped), "直接跳到 t 和逐步积到 t 必须逐位相同 —— 茎里不许有历史").toBe(true);
 });
 
 test("捏合是边沿触发，不是状态触发", () => {

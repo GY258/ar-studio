@@ -149,6 +149,15 @@ export async function capture(page: Page, t: number): Promise<Buffer> {
   return Buffer.from(dataUrl.split(",")[1], "base64");
 }
 
+/** 直接渲染 t（不按定步长积过去）并返回 PNG。只给「证明是纯函数」的断言用。 */
+export async function captureDirect(page: Page, t: number): Promise<Buffer> {
+  const dataUrl = await page.evaluate((tt) => {
+    window.harness.renderDirect(tt);
+    return window.harness.snapshot();
+  }, t);
+  return Buffer.from(dataUrl.split(",")[1], "base64");
+}
+
 /**
  * 模板的整体周期。
  *
@@ -201,6 +210,7 @@ declare global {
       setup(o: { fixture: string; width: number; height: number }): Promise<void>;
       loadTemplate(raw: unknown): Promise<number>;
       render(t: number): void;
+      renderDirect(t: number): void;
       snapshot(): string;
       bgMaterialType(): string;
     };

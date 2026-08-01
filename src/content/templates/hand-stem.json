@@ -1,12 +1,13 @@
 {
-  "slug": "finger-flowers",
+  "slug": "hand-stem",
   "name": {
-    "zh": "指尖开花",
-    "en": "Finger Garden"
+    "zh": "茎探针",
+    "en": "Stem Probe"
   },
-  "category": "hand",
-  "sort_order": 40,
+  "category": "debug",
+  "sort_order": 997,
   "price_cents": 0,
+  "hidden": true,
   "schema_version": 2,
   "template_type": "overlay",
   "perception": [
@@ -312,42 +313,6 @@
       "size": {
         "ref": "palm_width",
         "scale": 0.055
-      }
-    },
-    {
-      "id": "bloom-left",
-      "asset": {
-        "kind": "pinch-bloom",
-        "key": "emoji-cherry-blossom",
-        "seconds": 1.1,
-        "grow": 0.85
-      },
-      "anchor": {
-        "space": "hand",
-        "hand": "left",
-        "landmark": "index_tip"
-      },
-      "size": {
-        "ref": "palm_width",
-        "scale": 1
-      }
-    },
-    {
-      "id": "bloom-right",
-      "asset": {
-        "kind": "pinch-bloom",
-        "key": "emoji-sparkles",
-        "seconds": 1.1,
-        "grow": 0.85
-      },
-      "anchor": {
-        "space": "hand",
-        "hand": "right",
-        "landmark": "index_tip"
-      },
-      "size": {
-        "ref": "palm_width",
-        "scale": 1
       }
     }
   ]
