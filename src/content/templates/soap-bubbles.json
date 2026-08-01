@@ -40,5 +40,55 @@
         "scale": 1
       }
     }
+  ],
+  "controls": [
+    {
+      "key": "drift",
+      "label": {
+        "zh": "飘速",
+        "en": "Drift"
+      },
+      "min": 0.01,
+      "max": 0.2,
+      "step": 0.01,
+      "default": 0.05,
+      "target": "element.bubbles.rise"
+    },
+    {
+      "key": "reach",
+      "label": {
+        "zh": "戳破范围",
+        "en": "Reach"
+      },
+      "min": 0.6,
+      "max": 2.5,
+      "step": 0.05,
+      "default": 1.15,
+      "target": "element.bubbles.popRadius"
+    },
+    {
+      "key": "iris",
+      "label": {
+        "zh": "彩虹",
+        "en": "Iridescence"
+      },
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "default": 0.9,
+      "target": "element.bubbles.iridescence"
+    },
+    {
+      "key": "opacity",
+      "label": {
+        "zh": "不透明度",
+        "en": "Opacity"
+      },
+      "min": 0.2,
+      "max": 1,
+      "step": 0.05,
+      "default": 1,
+      "target": "element.bubbles.opacity"
+    }
   ]
 }

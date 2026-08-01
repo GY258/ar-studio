@@ -284,6 +284,23 @@ export class BubbleField {
     (this.mat.uniforms.uRes.value as THREE.Vector2).set(w, h);
   }
 
+  /**
+   * 滑块实时改一个参数。名单见 tunables.ts。
+   *
+   * 注意**不收 count 和 size**：泡泡的位置是出生时定死的不变量，
+   * 中途改这两个只会作用在之后重生的那批上，而破了不再生 —— 于是拖滑块
+   * 什么都不发生。这种「拖了没反应」正是要避免的，所以干脆不让它上滑块。
+   */
+  setParam(name: string, value: number) {
+    if (name === "opacity") {
+      this.mat.uniforms.uOpacity.value = value;
+      return;
+    }
+    if (name === "refraction") this.mat.uniforms.uRefract.value = value;
+    if (name === "iridescence") this.mat.uniforms.uIrid.value = value;
+    (this.params as unknown as Record<string, number>)[name] = value;
+  }
+
   /** 折射要采的画面。引擎换源（摄像头 ↔ 离线静态图）时要重新传 */
   setSource(tex: THREE.Texture | null) {
     this.mat.uniforms.uSrc.value = tex;

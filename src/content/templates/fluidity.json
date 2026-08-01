@@ -1,0 +1,137 @@
+{
+  "slug": "fluidity",
+  "name": {
+    "zh": "流动性",
+    "en": "Fluidity"
+  },
+  "category": "fun",
+  "sort_order": 20,
+  "price_cents": 0,
+  "schema_version": 2,
+  "template_type": "overlay",
+  "perception": [
+    "pose"
+  ],
+  "preview": {},
+  "elements": [
+    {
+      "id": "fluidity",
+      "asset": {
+        "kind": "fluidity",
+        "boxes": 64,
+        "lines": 48,
+        "detectHz": 22,
+        "density": 0.3,
+        "jitter": 0.3,
+        "boxSize": 0.13,
+        "boxSizeSpread": 0.85,
+        "labelRatio": 0.78,
+        "digits": 5,
+        "lineReach": 0.08,
+        "fillRatio": 0.22,
+        "color": "#FFFFFF",
+        "seed": 41
+      },
+      "anchor": {
+        "space": "screen",
+        "nx": 0.5,
+        "ny": 0.5
+      },
+      "size": {
+        "ref": "vw",
+        "scale": 1
+      }
+    }
+  ],
+  "controls": [
+    {
+      "key": "intensity",
+      "label": {
+        "zh": "强度",
+        "en": "Intensity"
+      },
+      "min": 0.1,
+      "max": 0.85,
+      "default": 0.3,
+      "target": "element.fluidity.density",
+      "options": [
+        {
+          "label": {
+            "zh": "轻",
+            "en": "Mild"
+          },
+          "value": 0.12
+        },
+        {
+          "label": {
+            "zh": "中",
+            "en": "Medium"
+          },
+          "value": 0.3
+        },
+        {
+          "label": {
+            "zh": "强",
+            "en": "Strong"
+          },
+          "value": 0.55
+        },
+        {
+          "label": {
+            "zh": "爆",
+            "en": "Extreme"
+          },
+          "value": 0.85
+        }
+      ]
+    },
+    {
+      "key": "boxSize",
+      "label": {
+        "zh": "框大小",
+        "en": "Box size"
+      },
+      "min": 0.05,
+      "max": 0.4,
+      "step": 0.01,
+      "default": 0.13,
+      "target": "element.fluidity.boxSize"
+    },
+    {
+      "key": "labels",
+      "label": {
+        "zh": "编号密度",
+        "en": "Labels"
+      },
+      "min": 0,
+      "max": 1,
+      "step": 0.02,
+      "default": 0.78,
+      "target": "element.fluidity.labelRatio"
+    },
+    {
+      "key": "rate",
+      "label": {
+        "zh": "频率",
+        "en": "Rate"
+      },
+      "min": 4,
+      "max": 40,
+      "step": 1,
+      "default": 22,
+      "target": "element.fluidity.detectHz"
+    },
+    {
+      "key": "opacity",
+      "label": {
+        "zh": "不透明度",
+        "en": "Opacity"
+      },
+      "min": 0.1,
+      "max": 1,
+      "step": 0.05,
+      "default": 1,
+      "target": "element.fluidity.opacity"
+    }
+  ]
+}

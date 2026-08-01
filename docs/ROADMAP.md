@@ -56,11 +56,10 @@ instanced quad、按 y 排序的半透明合成、折射源视频、边缘薄膜
 放弃闭式位置、回到逐帧积分，把上面那一整段简单性都赔进去。要做也该等到它
 真的成为观感瓶颈。
 
-还欠的（对应原文的 d）：**`controls` 对非粒子模板打通 + 离散控件。**
-`resolveControls` 现在只在 `templateType === "particle"` 的分支里被调用 ——
-overlay 模板写了 `controls` 就是几个拖了没反应的滑块，而且不报错。
-参考截图里那排 Mild / Medium / Strong / Extreme 是**离散**控件，
-schema 里只有连续的 min/max/step。泡泡的数量、透明度、大小现在只能改 JSON。
+原文的 d（`controls` 对非粒子模板打通 + 离散控件）**也做了**：
+新增 `element.<元素 id>.<参数名>` 这种 target，`Control.options` 支持离散档位
+（Mild / Medium / Strong / Extreme 这类）。能挂哪些参数见 `engine/tunables.ts` ——
+那是引擎和校验器共用的**唯一名单**，两边各写各的正是这个仓库反复出问题的地方。
 
 ## 状态层一通就顺带解锁的
 

@@ -18,7 +18,7 @@ const HARNESS_DIR = path.join(ROOT, "test/harness");
 const FIXTURES_DIR = path.join(ROOT, "test/fixtures");
 
 export const VIEWPORT = { width: 960, height: 540 };
-export type FixtureName = "front" | "side" | "far" | "noface" | "hands";
+export type FixtureName = "front" | "side" | "far" | "noface" | "hands" | "body";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -149,6 +149,11 @@ export async function capture(page: Page, t: number): Promise<Buffer> {
   return Buffer.from(dataUrl.split(",")[1], "base64");
 }
 
+/** 拨一个滑块。给「controls 真的接上了」那条断言用。 */
+export async function setControl(page: Page, key: string, value: number) {
+  await page.evaluate(([k, v]) => window.harness.setControl(k as string, v as number), [key, value] as [string, number]);
+}
+
 /** 直接渲染 t（不按定步长积过去）并返回 PNG。只给「证明是纯函数」的断言用。 */
 export async function captureDirect(page: Page, t: number): Promise<Buffer> {
   const dataUrl = await page.evaluate((tt) => {
@@ -211,6 +216,7 @@ declare global {
       loadTemplate(raw: unknown): Promise<number>;
       render(t: number): void;
       renderDirect(t: number): void;
+      setControl(key: string, value: number): void;
       snapshot(): string;
       bgMaterialType(): string;
     };

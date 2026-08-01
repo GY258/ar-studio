@@ -12,6 +12,7 @@ import { ArEngine } from "@/engine/engine";
 import { FixtureLandmarkProvider, type Landmark } from "@/engine/face-tracker";
 import { FixtureSegmentationProvider } from "@/engine/segmentation";
 import { FixtureHandProvider, type HandFixture } from "@/engine/hand-tracker";
+import { FixturePoseProvider, type PoseFixture } from "@/engine/pose-tracker";
 import { migrateElements } from "@/lib/migrate";
 import type { TemplateConfig } from "@/engine/types";
 
@@ -70,13 +71,19 @@ class Harness {
     this.canvas = canvas;
 
     const base = `/fixtures/${opts.fixture}`;
-    const [image, mask, landmarks, hands] = await Promise.all([
+    const [image, mask, landmarks, hands, pose] = await Promise.all([
       loadImage(`${base}.png`),
       loadMask(`${base}.mask.png`),
-      fetch(`${base}.landmarks.json`).then((r) => r.json() as Promise<Landmark[] | null>),
+      fetch(`${base}.landmarks.json`)
+        .then((r) => (r.ok ? (r.json() as Promise<Landmark[] | null>) : null))
+        .catch(() => null),
       // 没有手的 fixture 不写这个文件，404 就当没有手 —— 空数组和「没录过」要分得开
       fetch(`${base}.hands.json`)
         .then((r) => (r.ok ? (r.json() as Promise<HandFixture>) : null))
+        .catch(() => null),
+      // 同理：没录到人的 fixture 没有这个文件，404 = 没有姿态
+      fetch(`${base}.pose.json`)
+        .then((r) => (r.ok ? (r.json() as Promise<PoseFixture>) : null))
         .catch(() => null),
     ]);
 
@@ -84,6 +91,7 @@ class Harness {
     engine.setLandmarkProvider(new FixtureLandmarkProvider(landmarks));
     engine.setSegmentationProvider(new FixtureSegmentationProvider(mask.data, mask.w, mask.h));
     engine.setHandProvider(new FixtureHandProvider(hands));
+    engine.setPoseProvider(new FixturePoseProvider(pose));
     engine.setSource(image);
     this.engine = engine;
   }
@@ -125,6 +133,15 @@ class Harness {
   render(t: number) {
     if (!this.engine) throw new Error("先调 setup()");
     this.engine.stepTo(t);
+  }
+
+  /**
+   * 拨一个滑块。测试用来验「controls 真的接上了」——
+   * 这个洞的性质是「拖了没反应而且不报错」，只有把值推进去再看画面变没变才抓得到。
+   */
+  setControl(key: string, value: number) {
+    if (!this.engine) throw new Error("先调 setup()");
+    this.engine.setControls({ [key]: value });
   }
 
   /**

@@ -1,6 +1,8 @@
 # fixture 画面图的来源与授权
 
-四张 `*.png` 画面图全部派生自**同一张** Pexels 图库照片：
+## 半身 / 手部（front / side / far / noface / hands）
+
+派生自**同一张** Pexels 图库照片：
 
 - 照片：<https://www.pexels.com/photo/photography-of-a-woman-looking-at-camera-1070745/>
 - 摄影：Min An
@@ -52,3 +54,17 @@ UPDATE_GOLDEN=1 npm run test:render
 `test/render.spec.ts` 里有几条断言的取样框是按**这张** fixture 的人体位置定的
 （人在 x[0.37, 0.95]、质心 (0.605, 0.681)）。换图之后必须重新对位，
 否则取样框落到背景上，断言会变成永远通过。
+
+## 全身（body）
+
+- 照片：<https://www.pexels.com/photo/young-man-walking-on-big-hallway-4846411/>
+- 授权：[Pexels License](https://www.pexels.com/license/) —— 可免费商用、可修改、无需署名
+
+Fluidity 那类效果要全身关节（肩、肘、腕、髋、膝、踝），半身特写上姿态模型
+读不到腿和脚，框会全挤在画面上半部 —— 测试过了但验的不是那个效果。
+
+选深色衣服 + 浅色背景是有意的：白色线框叠上去对比强，观感问题一眼看得见。
+
+`body.pose.json` 是**序列**不是单帧：手臂开合由 `npm run make:pose-seq` 合成
+（绕肩关节旋转），因为一张照片的 spread 是恒定的，不合成的话
+「张开手臂 → 框和线爆发」这条核心行为离线零覆盖。几何是真模型录的。

@@ -27,6 +27,7 @@ import {
   capture,
   templatePeriod,
   captureDirect,
+  setControl,
   type FixtureName,
   type Harness,
 } from "../scripts/harness-driver";
@@ -101,7 +102,12 @@ function highFreq(p: PNG, x0: number, y0: number, w: number, h: number): number 
  */
 function fixtureFor(templatePath: string): FixtureName {
   const raw = JSON.parse(fs.readFileSync(templatePath, "utf8"));
-  return Array.isArray(raw.perception) && raw.perception.includes("hands") ? "hands" : "front";
+  const p: string[] = Array.isArray(raw.perception) ? raw.perception : [];
+  // 全身模板必须喂全身那张。front 是半身特写，姿态模型在上面读不到腿和脚，
+  // 框会全挤在画面上半部 —— 测试过了但验的不是这个效果
+  if (p.includes("pose")) return "body";
+  if (p.includes("hands")) return "hands";
+  return "front";
 }
 
 /** 展开后有没有动画。静态模板不该被「动画在动」那条断言卡住。 */
@@ -725,6 +731,143 @@ test("轨迹：状态层确定，且带真的在长", async () => {
   // 再来一次同一个 t。走的是「时间倒流 → 清状态 → 重新按定步长积到 2.4」
   const again = await capture(harness.page, 2.7);
   expect(again.equals(lateBuf), "同一个 t 渲染两次必须逐位相同，否则状态没清干净或步长不定").toBe(true);
+});
+
+test("滑块对非 particle 模板真的有用", async () => {
+  /*
+   * 这条堵的是又一个**静默失效**：`controls` 原来只在 particle 模板的分支里
+   * 被 resolveControls 消费，overlay / facetrack 模板写了 controls ——
+   * 能过校验、面板上画得出滑块、拖了什么都不发生、也不报错。
+   * 和当初的 blur、hands、posterize 是同一类。
+   *
+   * 断言必须**拨完之后看东西真的变了**。只断言「setControls 不抛异常」的话，
+   * 什么都没接上的实现照样能过。
+   */
+  const tpl = path.join(TEMPLATES, "fluidity.json");
+  const boxes = () =>
+    harness.page.evaluate(
+      () =>
+        (window as unknown as { harness: { engine: { debugStats(): { fluidityBoxes: number } } } }).harness.engine
+          .debugStats().fluidityBoxes,
+    );
+
+  // baseFrame 会**换模板**（装一个空的去拍底图），所以必须先取、再把待测模板装回来。
+  // 中途调它的话后面全在拿空模板做断言 —— 第一版就是这么翻的车，覆盖率直接 0
+  await loadTemplate(harness.page, tpl, "body");
+  const base = await baseFrame("body");
+  await loadTemplate(harness.page, tpl, "body");
+
+  await capture(harness.page, 0);
+  const before = await boxes();
+
+  // intensity 是离散四档，绑在 element.fluidity.density 上
+  await setControl(harness.page, "intensity", 0.85);
+  await capture(harness.page, 0);
+  const after = await boxes();
+  expect(after, `拨到「爆」档框该变多（${before} → ${after}）`).toBeGreaterThan(before);
+
+  await setControl(harness.page, "intensity", 0.12);
+  await capture(harness.page, 0);
+  expect(await boxes(), "拨回「轻」档框该变少").toBeLessThan(after);
+
+  /*
+   * 连续滑块也要真的作用：把框调大，画面覆盖率该涨。
+   *
+   * 先把编号关掉（labels → 0）再量。覆盖率里混着线和编号，它们不随 boxSize 变，
+   * 会把信号稀释到 1.36 —— 那时候不该去调阈值迁就它，该把噪声去掉。
+   * 顺带这也验了 labels 那个滑块是接上的：关掉之后覆盖率必须先掉一截。
+   */
+  await setControl(harness.page, "intensity", 0.85);
+  const withLabels = coverage(decode(await capture(harness.page, 0)), base);
+  await setControl(harness.page, "labels", 0);
+  const small = coverage(decode(await capture(harness.page, 0)), base);
+  expect(small, `关掉编号覆盖率该掉一截（${withLabels.toFixed(4)} → ${small.toFixed(4)}）`).toBeLessThan(
+    withLabels * 0.92,
+  );
+
+  await setControl(harness.page, "boxSize", 0.35);
+  const big = coverage(decode(await capture(harness.page, 0)), base);
+  expect(big / small, `把框调大覆盖率该涨（${small.toFixed(4)} → ${big.toFixed(4)}）`).toBeGreaterThan(1.5);
+});
+
+test("Fluidity：框挂在全身关节上，密度跟着姿态爆发", async () => {
+  /*
+   * 断言直接读框的个数，不看像素。
+   *
+   * 「框变多了」和「人走近了所以框变大了」在覆盖率上分不开 ——
+   * 而这个效果的灵魂正是**数量**随姿态爆发。参考素材里张开手臂那一帧
+   * 框和线炸开、手收拢时骤减。
+   *
+   * 密度由 spread（双腕间距 / 肩宽）驱动，是**当前帧的纯函数**，不是运动速度。
+   * fixture 的手臂开合是合成的（见 scripts/make-pose-sequence.ts）——
+   * 两张全身照都是手垂着的，不合成的话 spread 恒定，这条断言什么都证明不了。
+   */
+  const tpl = path.join(TEMPLATES, "fluidity.json");
+  const stats = () =>
+    harness.page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            harness: { engine: { debugStats(): { fluidityBoxes: number; fluidityLowestY: number } } };
+          }
+        ).harness.engine.debugStats(),
+    );
+  const boxes = async () => (await stats()).fluidityBoxes;
+
+  await loadTemplate(harness.page, tpl, "body");
+  const base = await baseFrame("body");
+  await loadTemplate(harness.page, tpl, "body");
+
+  // 序列是 4 秒一个来回：t=0 手垂着，t=2 张到最开
+  await capture(harness.page, 0);
+  const closedStats = await stats();
+  const closed = closedStats.fluidityBoxes;
+  const shot = await capture(harness.page, 2.0);
+  const open = await boxes();
+
+  expect(closed, "手垂着时也该有几个框 —— 全清读起来像检测断了").toBeGreaterThan(2);
+  /*
+   * 1.5 倍而不是 2 倍。
+   *
+   * 密度是 boxes * (0.42 + 0.58 * spread)，而 fixture 是走路姿势、静止时
+   * spread 已经有 0.25 —— 从 0.565 涨到 1.0 就是 1.77 倍，再往上会撞到
+   * boxes 这个上限。写 2 倍的话这条永远红，而红的原因是「上限卡住了」
+   * 不是「密度不跟姿态走」。断言的倍数得按设计上能达到的范围定。
+   */
+  expect(open, `张开手臂时框该爆发式增多（${closed} → ${open}）`).toBeGreaterThan(closed * 1.5);
+  expect(coverage(decode(shot), base), "框和线该画出成规模的像素").toBeGreaterThan(0.004);
+
+  /*
+   * 框要贴着**全身**，不是全挤在上半身。POSE_BOX_POINTS 按解剖顺序排，
+   * 取前缀的话框全落在脸和手臂上，腿上一个都没有。
+   *
+   * 这条得**单独用一个框很少的配置**去验，踩了三次才写对：
+   *   一、量张开那一帧没用 —— 框数超过关节总数（19）时所有锚点都会被用上，
+   *       取前缀和均匀铺开出来一模一样。
+   *   二、用像素带量也没用 —— 连接线也落在下半部分，把断言污染到改回取前缀照样绿。
+   *   三、改用「最低那个框在哪」之后，产品模板的密度下限（0.42）又保证了
+   *       框数永远 ≥ 关节数 —— 这条路在**这个模板上**跑不到。
+   * 所以写一个 boxes: 10 的临时模板，那才是这段逻辑真正生效的区间。
+   */
+  const sparse = path.join(ARTIFACTS, "__fluidity-sparse.json");
+  const raw = JSON.parse(fs.readFileSync(tpl, "utf8"));
+  raw.elements[0].asset.boxes = 10;
+  fs.writeFileSync(sparse, JSON.stringify(raw));
+  await loadTemplate(harness.page, sparse, "body");
+  await capture(harness.page, 0);
+  expect((await stats()).fluidityLowestY, "框少的时候也该铺到腿和脚上，不能全挤在上半身").toBeGreaterThan(0.72);
+
+  await loadTemplate(harness.page, tpl, "body");
+  await capture(harness.page, 2.0);
+
+  // 同一个 t 再来一次：编号和抖动都是 hash 的纯函数，必须逐位相同
+  await capture(harness.page, 3.5);
+  const again = await capture(harness.page, 2.0);
+  expect(again.equals(shot), "同一个 t 渲染两次必须逐位相同 —— 编号不许用随机数").toBe(true);
+
+  // 没有姿态的 fixture：整套线框必须消失，而不是画到画面角上
+  await loadTemplate(harness.page, tpl, "front");
+  expect(await boxes(), "没检测到人时不该有任何框").toBe(0);
 });
 
 test("泡泡：一开场就满屏、在动、指尖真的能戳破", async () => {

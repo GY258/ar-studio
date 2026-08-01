@@ -4,11 +4,12 @@ import { FACE_ANCHORS, ANCHOR_PAIRS } from "@/engine/anchors";
 import { HAND_ANCHORS } from "@/engine/hand-anchors";
 import { listSvgKeys } from "@/engine/svg-assets";
 import { IMPLEMENTED_EFFECTS } from "@/engine/source-effects";
+import { TUNABLE_PARAMS, parseElementTarget } from "@/engine/tunables";
 import { sanitizeSvg } from "@/engine/svg-sanitize";
 import { migrateElements } from "./migrate";
 
 const SHAPES = ["cloud", "shower", "glass", "cup"];
-const PERCEPTIONS = ["segmentation", "face", "hands"];
+const PERCEPTIONS = ["segmentation", "face", "hands", "pose"];
 const KNOBS = ["gravity", "friction", "streak", "size", "speed", "spread", "splash"];
 const MODES = ["absolute", "scale"];
 const TEMPLATE_TYPES = ["particle", "overlay", "facetrack"];
@@ -56,6 +57,7 @@ export function validateTemplate(raw: Raw): string[] {
   if (templateType === "overlay" || templateType === "facetrack") {
     validateElementSection(raw, templateType, p);
     validateSource(raw, p);
+    validateElementControls(raw, p);
     return p;
   }
 
@@ -136,7 +138,7 @@ export function validateTemplate(raw: Raw): string[] {
       if (target !== undefined) {
         const builtin = ["rate", "wind", "stick"].includes(target);
         const sub = target.startsWith("substance.") && KNOBS.includes(target.slice(10));
-        if (!builtin && !sub) p.push(`${at}.target "${target}" 无效`);
+        if (!builtin && !sub && !parseElementTarget(target)) p.push(`${at}.target "${target}" 无效`);
       } else if (!["rate", "wind", "stick"].includes(c.key)) {
         p.push(`${at} 的 key "${c.key}" 不是内置语义，必须显式声明 target`);
       }
@@ -144,6 +146,86 @@ export function validateTemplate(raw: Raw): string[] {
   }
 
   return p;
+}
+
+/**
+ * 非 particle 模板的 controls。
+ *
+ * 在这之前这一段**完全没校验**，而引擎那边也不认 —— 写了 controls 能过校验、
+ * 面板上画得出滑块、拖了什么都不发生、也不报错。和当初的 blur、hands 一模一样。
+ * 现在两件事一起补上：引擎会分发，校验器会拦。
+ */
+function validateElementControls(raw: Raw, p: string[]) {
+  const cs = raw.controls;
+  if (cs === undefined) return;
+  if (!Array.isArray(cs)) {
+    p.push("controls 必须是数组");
+    return;
+  }
+  // 元素 id → asset.kind，用来查这个参数在那种 asset 上存不存在
+  const kinds = new Map<string, string>();
+  for (const e of (raw.elements as Raw[]) ?? []) {
+    const a = e?.asset as Raw | undefined;
+    if (typeof e?.id === "string" && typeof a?.kind === "string") kinds.set(e.id, a.kind);
+  }
+
+  for (const [i, c0] of cs.entries()) {
+    const c = c0 as Raw;
+    const at = `controls[${i}]`;
+    if (typeof c.key !== "string" || !c.key) {
+      p.push(`${at}.key 必填`);
+      continue;
+    }
+    const lb = c.label as Raw | undefined;
+    if (!lb || typeof lb.zh !== "string") p.push(`${at}.label.zh 必填`);
+    if (!num(c.min) || !num(c.max) || !num(c.default)) {
+      p.push(`${at} 的 min / max / default 都得是数字`);
+    } else if ((c.min as number) >= (c.max as number)) {
+      p.push(`${at}.min 必须小于 max`);
+    }
+
+    const target = c.target;
+    if (typeof target !== "string") {
+      p.push(`${at}.target 必填，形如 "element.<元素 id>.<参数名>"`);
+      continue;
+    }
+    const et = parseElementTarget(target);
+    if (!et) {
+      p.push(`${at}.target "${target}" 无效。非 particle 模板只能绑元素参数：\"element.<元素 id>.<参数名>\"`);
+      continue;
+    }
+    const kind = kinds.get(et.elementId);
+    if (!kind) {
+      p.push(`${at}.target 指向的元素 "${et.elementId}" 不存在。现有的：${[...kinds.keys()].join(", ") || "（无）"}`);
+      continue;
+    }
+    const allowed = TUNABLE_PARAMS[kind];
+    if (!allowed) {
+      p.push(`${at}.target 指向的元素是 ${kind}，这种 asset 没有可实时调的参数`);
+    } else if (!allowed.includes(et.param) && et.param !== "opacity") {
+      p.push(
+        `${at}.target 的参数 "${et.param}" 不能实时调。${kind} 可调的有：${allowed.join(", ")}。` +
+          `没列进来的多半是改了要重建 mesh 的（容量、位数这类），走 JSON 不走滑块`,
+      );
+    }
+
+    if (c.options !== undefined) {
+      const opts = c.options as Raw[];
+      if (!Array.isArray(opts) || opts.length < 2) {
+        p.push(`${at}.options 至少要两档，形如 [{ "label": { "zh": "轻" }, "value": 0.2 }, ...]`);
+      } else {
+        const vals = opts.map((o) => o?.value);
+        for (const [j, o] of opts.entries()) {
+          const ol = o?.label as Raw | undefined;
+          if (!ol || typeof ol.zh !== "string") p.push(`${at}.options[${j}].label.zh 必填`);
+          if (!num(o?.value)) p.push(`${at}.options[${j}].value 必须是数字`);
+        }
+        if (num(c.default) && !vals.includes(c.default)) {
+          p.push(`${at}.default 必须正好是某一档的 value —— 离散控件没有「中间值」`);
+        }
+      }
+    }
+  }
 }
 
 export function checkWiring(cfg: TemplateConfig): string[] {
@@ -168,7 +250,7 @@ const ANIM_PRESETS = ["float", "fall", "pulse", "spin", "emit-fall-fade"];
 const EASES = ["linear", "in", "out", "inout", "gravity", "bounce"];
 /** 只有「0→1 走一趟」的原语能缓动。周期性原语套 ease 会在接缝处顿一下，见 animations.ts */
 const EASE_PRESETS = ["fall", "emit-fall-fade"];
-const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "stem", "bubbles", "pinch-bloom"];
+const ASSET_KINDS = ["svg-lib", "svg-inline", "text", "gradient", "trail", "stem", "bubbles", "fluidity", "pinch-bloom"];
 const FINGER_NAMES = ["thumb", "index", "middle", "ring", "pinky"];
 const HAND_ANCHOR_NAMES = Object.keys(HAND_ANCHORS);
 const SIZE_REFS = ["vw", "iod", "eye_width", "face_width", "palm_width"];
@@ -325,6 +407,36 @@ function validateAsset(a: unknown, at: string, p: string[]) {
         }
         if (!inRange(fl.scale, 0.02, 3)) p.push(`${at}.asset.flower.scale 应在 [0.02, 3]`);
       }
+    }
+  }
+
+  if (kind === "fluidity") {
+    if (!inRange(asset.boxes, 1, 200)) p.push(`${at}.asset.boxes 应在 [1, 200]（最多几个框）`);
+    if (!inRange(asset.lines, 0, 400)) p.push(`${at}.asset.lines 应在 [0, 400]（最多几条线）`);
+    if (!inRange(asset.detectHz, 1, 60)) {
+      p.push(`${at}.asset.detectHz 应在 [1, 60]（每秒重检测几次。这是「一帧一检测」那种跳动的节奏）`);
+    }
+    if (!inRange(asset.jitter, 0, 2)) p.push(`${at}.asset.jitter 应在 [0, 2]（框位置抖动，相对肩宽）`);
+    if (!inRange(asset.boxSize, 0.01, 2)) {
+      p.push(`${at}.asset.boxSize 应在 [0.01, 2]（框的**平均**大小，相对肩宽）`);
+    }
+    if (!inRange(asset.boxSizeSpread, 0, 1)) {
+      p.push(
+        `${at}.asset.boxSizeSpread 应在 [0, 1]（大小差异。0 = 全一样大，1 = 大量小框 + 少数大框。` +
+          `不管调多少平均值都等于 boxSize）`,
+      );
+    }
+    if (!inRange(asset.labelRatio, 0, 1)) p.push(`${at}.asset.labelRatio 应在 [0, 1]（多少比例的框带编号）`);
+    if (!inRange(asset.density, 0, 1)) p.push(`${at}.asset.density 应在 [0, 1]（静止时还剩多少密度）`);
+    if (!inRange(asset.lineReach, 0, 1)) p.push(`${at}.asset.lineReach 应在 [0, 1]（多少比例的线拉出画面）`);
+    if (!inRange(asset.fillRatio, 0, 1)) p.push(`${at}.asset.fillRatio 应在 [0, 1]（多少比例的小框是实心的）`);
+    if (!inRange(asset.digits, 1, 8)) p.push(`${at}.asset.digits 应在 [1, 8]（编号位数，参考素材是 5）`);
+    if (typeof asset.color !== "string") p.push(`${at}.asset.color 必填`);
+    if (!num(asset.seed)) {
+      p.push(
+        `${at}.asset.seed 必填。编号和抖动都是 hash(第几个, 第几个检测帧, seed) 的纯函数 —— ` +
+          `用随机数的话 renderAt(t) 不再确定，整套渲染回归就不成立了`,
+      );
     }
   }
 
@@ -494,6 +606,12 @@ function validateElement(e: Raw, at: string, p: string[], ids: Set<string>) {
     p.push(
       `${at} 的 asset 是 pinch-bloom 但锚不在 hand 空间 —— 捏合是手的动作，` +
         `要靠拇指尖和食指尖的距离判定，别的空间没有这两个点`,
+    );
+  }
+  if (assetKind === "fluidity" && space !== "screen") {
+    p.push(
+      `${at} 的 asset 是 fluidity 但锚不在 screen 空间 —— 它是满屏的效果，` +
+        `框挂在全身关节上，不挂在某一个锚点。写 { "space": "screen", "nx": 0.5, "ny": 0.5 }`,
     );
   }
   if (assetKind === "bubbles" && space !== "screen") {

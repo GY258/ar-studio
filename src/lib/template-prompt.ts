@@ -74,6 +74,12 @@ type ElementAsset =
       leaf?: { key: string; spacing: number; scale: number; seed: number };
       flower?: { key: string; scale: number };              // 长在茎顶端，跟着生长的那头走
       seed: number }                                        // 必填：定弯的方向和叶子的左右
+  | { kind: "fluidity";   boxes: number; lines: number;      // 检测框 + 连线，见下
+      detectHz: number; density: number; jitter: number;
+      boxSize: number; boxSizeSpread: number;
+      labelRatio: number; digits: number;
+      lineReach: number; fillRatio: number;
+      color: string; seed: number }
   | { kind: "bubbles";    count: number; rise: number;       // 肥皂泡，见下
       size: [number, number]; wobble: number; popRadius: number;
       refraction: number; iridescence: number; seed: number }
@@ -169,6 +175,48 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
 采样落在固定的 12Hz 时间网格上，不是每帧一次 —— 每帧一次的话同一段手势在
 60fps 和 20fps 下会生成不同的带。相邻采样点位移超过 0.18 屏会**断开重新起一条**：
 手划出画面再进来、检测短暂丢失重新锁定，都会瞬移，连起来就是一条横跨画面的假线。
+
+### fluidity —— 带编号的检测框 + 连线，跟着人体运动
+
+\`\`\`jsonc
+{ "id": "fluidity",
+  "asset": { "kind": "fluidity", "boxes": 64, "lines": 48, "detectHz": 22,
+             "density": 0.3, "jitter": 0.3,
+             "boxSize": 0.13, "boxSizeSpread": 0.85,
+             "labelRatio": 0.78, "digits": 5,
+             "lineReach": 0.08, "fillRatio": 0.22,
+             "color": "#FFFFFF", "seed": 41 },
+  "anchor": { "space": "screen", "nx": 0.5, "ny": 0.5 },
+  "size": { "ref": "vw", "scale": 1 } }
+\`\`\`
+
+需要 \`perception: ["pose"]\`（全身 33 点），锚点必须 \`space: "screen"\`。
+框的大小相对**肩宽**，人退远会一起缩。
+
+**密度由姿态驱动，不由运动速度驱动。** 参考素材里「张开手臂时框和线爆发式增多」
+看起来像在响应快慢，其实差别在姿态本身 —— 慢慢张开一样该炸。所以取
+\`双腕间距 / 肩宽\`，是当前帧的纯函数，renderAt(t) 的无历史性照旧成立。
+
+- \`detectHz\` 是**一帧一检测**那种生硬跳变的节奏，编号和抖动都 key 在它上面，
+  不做任何插值。平滑插值会让它变成柔顺的装饰动画，完全是另一个东西
+- \`boxSize\` 是**平均**大小，不是上限。分布本身是偏小的幂次，
+  给 min/max 的话算不出平均值 —— 想「把框调小一点」得先在脑子里做一遍积分。
+  \`boxSizeSpread\` 只调差异程度（0 = 全一样大，1 = 大量小框 + 少数大框），
+  **平均值恒等于 boxSize**，两个旋钮互不干扰
+- \`density\` 是静止时还剩多少密度。参考里手收拢那几帧只剩三五个框，
+  给小一点才有那个对比 —— 给大了整段都是满屏，反而没有「爆发」可言
+- \`labelRatio\` 控制多少框带编号。全带的话数字比框还抢眼，
+  而它本来是「检测 id」这种次要信息
+- \`lineReach\` 是多少比例的线拉出画面。给大了满屏横贯的斜线会盖掉人体上的网
+- \`fillRatio\` 是多少比例的**中小号**框填实。参考素材里散着几个实心的白色小方块 ——
+  全描边的话画面太均质，实心的那几个是节奏上的重音。大框不填（会糊掉半个身子），
+  最小的那批也不填（只有几个像素点，看不出是方块）
+- 编号走 \`hash(第几个框, 第几个检测帧, seed)\`，看着像每帧重新分配的检测 id，
+  实际是纯函数。数字是 shader 里的 **5×7** 程序化点阵，不用字体 ——
+  系统字体会让 golden 只在录它的机器上成立。3×5 试过，太方太粗，
+  参考素材里的编号明显更高更瘦
+- 字号和框都**吸附到整像素**（字高吸到 7 的倍数）。像素风的字不落在整像素上，
+  笔画粗细不匀、边上泛色
 
 ### bubbles —— 肥皂泡，指尖戳破
 
@@ -343,6 +391,36 @@ ${Object.entries(ANCHOR_PAIRS)
   .join("\n")}
 
 写 \`lower_eyelid\`，不是 \`lower_eyelid_left\`。
+
+## controls —— 给用户拖的滑块
+
+particle 模板绑 \`substance.*\` 和三个内置旋钮；**overlay / facetrack 模板绑元素参数**：
+
+\`\`\`jsonc
+"controls": [
+  { "key": "intensity", "label": { "zh": "强度", "en": "Intensity" },
+    "min": 0.1, "max": 0.85, "default": 0.3,
+    "target": "element.fluidity.density",
+    "options": [                                  // 给了 options 就渲染成一排按钮
+      { "label": { "zh": "轻" }, "value": 0.12 },
+      { "label": { "zh": "中" }, "value": 0.3 },
+      { "label": { "zh": "强" }, "value": 0.55 },
+      { "label": { "zh": "爆" }, "value": 0.85 } ] },
+  { "key": "boxSize", "label": { "zh": "框大小" },
+    "min": 0.05, "max": 0.4, "step": 0.01, "default": 0.13,
+    "target": "element.fluidity.boxSize" }
+]
+\`\`\`
+
+- \`target\` 是 \`element.<元素 id>.<参数名>\`。能挂哪些参数由 \`engine/tunables.ts\`
+  这张表决定 —— 没列进来的多半是**改了要重建 mesh** 的（容量、编号位数这类），
+  拖一下滑块就重建一次几何，手感和开销都不对
+- 每个元素都有 \`opacity\`，任何 asset 都能挂
+- \`options\` 给离散档位。「强度四档」这种诉求用连续滑块表达不了 ——
+  用户要的是选一个预设，不是在 0~100 之间找一个数。\`default\` 必须正好是某一档的 value
+
+⚠️ 在这之前 \`controls\` 对非 particle 模板是**静默失效**的：写了能过校验、
+面板上画得出滑块、拖了什么都不发生、也不报错。现在引擎会分发，校验器会拦。
 
 ## 帧效果 source
 

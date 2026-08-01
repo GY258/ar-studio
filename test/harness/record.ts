@@ -9,6 +9,7 @@
 import { MediaPipeLandmarkProvider } from "@/engine/face-tracker";
 import { MediaPipeSegmentationProvider } from "@/engine/segmentation";
 import { MediaPipeHandProvider } from "@/engine/hand-tracker";
+import { MediaPipePoseProvider } from "@/engine/pose-tracker";
 
 interface Recorded {
   landmarks: { x: number; y: number; z: number }[] | null;
@@ -16,6 +17,8 @@ interface Recorded {
   mask: { data: number[]; w: number; h: number } | null;
   /** 手部：每只手 21 点 + 是本人的左手还是右手 */
   hands: { hand: "left" | "right"; points: { x: number; y: number; z: number }[] }[] | null;
+  /** 全身姿态：每个人 33 点。只录第一个人，理由见 pose-tracker */
+  pose: { x: number; y: number; z: number }[][] | null;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -31,6 +34,7 @@ class Recorder {
   private face: MediaPipeLandmarkProvider | null = null;
   private seg: MediaPipeSegmentationProvider | null = null;
   private hands: MediaPipeHandProvider | null = null;
+  private pose: MediaPipePoseProvider | null = null;
 
   /** 会话级单调时钟，毫秒。见 record() 里的注释 */
   private clock = 0;
@@ -39,7 +43,8 @@ class Recorder {
     this.face = new MediaPipeLandmarkProvider();
     this.seg = new MediaPipeSegmentationProvider();
     this.hands = new MediaPipeHandProvider();
-    await Promise.all([this.face.load(), this.seg.load(), this.hands.load()]);
+    this.pose = new MediaPipePoseProvider();
+    await Promise.all([this.face.load(), this.seg.load(), this.hands.load(), this.pose.load()]);
   }
 
   async record(src: string): Promise<Recorded> {
@@ -62,6 +67,12 @@ class Recorder {
       if (h && h.length) hands = h.map((x) => ({ hand: x.hand, points: x.points }));
     }
 
+    let pose: Recorded["pose"] = null;
+    for (let i = 0; i < 5; i++) {
+      const p = this.pose!.detect(img, (this.clock += 33));
+      if (p && p.length) pose = p.map((pts) => pts.map((q) => ({ x: q.x, y: q.y, z: q.z })));
+    }
+
     let mask: Recorded["mask"] = null;
     for (let i = 0; i < 5; i++) {
       this.seg!.segment(img, (this.clock += 33), (data, w, h) => {
@@ -74,6 +85,7 @@ class Recorder {
         ? landmarks.map((p) => ({ x: round(p.x), y: round(p.y), z: round(p.z) }))
         : null,
       mask,
+      pose: pose ? pose.map((pts) => pts.map((p) => ({ x: round(p.x), y: round(p.y), z: round(p.z) }))) : null,
       hands: hands
         ? hands.map((h) => ({
             hand: h.hand,
