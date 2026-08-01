@@ -352,8 +352,20 @@ export class FluidityField {
 
   /** 这一帧的检测速率，次/秒。测试靠它断言「人一动线条就加速」 */
   private lastRate = 0;
+  /**
+   * 这一帧有几条线的端点跑到了所有框的包围盒之外。
+   *
+   * 「出界的线」用像素带量不准 —— 手臂张开时腕部的框本身就落在画面边缘，
+   * 会把断言污染到分不清是框还是线。直接数端点才对得上这个说法。
+   */
+  private lastOutside = 0;
   detectRate(): number {
     return this.lastRate;
+  }
+
+  /** 端点跑到框的包围盒之外的线有几条 */
+  outsideLines(): number {
+    return this.lastOutside;
   }
 
   /**
@@ -378,6 +390,7 @@ export class FluidityField {
     this.group.visible = false;
     this.lastBoxCount = 0;
     this.lastLowest = 0;
+    this.lastOutside = 0;
   }
 
   update(t: number, tracker: PoseTracker, pose: PoseFrame | null) {
@@ -559,6 +572,19 @@ export class FluidityField {
      * 而这个效果要的是「一直在解析，只是现在没什么可解析的」。
      */
     const m = centers.length < 2 ? 0 : Math.round(p.lines * (0.08 + 0.92 * Math.pow(pose.spread, 1.6)));
+    // 所有框的包围盒 —— 判断某条线有没有「长到人身体以外」的基准
+    let bx0 = Infinity;
+    let bx1 = -Infinity;
+    let by0 = Infinity;
+    let by1 = -Infinity;
+    for (const c of centers) {
+      bx0 = Math.min(bx0, c.x);
+      bx1 = Math.max(bx1, c.x);
+      by0 = Math.min(by0, c.y);
+      by1 = Math.max(by1, c.y);
+    }
+    let outside = 0;
+
     let li = 0;
     for (let j = 0; j < m && li < p.lines; j++) {
       const a = centers[Math.floor(hash1(j * 271 + f * 7, p.seed) * centers.length) % centers.length];
@@ -571,15 +597,21 @@ export class FluidityField {
        * 全都框对框的话线永远困在人体轮廓内，读起来是网格不是流动。
        */
       /*
-       * 只有 lineReach 那一小部分线拉出画面。第一版写死了 18% ——
-       * 结果满屏都是横贯画面的长斜线，人体上的网状结构反而看不见了。
-       * 参考素材里长线是点缀，主体是**框与框之间**连出来的网。
+       * 只有 lineReach 那一小部分线拉出画面，**缺省是 0**。
+       *
+       * 这一路是照参考图里「手臂张开时拉出跨画面长线」加的，但那些线会跑到
+       * 人的轮廓外面、一直连到画面边界 —— 观感上很跳，而且它跟「机器在解析
+       * 这个人」这个读法是冲突的：解析结果不该长到人身体以外去。
+       * 留着参数是因为它确实是参考里有的东西，想要的人可以调回来。
        */
       if (hash1(j * 811 + f * 17, p.seed) < p.lineReach) {
         const ang = hash1(j * 929 + f * 23, p.seed) * Math.PI * 2;
         b = { x: a.x + Math.cos(ang) * this.W, y: a.y + Math.sin(ang) * this.H };
       }
       if (a === b) continue;
+      // 留一点余量：框自身有大小，端点正好压在包围盒边上不算出界
+      const pad = 4;
+      if (b.x < bx0 - pad || b.x > bx1 + pad || b.y < by0 - pad || b.y > by1 + pad) outside++;
       this.lPos[li * 6] = a.x;
       this.lPos[li * 6 + 1] = a.y;
       this.lPos[li * 6 + 2] = 8;
@@ -589,6 +621,7 @@ export class FluidityField {
       li++;
     }
     // 没用到的顶点塌到原点并靠 drawRange 裁掉 —— 留着旧数据会拖出乱线
+    this.lastOutside = outside;
     this.lineGeo.setDrawRange(0, li * 2);
     this.lineGeo.attributes.position.needsUpdate = true;
 

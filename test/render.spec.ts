@@ -746,6 +746,38 @@ test("轨迹：状态层确定，且带真的在长", async () => {
   expect(again.equals(lateBuf), "同一个 t 渲染两次必须逐位相同，否则状态没清干净或步长不定").toBe(true);
 });
 
+test("Fluidity：默认不画出界的长线，调回来又要有", async () => {
+  /*
+   * 那一路线是照参考图里「手臂张开时拉出跨画面长线」加的，但它会跑到人的
+   * 轮廓外面、一直连到画面边界 —— 和「机器在解析这个人」这个读法是冲突的：
+   * 解析结果不该长到人身体以外去。所以缺省关掉，留参数给想要的人。
+   *
+   * 判据直接数「端点落在所有框的包围盒之外」的线条数，**不用像素带量**：
+   * 手臂张开时腕部的框本身就落在画面边缘，像素带分不清那是框还是线 ——
+   * 第一版就是这么写的，缺省状态下量到 333 个边缘像素，全是合法的框。
+   *
+   * **两边都验**：只断言「关掉时是 0」的话，一个压根不画线的实现照样能过。
+   */
+  const tpl = path.join(TEMPLATES, "fluidity.json");
+  const outside = () =>
+    harness.page.evaluate(
+      () =>
+        (window as unknown as { harness: { engine: { debugStats(): { fluidityOutsideLines: number } } } }).harness
+          .engine.debugStats().fluidityOutsideLines,
+    );
+
+  await loadTemplate(harness.page, tpl, "body");
+  // 张开手臂那一刻线最多，最容易暴露出界的线
+  await capture(harness.page, 2.0);
+  const off = await outside();
+  expect(off, `缺省不该有线跑到框的包围盒之外（${off} 条）`).toBe(0);
+
+  await setControl(harness.page, "reach", 0.4);
+  await capture(harness.page, 2.0);
+  const on = await outside();
+  expect(on, `把「出界长线」调回来就该出现（${off} → ${on}）`).toBeGreaterThan(3);
+});
+
 test("Fluidity：人一动线条就加速，站着不动就慢下来", async () => {
   /*
    * 参考素材里人卡点一动，线条明显跟着加速；站着不动时变化得很慢。

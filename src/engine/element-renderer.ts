@@ -827,6 +827,13 @@ export class ElementRenderer {
     }
   }
 
+  /** 端点跑到框包围盒之外的线有几条。测试用来断言「缺省不画出界的长线」 */
+  fluidityOutsideLines(): number {
+    let n = 0;
+    for (const it of this.items) n += it.fluidity?.outsideLines() ?? 0;
+    return n;
+  }
+
   /** 这一帧 fluidity 的检测速率。测试用来断言「人一动线条就加速」 */
   fluidityRate(): number {
     let r = 0;
