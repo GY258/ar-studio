@@ -86,6 +86,15 @@ async function walkTemplate(browser: Browser, baseUrl: string, slug: string) {
   await page.waitForTimeout(8000);
   await shoot(page, `${slug}-2-使用中`);
 
+  // 0.5 档：iOS 只给横向流，竖屏 cover 之后只剩 26% 的宽度，
+  // 往回缩才看得到接近系统相机那样的取景。这一张就是验它长什么样
+  const half = page.getByRole("button", { name: "0.5" });
+  if (await half.count()) {
+    await half.first().click();
+    await page.waitForTimeout(800);
+    await shoot(page, `${slug}-2b-缩到0.5`);
+  }
+
   // 设置面板：手机上是从底部升起的抽屉
   const gear = page.locator("button").filter({ has: page.locator("svg") });
   const settings = page.getByRole("button", { name: /settings|设置/i });

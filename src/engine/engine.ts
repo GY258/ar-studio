@@ -60,6 +60,9 @@ export interface EngineStats {
    * 还是比例算错了。
    */
   camera: string;
+  /** 当前缩放倍率。UI 靠它让档位按钮跟着捏合走 —— 两套控件不同步的话
+   *  捏完之后高亮的还是旧档位，看着像坏了 */
+  zoom: number;
 }
 
 export interface EngineOptions {
@@ -123,6 +126,12 @@ export class ArEngine {
    * 猜是猜不出来的，所以把它显示出来。
    */
   private camInfo = "";
+  /** 设备**支持**什么（不是这次拿到了什么）。见 startCamera 里的注释 */
+  private camCaps = "";
+  /** 当前用的是前置还是后置。转屏重开摄像头时要沿用 */
+  private facing: "user" | "environment" = "user";
+  /** 正在重开摄像头。防止 resize 连续触发时叠着开好几路流 */
+  private reopening = false;
   /**
    * 数字缩放倍率。1 = 原始取景。
    *
@@ -278,35 +287,91 @@ export class ArEngine {
    * 漏掉任何一处的表现都是「贴在了镜像的位置上」，而且**只有换到后置才看得出来**。
    * 所以这里只设一个 setMirrored，具体换算集中在各自的一个函数里。
    */
+  /**
+   * 按一组约束开流，返回拿到的流和它的方向。
+   *
+   * 分成三档策略，从「什么都不指定」开始 —— 这是这次踩的坑的核心：
+   * 写死 width/height 反而害了自己。iOS 按自己的距离函数在**原生（横向）档位**里
+   * 挑最近的，而 1080x1920 和 1920x1080 像素数完全一样，在「最近」这件事上
+   * 是平手，等于没给方向信息，于是它保持横向。
+   * 不指定的话 Safari 会给按设备方向来的默认值。
+   */
+  private async openStream(
+    facing: "user" | "environment",
+    deviceId: string | undefined,
+    strategy: "auto" | "aspect" | "explicit",
+    portraitView: boolean,
+  ): Promise<MediaStream> {
+    const base: MediaTrackConstraints = {
+      facingMode: facing,
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    };
+    const video: MediaTrackConstraints =
+      strategy === "auto"
+        ? base
+        : strategy === "aspect"
+          ? { ...base, aspectRatio: { ideal: portraitView ? 9 / 16 : 16 / 9 } }
+          : {
+              ...base,
+              width: { ideal: portraitView ? 1080 : 1920 },
+              height: { ideal: portraitView ? 1920 : 1080 },
+            };
+    return navigator.mediaDevices.getUserMedia({ video, audio: false });
+  }
+
+  /**
+   * 开摄像头。
+   *
+   * facing 决定用前置还是后置，**同时决定画面镜不镜像**：
+   * 前置自拍不镜像的话抬左手看着是右手动，人立刻别扭；
+   * 后置拍别人镜像了则整个世界左右反了。
+   *
+   * **方向必须和视口一致**：竖着拿手机就要竖向流。拿不到的话竖屏画布 cover
+   * 之后只显示 16:9 横向流宽度的 26%，取景比系统相机窄一大截 ——
+   * 那不是比例算错，是把 74% 的画面裁掉了。
+   * 所以这里会校验拿到的方向，不对就换一种约束重试。
+   */
   async startCamera(facing: "user" | "environment" = "user", deviceId?: string): Promise<void> {
     if (!this.video) throw new Error("startCamera 需要一个 video 元素；离线模式请用 setSource()");
     this.degraded = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
     this.stopCamera();
+
+    const portraitView = this.H > this.W;
+    const tried: string[] = [];
+    let stream: MediaStream | null = null;
+
     /*
-     * 手机上请求**竖向**分辨率。
+     * 依次尝试，拿到方向对得上的就停。
      *
-     * 原来一律要 4:3 横向（1280×960），而手机画布是 9:16 竖屏 ——
-     * cover 裁切会把两侧砍掉一大半，人直接被切成半边。
-     * 全身类模板（fluidity）在这个裁法下根本框不进一个人。
-     *
-     * 用 ideal 而不是 exact：拿不到竖向流的设备会退回它自己的最佳档，
-     * 而不是直接抛 OverconstrainedError 让整个页面开不了摄像头。
+     * 不用 exact：拿不到就抛异常，整个页面开不了摄像头 —— 而「方向不对但能用」
+     * 比「什么都没有」好得多。所以是**尽力而为 + 兜底**，最后一档一定会成功。
      */
-    const portrait = this.degraded;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: portrait ? 1080 : 1920 },
-        height: { ideal: portrait ? 1920 : 1080 },
-        facingMode: facing,
-        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-      },
-      audio: false,
-    });
-    this.setMirrored(facing === "user");
+    for (const strategy of ["auto", "aspect", "explicit"] as const) {
+      try {
+        const s = await this.openStream(facing, deviceId, strategy, portraitView);
+        const st = s.getVideoTracks()[0]?.getSettings?.();
+        const portraitStream = (st?.height ?? 0) > (st?.width ?? 0);
+        tried.push(`${strategy}:${st?.width}x${st?.height}`);
+        if (stream) stream.getTracks().forEach((t) => t.stop());
+        stream = s;
+        if (portraitStream === portraitView) break;
+      } catch {
+        tried.push(`${strategy}:失败`);
+      }
+    }
+    if (!stream) throw new Error("开不了摄像头");
+
     this.video.srcObject = stream;
     await this.video.play();
-    const st = stream.getVideoTracks()[0]?.getSettings?.();
+
+    const track = stream.getVideoTracks()[0];
+    const st = track?.getSettings?.();
     if (st) this.camInfo = `${st.width}x${st.height}@${Math.round(st.frameRate ?? 0)}`;
+    // 试过哪几档也记下来 —— 「方向对不上」时唯一能判断该改哪儿的信息
+    this.camCaps = tried.join(" ");
+
+    this.facing = facing;
+    this.setMirrored(facing === "user");
     // videoWidth/videoHeight 在 play 后才可靠，再 resize 一次确保 cover 比例正确
     this.video.addEventListener("loadedmetadata", () => this.resize(), { once: true });
     this.resize();
@@ -331,9 +396,21 @@ export class ArEngine {
     return this.mirrored;
   }
 
-  /** 设置数字缩放。夹在 1~4 倍：小于 1 会露出画布外的黑边，大于 4 已经全是马赛克 */
+  /**
+   * 设置数字缩放。**允许小于 1**。
+   *
+   * 实测 iOS 会忽略「请求竖向分辨率」直接给 1920x1080 的横向流
+   * （状态栏里显示的就是这个数）。竖屏画布 cover 之后只显示视频宽度的 26% ——
+   * 这就是「取景比系统相机窄得多」的全部原因，不是比例算错。
+   *
+   * 拿不到竖向流就只能让用户往回缩：0.5 倍时能看到接近两倍宽的场景，
+   * 代价是上下出现黑边。这和系统相机的 0.5x 是同一个意思 ——
+   * 那边是切到超广角镜头，这边是把画面缩回来，观感目的一样。
+   *
+   * 下限 0.3：再小主体已经小到没法用，而黑边占了大半个屏幕。
+   */
   setZoom(z: number) {
-    const next = Math.max(1, Math.min(4, z));
+    const next = Math.max(0.3, Math.min(4, z));
     if (next === this.zoom) return;
     this.zoom = next;
     this.elements.setZoom(next);
@@ -735,6 +812,7 @@ export class ArEngine {
       tracking: this.isTracking(performance.now()),
       degraded: this.degraded,
       camera: this.camInfo,
+      zoom: this.zoom,
       perception: this.perception.join(","),
       templateType: this.templateType,
       elementCount: this.elements.count(),
@@ -766,6 +844,11 @@ export class ArEngine {
    * 前者多半是 seen=false 走了 onLost 兜底（整张蒙版被填成「哪里都不作用」），
    * 后者才是蒙版本身的问题。光看画面区分不了，看这几个数字一眼就知道。
    */
+  /** 摄像头能力。诊断「竖向流到底是给不了还是没要对」用 */
+  debugCameraCaps(): string {
+    return this.camCaps;
+  }
+
   debugMaskStats() {
     const src = this.maskField.data;
     let min = 255;
@@ -845,6 +928,27 @@ export class ArEngine {
 
   resize() {
     const canvas = this.renderer.domElement;
+    /*
+     * 转屏之后流的方向就对不上了 —— 竖着拿手机却在放横向流，
+     * cover 会把大半个画面裁掉。所以这里检查一下，不对就重开。
+     *
+     * 只在**方向真的翻了**的时候重开：resize 在滚动、地址栏收起、
+     * 软键盘弹出时都会触发，每次都重开摄像头会闪成一片。
+     * reopening 这个锁是必须的，否则连续 resize 会叠着开好几路流。
+     */
+    if (this.video && !this.reopening) {
+      const vw = this.video.videoWidth;
+      const vh = this.video.videoHeight;
+      const r = canvas.getBoundingClientRect();
+      if (vw > 0 && vh > 0 && r.width > 0 && vh > vw !== r.height > r.width) {
+        this.reopening = true;
+        void this.startCamera(this.facing)
+          .catch((e) => this.onError?.(e as Error))
+          .finally(() => {
+            this.reopening = false;
+          });
+      }
+    }
     const rect = canvas.getBoundingClientRect();
     this.W = Math.max(2, Math.round(rect.width));
     this.H = Math.max(2, Math.round(rect.height));
@@ -1303,6 +1407,7 @@ export class ArEngine {
         tracking: this.isTracking(now),
         degraded: this.degraded,
       camera: this.camInfo,
+      zoom: this.zoom,
         needsTracking: this.perception.length > 0,
       });
     }

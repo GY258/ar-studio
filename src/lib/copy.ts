@@ -56,6 +56,7 @@ export const COPY = {
     recordStart: "Start recording",
     recordStop: "Stop recording",
     settings: "Settings",
+    zoomLabel: (z: number) => (z === 1 ? "1×" : String(z)),
     installTitle: "Add to Home Screen",
     installBody: "Tap Share, then “Add to Home Screen”. The camera permission sticks, and you get the full screen.",
     installDismiss: "Not now",

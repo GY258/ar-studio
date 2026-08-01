@@ -28,6 +28,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     degraded: false,
     needsTracking: true,
     camera: "",
+    zoom: 1,
   });
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -58,6 +59,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
    * 也别对已经装好的人重复弹。
    */
   const [showInstall, setShowInstall] = useState(false);
+
 
   /* ---------------- 引擎 ---------------- */
 
@@ -287,6 +289,18 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
    * 前置框不进全身 —— fluidity 这类需要全身入镜的模板必须用后置。
    * 之前 facingMode 是写死的 "user"，而且没有任何切换入口。
    */
+  /**
+   * 切缩放档位。
+   *
+   * 给档位而不是只给捏合：双指在小屏上很难精确，而且拍的时候一只手要拿稳手机。
+   * 系统相机也是这么做的（.5 / 1x / 2 / 3），捏合只作微调。
+   * 高亮跟着 **stats.zoom** 走而不是本地 state —— 捏合改的是引擎里那个值，
+   * 两套控件各存各的话，捏完之后高亮的还是旧档位。
+   */
+  const setZoom = useCallback((z: number) => {
+    engineRef.current?.setZoom(z);
+  }, []);
+
   const flipCamera = useCallback(() => {
     const next = facing === "user" ? "environment" : "user";
     setFacing(next);
@@ -571,6 +585,25 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
                uiHidden ? "pointer-events-none opacity-0" : "opacity-100"
              }`}
              style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}>
+
+          {/*
+            缩放档位。0.5 在这里的意思和系统相机的 .5x 一样 ——
+            iOS 只给横向流，竖屏 cover 之后只剩 26% 的宽度，
+            往回缩才看得到接近系统相机那样的取景（代价是上下黑边）。
+          */}
+          <div className="flex justify-center gap-2 px-4">
+            {[0.5, 1, 2, 3].map((z) => (
+              <button
+                key={z}
+                onClick={() => setZoom(z)}
+                className={`h-9 min-w-9 rounded-full px-3 font-mono text-[12px] backdrop-blur ${
+                  Math.abs(stats.zoom - z) < 0.02 ? "bg-white text-black" : "bg-black/50 text-white/80"
+                }`}
+              >
+                {COPY.studio.zoomLabel(z)}
+              </button>
+            ))}
+          </div>
 
           {/* 模板横向滚动 */}
           <div className="no-scrollbar flex gap-2 overflow-x-auto px-4">
