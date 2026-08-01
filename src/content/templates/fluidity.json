@@ -29,7 +29,7 @@
         "labelRatio": 0.78,
         "digits": 5,
         "digitSize": 0.038,
-        "lineReach": 0.08,
+        "lineReach": 0,
         "fillRatio": 0.22,
         "color": "#FFFFFF",
         "seed": 41
@@ -158,6 +158,18 @@
       "step": 0.02,
       "default": 0.18,
       "target": "element.fluidity.idleRate"
+    },
+    {
+      "key": "reach",
+      "label": {
+        "zh": "出界长线",
+        "en": "Long lines"
+      },
+      "min": 0,
+      "max": 0.4,
+      "step": 0.02,
+      "default": 0,
+      "target": "element.fluidity.lineReach"
     }
   ]
 }

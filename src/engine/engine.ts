@@ -683,6 +683,7 @@ export class ArEngine {
       fluidityBoxes: this.elements.fluidityBoxes(),
       fluidityLowestY: this.elements.fluidityLowestY(),
       fluidityRate: this.elements.fluidityRate(),
+      fluidityOutsideLines: this.elements.fluidityOutsideLines(),
       /**
        * 解不出素材、被跳过的元素。**非空就是有东西没画出来**。
        * smoke:live 据此判失败 —— 这个失效模式以前是完全静默的。
