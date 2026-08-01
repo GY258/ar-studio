@@ -117,6 +117,8 @@ async function runGroup(
 ): Promise<Result[]> {
   const out: Result[] = [];
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ["camera"] });
+  /** 手机视口那条只在第一个模板上验一次 —— 那是全局 UI，不是每个模板各有一份 */
+  let checkMobileUi = true;
 
   for (const slug of slugs) {
     const problems: string[] = [];
@@ -194,6 +196,29 @@ async function runGroup(
       const shot = await page.locator("canvas").first().screenshot();
       fs.mkdirSync(OUT, { recursive: true });
       fs.writeFileSync(path.join(OUT, `${slug}.png`), shot);
+
+      /*
+       * 手机视口下关键控件必须还在。
+       *
+       * 这条堵的是一类真踩过的失效：翻转摄像头按钮只加进了**桌面**那一排
+       * （`hidden md:flex`），手机版的底部条是另一段 JSX —— 手机上根本没有入口。
+       * 而全身类模板非后置不可，笔记本又只有前置，等于那个功能在唯一需要它的
+       * 设备上不存在。桌面视口下的冒烟一路全绿。
+       *
+       * 只在第一个模板上验一次：这是全局 UI，每个模板都测一遍纯属浪费。
+       */
+      if (checkMobileUi) {
+        checkMobileUi = false;
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.waitForTimeout(300);
+        for (const label of ["Flip camera"]) {
+          const n = await page.getByRole("button", { name: label }).count();
+          const visible = n > 0 && (await page.getByRole("button", { name: label }).first().isVisible());
+          if (!visible) problems.push(`手机视口下找不到「${label}」按钮 —— 多半只加进了桌面那一排`);
+        }
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await page.waitForTimeout(300);
+      }
 
       if (fps <= 0) problems.push("fps 为 0，渲染循环没在跑");
       if (frameLooksBlank(shot)) problems.push("画面几乎是纯色 —— 大概率 shader 没编过或模型没加载");

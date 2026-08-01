@@ -546,6 +546,23 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
                 <line x1="8" y1="23" x2="16" y2="23" />
               </svg>
             </button>
+
+            {/*
+              翻转摄像头。**手机上这个按钮比桌面重要得多** ——
+              笔记本只有前置，而全身类模板（fluidity）非后置不可。
+              上一版只加在桌面那一排里，手机上根本看不到入口。
+            */}
+            <button
+              onClick={flipCamera}
+              aria-label={COPY.studio.flipCamera}
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white/80 backdrop-blur"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7h3l2-2h8l2 2h3v12H3z" />
+                <path d="M15 12a3 3 0 1 1-3-3" />
+                <polyline points="12 6.5 12 9 14.5 9" />
+              </svg>
+            </button>
           </div>
 
           <p className="text-center font-mono text-[11px] text-white/50">{statusLine}</p>
