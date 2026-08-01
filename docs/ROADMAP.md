@@ -9,6 +9,11 @@
 
 ### 1. 模型自托管：文件放哪
 
+> ⚠️ **Service Worker 缓存解决不了这个。** 已经加了 SW 缓存模型权重，
+> 但缓存只对「已经成功下过一次」的人有效，而国内的痛点是**第一次就下不下来**。
+> 这两件事别混为一谈 —— SW 治的是「第二次进来快」，自托管治的是「进得来」。
+
+
 现在 `NEXT_PUBLIC_WASM_BASE` / `SEG_MODEL` / `FACE_MODEL` / `HAND_MODEL` 全指向
 jsdelivr 和 storage.googleapis.com。**国内大概率加载不出来**，用户看到的是页面卡在
 「Loading the person-segmentation model…」——不报错，就是一直转。

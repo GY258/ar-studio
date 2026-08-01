@@ -46,6 +46,17 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
   const [uiHidden, setUiHidden] = useState(false);
   /** 存相册的结果提示。null = 没提示 */
   const [saveNote, setSaveNote] = useState<string | null>(null);
+  /**
+   * iOS 上引导「添加到主屏幕」。
+   *
+   * 装上之后**摄像头权限就不再每次页面加载都问一遍** —— 那是手机上最烦的一点，
+   * 而它是 Safari 对普通标签页的策略，改跳转方式治不了。
+   *
+   * iOS 不触发 beforeinstallprompt（那是 Chrome 的），所以只能自己判断
+   * 「是 iOS Safari 且还没装」再提示。判断条件写得保守一点：宁可不提示，
+   * 也别对已经装好的人重复弹。
+   */
+  const [showInstall, setShowInstall] = useState(false);
 
   /* ---------------- 引擎 ---------------- */
 
@@ -64,6 +75,16 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
       (window as unknown as { __engine?: ArEngine }).__engine = engine;
     }
 
+    /*
+     * 注册 Service Worker，把模型权重缓存下来 —— 第二次进来不用再下几十 MB。
+     *
+     * 放在这里而不是 layout：只有真正要用模型的页面才值得装它。
+     * 失败了就算了，它是纯优化，不该拖着主流程。
+     */
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+
     engine
       .loadPerception()
       .then(() => setPhase("ready"))
@@ -71,6 +92,16 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
         setPhase("failed");
         setProblem(COPY.studio.modelFailed(e.message));
       });
+
+    /*
+     * 只对「iOS + 独立窗口之外 + 这次会话没关过」提示。
+     * navigator.standalone 是 iOS 专有的，装到主屏后为 true。
+     */
+    const nav = window.navigator as Navigator & { standalone?: boolean };
+    const isIOS = /iPad|iPhone|iPod/.test(nav.userAgent) && !/CriOS|FxiOS/.test(nav.userAgent);
+    if (isIOS && !nav.standalone && sessionStorage.getItem("ar-install-hint") !== "off") {
+      setShowInstall(true);
+    }
 
     const onResize = () => engine.resize();
     window.addEventListener("resize", onResize);
@@ -683,6 +714,29 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
               </label>
             ))}
           </div>
+        </div>
+      )}
+
+      {/*
+        引导添加到主屏（只有 iOS 普通标签页会看到）。
+        **只在开摄像头之前显示**：第一版没加这个条件，横幅盖住了底部的模板条，
+        拍摄时想换模板点不到 —— 冒烟里「切模板不重开摄像头」那条当场超时才发现。
+        而且时机上也该在开始之前说，不是拍到一半打断人。
+      */}
+      {showInstall && phase !== "live" && (
+        <div className="md:hidden fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 px-5 pt-4 backdrop-blur"
+             style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)" }}>
+          <p className="text-[14px] font-medium text-fg">{COPY.studio.installTitle}</p>
+          <p className="mt-1 text-note text-muted">{COPY.studio.installBody}</p>
+          <button
+            onClick={() => {
+              sessionStorage.setItem("ar-install-hint", "off");
+              setShowInstall(false);
+            }}
+            className="mt-3 w-full rounded-full border border-line py-2 text-[13px] text-muted"
+          >
+            {COPY.studio.installDismiss}
+          </button>
         </div>
       )}
 
