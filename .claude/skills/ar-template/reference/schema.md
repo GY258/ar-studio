@@ -57,7 +57,7 @@ type ElementAsset =
       flower?: { key: string; scale: number };              // 长在茎顶端，跟着生长的那头走
       seed: number }                                        // 必填：定弯的方向和叶子的左右
   | { kind: "fluidity";   boxes: number; lines: number;      // 检测框 + 连线，见下
-      detectHz: number; density: number; jitter: number;
+      detectHz: number; idleRate: number; density: number; jitter: number;
       boxSize: number; boxSizeSpread: number;
       labelRatio: number; digits: number; digitSize: number;
       lineReach: number; fillRatio: number;
@@ -162,7 +162,7 @@ svg 和 gradient 只有宽度一种含义，写 `fit: "font"` 也按宽度处理
 
 ```jsonc
 { "id": "fluidity",
-  "asset": { "kind": "fluidity", "boxes": 64, "lines": 48, "detectHz": 22,
+  "asset": { "kind": "fluidity", "boxes": 64, "lines": 48, "detectHz": 22, "idleRate": 0.18,
              "density": 0.3, "jitter": 0.3,
              "boxSize": 0.13, "boxSizeSpread": 0.85,
              "labelRatio": 0.78, "digits": 5, "digitSize": 0.038,
@@ -181,6 +181,12 @@ svg 和 gradient 只有宽度一种含义，写 `fit: "font"` 也按宽度处理
 
 - `detectHz` 是**一帧一检测**那种生硬跳变的节奏，编号和抖动都 key 在它上面，
   不做任何插值。平滑插值会让它变成柔顺的装饰动画，完全是另一个东西
+- **节奏跟着运动强度走**，`idleRate` 是人不动时降到几分之几。
+  参考素材里人卡点一动线条明显加速，站着不动时变化得很慢。
+  注意这和密度是**两件事**：密度走姿态（慢慢张开手臂也该炸），
+  节奏走速度（慢慢张开时节奏不该变快）。
+  ⚠️ 速度按定义需要两帧，所以 fluidity 属于「需要 stepTo」那一族 ——
+  离线渲染不能直接跳到任意 t，得按定步长积过去
 - `boxSize` 是**平均**大小，不是上限。分布本身是偏小的幂次，
   给 min/max 的话算不出平均值 —— 想「把框调小一点」得先在脑子里做一遍积分。
   `boxSizeSpread` 只调差异程度（0 = 全一样大，1 = 大量小框 + 少数大框），

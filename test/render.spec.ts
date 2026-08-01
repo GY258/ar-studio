@@ -733,6 +733,42 @@ test("轨迹：状态层确定，且带真的在长", async () => {
   expect(again.equals(lateBuf), "同一个 t 渲染两次必须逐位相同，否则状态没清干净或步长不定").toBe(true);
 });
 
+test("Fluidity：人一动线条就加速，站着不动就慢下来", async () => {
+  /*
+   * 参考素材里人卡点一动，线条明显跟着加速；站着不动时变化得很慢。
+   *
+   * **这条是速度驱动的，和密度那条不是一回事。** 密度走 spread（姿态本身，
+   * 慢慢张开手臂也该炸），节奏走 motion（慢慢张开时节奏不该变快）。
+   * 我一开始把两者混在一起判断过 —— 说「密度由姿态驱动不由速度驱动」，
+   * 那对密度是对的，但节奏确实只能由速度定，从单帧姿态推不出来。
+   *
+   * 代价：速度按定义需要两帧，fluidity 因此加入「需要 stepTo」那一族。
+   *
+   * fixture 的手臂开合是 sin(π·p)，4 秒一个来回：
+   *   t=2.0 在正弦峰值，导数为 0 → 姿态最舒展但**速度为 0**
+   *   t=1.0 在上升段中点 → 速度最大
+   * 正好能把「姿态」和「速度」这两个因素分开验 —— 如果实现错误地把密度那套
+   * spread 拿来驱动节奏，t=2.0 的速率会是最高而不是最低。
+   */
+  const tpl = path.join(TEMPLATES, "fluidity.json");
+  const rate = () =>
+    harness.page.evaluate(
+      () =>
+        (window as unknown as { harness: { engine: { debugStats(): { fluidityRate: number } } } }).harness.engine
+          .debugStats().fluidityRate,
+    );
+
+  await loadTemplate(harness.page, tpl, "body");
+  await capture(harness.page, 1.0);
+  const moving = await rate();
+  await capture(harness.page, 2.0);
+  const peakPose = await rate();
+
+  expect(moving, "手臂挥到一半时该跑满速率").toBeGreaterThan(10);
+  expect(peakPose, `姿态最舒展但速度为 0 时该慢下来（挥动 ${moving.toFixed(1)} → 峰值 ${peakPose.toFixed(1)}）`)
+    .toBeLessThan(moving * 0.6);
+});
+
 test("滑块对非 particle 模板真的有用", async () => {
   /*
    * 这条堵的是又一个**静默失效**：`controls` 原来只在 particle 模板的分支里

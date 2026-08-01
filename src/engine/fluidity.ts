@@ -85,8 +85,13 @@ export interface FluidityParams {
   boxes: number;
   /** 最多几条线 */
   lines: number;
-  /** 每秒重检测几次。编号跳变和抖动的节奏 */
+  /** 人在动的时候每秒重检测几次。编号跳变和抖动的节奏 */
   detectHz: number;
+  /**
+   * 人不动时降到 detectHz 的几分之几 0~1。
+   * 参考素材里人卡点一动线条就加速，站着不动时变化得很慢。
+   */
+  idleRate: number;
   /** 框位置抖动幅度，相对肩宽 */
   jitter: number;
   /** 框的**平均**大小，相对肩宽 */
@@ -137,6 +142,15 @@ export class FluidityField {
 
   private W = 1280;
   private H = 720;
+  /**
+   * 检测相位。**不是 floor(t * rate)**。
+   *
+   * 速率会随运动强度变，而 floor(t * rate) 在 rate 变化时会往回跳或者
+   * 突然跨好几格 —— 表现是整套线框莫名其妙地闪一下、甚至倒着重排。
+   * 用累加器就永远是单调的：phase += rate * dt。
+   */
+  private phase = 0;
+  private lastT = -1;
 
   constructor(
     private readonly params: FluidityParams,
@@ -330,6 +344,12 @@ export class FluidityField {
     return this.lastBoxCount;
   }
 
+  /** 这一帧的检测速率，次/秒。测试靠它断言「人一动线条就加速」 */
+  private lastRate = 0;
+  detectRate(): number {
+    return this.lastRate;
+  }
+
   /**
    * 最低那个框在画面上的位置。
    *
@@ -340,6 +360,12 @@ export class FluidityField {
    */
   lowestBoxY(): number {
     return this.lastLowest;
+  }
+
+  /** 清掉跨帧状态。切模板和时间倒流时调 */
+  reset() {
+    this.phase = 0;
+    this.lastT = -1;
   }
 
   hide() {
@@ -356,8 +382,22 @@ export class FluidityField {
     this.group.visible = true;
 
     const p = this.params;
+
+    /*
+     * 检测速率**跟着运动强度走**。
+     *
+     * 参考素材里人卡点一动，线条明显跟着加速；站着不动时变化得很慢。
+     * 那是速度驱动的，不是姿态驱动的 —— 密度走 spread（慢慢张开手臂也该炸），
+     * 节奏走 motion（慢慢张开时节奏不该变快）。两者管不同的事。
+     */
+    if (t < this.lastT) this.reset(); // 时间倒流：相位重来（同 TrailBuffer）
+    const dt = this.lastT < 0 ? 0 : t - this.lastT;
+    this.lastT = t;
+    this.lastRate = p.detectHz * (p.idleRate + (1 - p.idleRate) * pose.motion);
+    this.phase += this.lastRate * dt;
+
     // 一帧一检测：所有随机量 key 在这个整数上，不插值。参考要的就是这种生硬跳变
-    const f = Math.floor(t * p.detectHz);
+    const f = Math.floor(this.phase);
     const sw = pose.shoulderWidth;
 
     /*
