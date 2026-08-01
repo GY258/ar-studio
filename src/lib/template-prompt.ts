@@ -77,7 +77,7 @@ type ElementAsset =
   | { kind: "fluidity";   boxes: number; lines: number;      // 检测框 + 连线，见下
       detectHz: number; density: number; jitter: number;
       boxSize: number; boxSizeSpread: number;
-      labelRatio: number; digits: number;
+      labelRatio: number; digits: number; digitSize: number;
       lineReach: number; fillRatio: number;
       color: string; seed: number }
   | { kind: "bubbles";    count: number; rise: number;       // 肥皂泡，见下
@@ -183,7 +183,7 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
   "asset": { "kind": "fluidity", "boxes": 64, "lines": 48, "detectHz": 22,
              "density": 0.3, "jitter": 0.3,
              "boxSize": 0.13, "boxSizeSpread": 0.85,
-             "labelRatio": 0.78, "digits": 5,
+             "labelRatio": 0.78, "digits": 5, "digitSize": 0.038,
              "lineReach": 0.08, "fillRatio": 0.22,
              "color": "#FFFFFF", "seed": 41 },
   "anchor": { "space": "screen", "nx": 0.5, "ny": 0.5 },
@@ -205,8 +205,10 @@ svg 和 gradient 只有宽度一种含义，写 \`fit: "font"\` 也按宽度处�
   **平均值恒等于 boxSize**，两个旋钮互不干扰
 - \`density\` 是静止时还剩多少密度。参考里手收拢那几帧只剩三五个框，
   给小一点才有那个对比 —— 给大了整段都是满屏，反而没有「爆发」可言
-- \`labelRatio\` 控制多少框带编号。全带的话数字比框还抢眼，
-  而它本来是「检测 id」这种次要信息
+- \`labelRatio\` 控制多少框带编号，\`digitSize\` 控制字多大。
+  全带、字又大的话数字比框还抢眼，而它本来是「检测 id」这种次要信息。
+  \`digitSize\` 会**吸到 7 的倍数**（5×7 点阵的行数），下限 7px ——
+  也就是每行 1 个像素，点阵还读得出来的极限；调再小也不会糊成噪点
 - \`lineReach\` 是多少比例的线拉出画面。给大了满屏横贯的斜线会盖掉人体上的网
 - \`fillRatio\` 是多少比例的**中小号**框填实。参考素材里散着几个实心的白色小方块 ——
   全描边的话画面太均质，实心的那几个是节奏上的重音。大框不填（会糊掉半个身子），

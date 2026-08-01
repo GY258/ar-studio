@@ -431,6 +431,9 @@ function validateAsset(a: unknown, at: string, p: string[]) {
     if (!inRange(asset.lineReach, 0, 1)) p.push(`${at}.asset.lineReach 应在 [0, 1]（多少比例的线拉出画面）`);
     if (!inRange(asset.fillRatio, 0, 1)) p.push(`${at}.asset.fillRatio 应在 [0, 1]（多少比例的小框是实心的）`);
     if (!inRange(asset.digits, 1, 8)) p.push(`${at}.asset.digits 应在 [1, 8]（编号位数，参考素材是 5）`);
+    if (!inRange(asset.digitSize, 0.01, 0.3)) {
+      p.push(`${at}.asset.digitSize 应在 [0.01, 0.3]（字高，相对肩宽。会吸到 7 的倍数，下限 7px）`);
+    }
     if (typeof asset.color !== "string") p.push(`${at}.asset.color 必填`);
     if (!num(asset.seed)) {
       p.push(
