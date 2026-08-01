@@ -243,10 +243,21 @@ export class ArEngine {
     if (!this.video) throw new Error("startCamera 需要一个 video 元素；离线模式请用 setSource()");
     this.degraded = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
     this.stopCamera();
+    /*
+     * 手机上请求**竖向**分辨率。
+     *
+     * 原来一律要 4:3 横向（1280×960），而手机画布是 9:16 竖屏 ——
+     * cover 裁切会把两侧砍掉一大半，人直接被切成半边。
+     * 全身类模板（fluidity）在这个裁法下根本框不进一个人。
+     *
+     * 用 ideal 而不是 exact：拿不到竖向流的设备会退回它自己的最佳档，
+     * 而不是直接抛 OverconstrainedError 让整个页面开不了摄像头。
+     */
+    const portrait = this.degraded;
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        width: { ideal: this.degraded ? 1280 : 1920 },
-        height: { ideal: this.degraded ? 960 : 1080 },
+        width: { ideal: portrait ? 1080 : 1920 },
+        height: { ideal: portrait ? 1920 : 1080 },
         facingMode: facing,
         ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
       },

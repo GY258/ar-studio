@@ -23,7 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import net from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
-import { chromium, type Browser } from "@playwright/test";
+import { chromium, devices, type Browser } from "@playwright/test";
 import { PNG } from "pngjs";
 import { pngToY4m } from "./fake-camera";
 
@@ -109,6 +109,86 @@ function declaredElementCount(slug: string): number {
   return Array.isArray(els) ? els.filter((e: Record<string, unknown>) => !e.generate).length : 0;
 }
 
+/**
+ * 手机端专项：**真的设备模拟**下验两件事。
+ *
+ * 一、关键控件在不在。翻转摄像头按钮曾经只加进了桌面那一排（`hidden md:flex`），
+ *     手机版底部条是另一段 JSX —— 手机上根本没有入口，而那是唯一需要它的设备。
+ * 二、开摄像头时**请求的约束**是不是竖向的。
+ *
+ * 第二条是这次想明白的：假摄像头会强制流的尺寸等于文件尺寸，
+ * 所以「请求了竖向分辨率」在画面上**看不出任何区别** —— 我一度以为这只能真机验。
+ * 但真正该验的不是拿到了什么画面，而是**请求了什么**：浏览器兑不兑现是操作系统的事，
+ * 我们能控制的只有请求。把 getUserMedia 包一层记下参数就验到了，还能进 CI。
+ *
+ * 必须用 devices 描述而不是 setViewportSize：引擎按 `pointer: coarse` 判断是不是
+ * 手机，拉窄窗口触发不到那条分支。
+ */
+async function checkMobile(browser: Browser, baseUrl: string, slug: string): Promise<string[]> {
+  const problems: string[] = [];
+  const ctx = await browser.newContext({ ...devices["iPhone 13"], permissions: ["camera"] });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => {
+    const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    (window as unknown as { __gum?: unknown[] }).__gum = [];
+    navigator.mediaDevices.getUserMedia = (c?: MediaStreamConstraints) => {
+      (window as unknown as { __gum: unknown[] }).__gum.push(c?.video);
+      return orig(c);
+    };
+  });
+  try {
+    await page.goto(`${baseUrl}/studio/${slug}`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Open camera" }).click({ timeout: READY_TIMEOUT_MS });
+    await page.waitForTimeout(3000);
+
+    for (const label of ["Flip camera"]) {
+      const n = await page.getByRole("button", { name: label }).count();
+      const visible = n > 0 && (await page.getByRole("button", { name: label }).first().isVisible());
+      if (!visible) problems.push(`手机上找不到「${label}」按钮 —— 多半只加进了桌面那一排`);
+    }
+
+    /*
+     * 录一小段，验「存到相册」这条路在结果弹层里露出来了。
+     *
+     * 只验按钮在不在，不验真的存进去 —— Web Share 会调起**系统**分享面板，
+     * headless 里既没有面板也没有相册。能自动验的边界就到这儿：
+     * 按钮在、点击有处理函数；真的落进相册只能在真机上确认。
+     */
+    const rec = page.getByRole("button", { name: /record/i });
+    if (await rec.count()) {
+      await rec.first().click();
+      await page.waitForTimeout(1500);
+      await rec.first().click();
+      await page.waitForTimeout(1500);
+      const save = page.getByRole("button", { name: "Save to Photos" });
+      if ((await save.count()) === 0) {
+        problems.push("录完之后结果弹层里没有「Save to Photos」—— 手机上只剩下载这条麻烦路");
+      }
+    }
+
+    const calls = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum)) as {
+      width?: { ideal?: number };
+      height?: { ideal?: number };
+    }[];
+    const v = calls.find((c) => c && c.width && c.height);
+    if (!v) {
+      problems.push("没有捕获到 getUserMedia 的视频约束 —— 摄像头这条路可能压根没走到");
+    } else {
+      const w = v.width?.ideal ?? 0;
+      const h = v.height?.ideal ?? 0;
+      if (h <= w) {
+        problems.push(
+          `手机上请求的是横向分辨率 ${w}×${h} —— 竖屏画布会把两侧裁掉一大半，全身模板框不进人`,
+        );
+      }
+    }
+  } catch (e) {
+    problems.push(`手机端检查失败：${(e as Error).message.split("\n")[0]}`);
+  }
+  await ctx.close();
+  return problems;
+}
+
 async function runGroup(
   browser: Browser,
   baseUrl: string,
@@ -117,8 +197,7 @@ async function runGroup(
 ): Promise<Result[]> {
   const out: Result[] = [];
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ["camera"] });
-  /** 手机视口那条只在第一个模板上验一次 —— 那是全局 UI，不是每个模板各有一份 */
-  let checkMobileUi = true;
+
 
   for (const slug of slugs) {
     const problems: string[] = [];
@@ -207,19 +286,6 @@ async function runGroup(
        *
        * 只在第一个模板上验一次：这是全局 UI，每个模板都测一遍纯属浪费。
        */
-      if (checkMobileUi) {
-        checkMobileUi = false;
-        await page.setViewportSize({ width: 390, height: 844 });
-        await page.waitForTimeout(300);
-        for (const label of ["Flip camera"]) {
-          const n = await page.getByRole("button", { name: label }).count();
-          const visible = n > 0 && (await page.getByRole("button", { name: label }).first().isVisible());
-          if (!visible) problems.push(`手机视口下找不到「${label}」按钮 —— 多半只加进了桌面那一排`);
-        }
-        await page.setViewportSize({ width: 1280, height: 800 });
-        await page.waitForTimeout(300);
-      }
-
       if (fps <= 0) problems.push("fps 为 0，渲染循环没在跑");
       if (frameLooksBlank(shot)) problems.push("画面几乎是纯色 —— 大概率 shader 没编过或模型没加载");
       if (tracking === false) problems.push(`感知没追踪上（假摄像头喂的是 ${input}）`);
@@ -294,6 +360,8 @@ async function main() {
   dev.stderr?.on("data", (d) => devLog.push(String(d)));
 
   const results: Result[] = [];
+  /** 手机端专项只跑一次，见下面的注释 */
+  let mobileChecked = false;
   let browser: Browser | null = null;
   try {
     await waitForServer(baseUrl, 90_000);
@@ -312,6 +380,20 @@ async function main() {
       });
       console.log(`\n--- 输入 ${input}（${slugs.length} 个模板）---`);
       results.push(...(await runGroup(browser, baseUrl, slugs, input)));
+
+      /*
+       * 手机端专项只跑一次。它验的是**全局 UI 和摄像头约束**，
+       * 不是每个模板各有一份 —— 每个模板都测一遍纯属浪费。
+       */
+      if (!mobileChecked) {
+        mobileChecked = true;
+        const mp = await checkMobile(browser, baseUrl, slugs[0]);
+        const mark = mp.length === 0 ? "✓" : "✗";
+        console.log(`${mark} ${"（手机端）".padEnd(14)} ${mp[0] ?? ""}`);
+        for (const p of mp.slice(1)) console.log(`  ${" ".repeat(16)}${p}`);
+        results.push({ slug: "mobile", input, ok: mp.length === 0, fps: null, tracking: null, problems: mp });
+      }
+
       await browser.close();
       browser = null;
     }

@@ -20,15 +20,15 @@
         "kind": "fluidity",
         "boxes": 64,
         "lines": 48,
-        "detectHz": 22,
-        "idleRate": 0.18,
+        "detectHz": 14,
+        "idleRate": 0.06,
         "density": 0.3,
         "jitter": 0.3,
         "boxSize": 0.13,
         "boxSizeSpread": 0.85,
-        "labelRatio": 0.78,
+        "labelRatio": 0.34,
         "digits": 5,
-        "digitSize": 0.038,
+        "digitSize": 0.015,
         "lineReach": 0,
         "fillRatio": 0.22,
         "color": "#FFFFFF",
@@ -108,7 +108,7 @@
       "min": 0,
       "max": 1,
       "step": 0.02,
-      "default": 0.78,
+      "default": 0.34,
       "target": "element.fluidity.labelRatio"
     },
     {
@@ -120,7 +120,7 @@
       "min": 0.015,
       "max": 0.12,
       "step": 0.005,
-      "default": 0.038,
+      "default": 0.015,
       "target": "element.fluidity.digitSize"
     },
     {
@@ -132,7 +132,7 @@
       "min": 4,
       "max": 40,
       "step": 1,
-      "default": 22,
+      "default": 14,
       "target": "element.fluidity.detectHz"
     },
     {
@@ -156,7 +156,7 @@
       "min": 0,
       "max": 1,
       "step": 0.02,
-      "default": 0.18,
+      "default": 0.06,
       "target": "element.fluidity.idleRate"
     },
     {

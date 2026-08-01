@@ -809,7 +809,15 @@ test("Fluidity：人一动线条就加速，站着不动就慢下来", async () 
   await capture(harness.page, 2.0);
   const peakPose = await rate();
 
-  expect(moving, "手臂挥到一半时该跑满速率").toBeGreaterThan(10);
+  /*
+   * 判据按模板自己的 detectHz 取比例，**不写绝对值**。
+   *
+   * 原来写的是「> 10」，那是按 detectHz = 22 定的 —— Gary 把默认值调到 14 之后
+   * 这条当场红了，而红的原因是「阈值过期」不是「行为不对」。
+   * 断言钉死在某个配置值上，等于给每次调参埋一颗雷。
+   */
+  const detectHz = JSON.parse(fs.readFileSync(tpl, "utf8")).elements[0].asset.detectHz as number;
+  expect(moving / detectHz, `手臂挥到一半时该跑到较高速率（${moving.toFixed(1)} / ${detectHz}）`).toBeGreaterThan(0.4);
   expect(peakPose, `姿态最舒展但速度为 0 时该慢下来（挥动 ${moving.toFixed(1)} → 峰值 ${peakPose.toFixed(1)}）`)
     .toBeLessThan(moving * 0.6);
 });

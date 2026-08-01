@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArEngine, type EngineStats } from "@/engine/engine";
 import { StudioRecorder, download, type RecordingResult } from "@/engine/recorder";
 import type { ControlValues, TemplateConfig, TemplateListing } from "@/engine/types";
+import { saveToPhotos } from "@/engine/recorder";
 import { COPY, t } from "@/lib/copy";
 import { PropThumb } from "./PropThumb";
 
@@ -35,6 +36,16 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
   const [busy, setBusy] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [facing, setFacing] = useState<"user" | "environment">("user");
+  /**
+   * 手机上把控件收起来。
+   *
+   * 模板条 + 录制按钮 + 状态栏一共压住画面下半部分的一大块，而这是个
+   * 「对着自己比划」的工具 —— 挡住的正是要看的地方。相机类 app 的通行做法
+   * 是点一下画面收起 UI，这里照做。
+   */
+  const [uiHidden, setUiHidden] = useState(false);
+  /** 存相册的结果提示。null = 没提示 */
+  const [saveNote, setSaveNote] = useState<string | null>(null);
 
   /* ---------------- 引擎 ---------------- */
 
@@ -290,6 +301,22 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     });
   }, [result, config]);
 
+  /**
+   * 存到相册。
+   *
+   * 按钮**常驻**而不是「支持才显示」：不显示的话用户根本不知道有这条路，
+   * 而能不能用要到点下去才知道（canShare 依赖文件类型）。
+   * 点了不行就如实说，并留着旁边的下载按钮兜底。
+   */
+  const saveToAlbum = useCallback(async () => {
+    if (!result || !config) return;
+    setSaveNote(null);
+    const r = await saveToPhotos(result, config.slug);
+    if (r === "webm") setSaveNote(COPY.studio.saveWebmHint);
+    else if (r === "unsupported") setSaveNote(COPY.studio.saveUnsupported);
+    // ok / cancelled 都不提示 —— 用户自己取消不是错误
+  }, [result, config]);
+
   const statusLine = useMemo(() => {
     if (phase !== "live") return "";
     // 不需要感知的模板没有东西可追，说「在找人」是假信息
@@ -455,13 +482,34 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
 
       {/* ==================== 手机端浮层 ==================== */}
 
+      {/*
+        收起状态下铺一层透明层，点一下把 UI 叫回来。
+        只在收起时存在 —— 常驻的话会挡住可拖拽道具的拖动手势。
+      */}
+      {phase === "live" && uiHidden && (
+        <button
+          onClick={() => setUiHidden(false)}
+          aria-label={COPY.studio.showUi}
+          className="md:hidden absolute inset-0 z-20"
+        />
+      )}
+
       {/* 顶部：模板名 + 录制计时 */}
       {phase === "live" && (
-        <div className="md:hidden absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4"
+        <div className={`md:hidden absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 transition-opacity ${
+               uiHidden ? "pointer-events-none opacity-0" : "opacity-100"
+             }`}
              style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 8px)" }}>
           <span className="rounded-full bg-black/50 px-3 py-1.5 text-[13px] text-white/80">
             {config ? t(config.name) : ""}
           </span>
+          <button
+            onClick={() => setUiHidden(true)}
+            aria-label={COPY.studio.hideUi}
+            className="rounded-full bg-black/50 px-3 py-1.5 text-[13px] text-white/70"
+          >
+            {COPY.studio.hideUi}
+          </button>
           {recording && (
             <div className="flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">
               <span className="h-2 w-2 animate-blink rounded-full bg-rec" />
@@ -483,7 +531,9 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
 
       {/* 底部控制区（手机） */}
       {phase === "live" && (
-        <div className="md:hidden absolute bottom-0 left-0 right-0 z-20 flex flex-col gap-3"
+        <div className={`md:hidden absolute bottom-0 left-0 right-0 z-20 flex flex-col gap-3 transition-opacity ${
+               uiHidden ? "pointer-events-none opacity-0" : "opacity-100"
+             }`}
              style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}>
 
           {/* 模板横向滚动 */}
@@ -513,6 +563,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
           <div className="flex items-center justify-center gap-8 px-4">
             <button
               onClick={() => setShowControls(!showControls)}
+              aria-label={COPY.studio.settings}
               className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur text-white/80"
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -521,9 +572,15 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
               </svg>
             </button>
 
+            {/*
+              手机上这几个圆钮原来一个可访问名称都没有 —— 读屏软件念不出来，
+              自动化也点不到（冒烟里那条「录完之后有没有存相册按钮」因此
+              整段被跳过，突变都抓不到）。补上 aria-label 两个问题一起解决。
+            */}
             <button
               onClick={toggleRecord}
               disabled={phase !== "live"}
+              aria-label={recording ? COPY.studio.recordStop : COPY.studio.recordStart}
               className="relative flex h-[72px] w-[72px] items-center justify-center rounded-full border-[3px] border-white/80 disabled:opacity-40"
             >
               <span className={`rounded-full transition-all duration-200 ${
@@ -535,6 +592,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
 
             <button
               onClick={() => toggleMic(!useMic)}
+              aria-label={COPY.studio.micLabel}
               className={`flex h-11 w-11 items-center justify-center rounded-full backdrop-blur ${
                 useMic ? "bg-accent text-[#1A0F2E]" : "bg-black/50 text-white/80"
               }`}
@@ -565,19 +623,27 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
             </button>
           </div>
 
-          <p className="text-center font-mono text-[11px] text-white/50">{statusLine}</p>
+          {/* 加个底衬：原来白字直接压在画面上，浅色背景下几乎读不出来 */}
+          <p className="mx-auto rounded-full bg-black/45 px-3 py-1 text-center font-mono text-[11px] text-white/70">
+            {statusLine}
+          </p>
         </div>
       )}
 
       {/* 参数抽屉（手机） */}
       {showControls && phase === "live" && (
-        <div className="md:hidden absolute inset-x-0 bottom-0 z-30 rounded-t-2xl bg-surface/95 backdrop-blur border-t border-line"
+        /*
+          面板高度封到 48vh 并内部滚动。
+          原来它撑到 80% 屏高，**调滑块时完全看不到效果** —— 而这是个纯视觉的
+          工具，看不到就只能拖一下关掉再看一眼，来回好几趟。
+        */
+        <div className="md:hidden absolute inset-x-0 bottom-0 z-30 flex max-h-[48vh] flex-col rounded-t-2xl bg-surface/95 backdrop-blur border-t border-line"
              style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)" }}>
           <div className="flex items-center justify-between px-5 py-3 border-b border-line">
             <span className="text-[14px] font-medium text-fg">Settings</span>
             <button onClick={() => setShowControls(false)} className="text-muted text-[13px]">Done</button>
           </div>
-          <div className="px-5 py-4 space-y-5">
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
             {config?.controls.map((c) => (
               <label key={c.key} className="flex items-center gap-3 text-[14px] text-muted">
                 <span className="w-16 shrink-0">{t(c.label)}</span>
@@ -629,19 +695,33 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
             {result.container === "webm" && (
               <p className="mt-3 text-note text-gold">{COPY.studio.webmWarning}</p>
             )}
-            <div className="mt-4 flex gap-3">
+            {saveNote && <p className="mt-3 text-note text-gold">{saveNote}</p>}
+            <div className="mt-4 flex flex-col gap-3">
+              {/*
+                「存到相册」放在最上面：手机上这才是绝大多数人要的动作。
+                原来只有「下载」，而 iOS Safari 的下载会**打开**文件而不是存下来，
+                用户得再长按视频→存储，正是 Gary 说的「有点麻烦」。
+              */}
               <button
-                onClick={saveResult}
-                className="flex-1 rounded-full bg-accent py-2.5 text-[14px] font-medium text-[#1A0F2E]"
+                onClick={saveToAlbum}
+                className="w-full rounded-full bg-accent py-2.5 text-[14px] font-medium text-[#1A0F2E]"
               >
-                {COPY.studio.resultDownload(result.container.toUpperCase())}
+                {COPY.studio.saveToPhotos}
               </button>
-              <button
-                onClick={() => { URL.revokeObjectURL(result.url); setResult(null); }}
-                className="rounded-full border border-line px-5 text-[13px] text-muted"
-              >
-                {COPY.studio.resultRetake}
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={saveResult}
+                  className="flex-1 rounded-full border border-line py-2.5 text-[13px] text-muted"
+                >
+                  {COPY.studio.resultDownload(result.container.toUpperCase())}
+                </button>
+                <button
+                  onClick={() => { URL.revokeObjectURL(result.url); setResult(null); setSaveNote(null); }}
+                  className="rounded-full border border-line px-5 text-[13px] text-muted"
+                >
+                  {COPY.studio.resultRetake}
+                </button>
+              </div>
             </div>
           </div>
         </div>
