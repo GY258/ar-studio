@@ -163,6 +163,7 @@ export class BubbleField {
         uRefract: { value: params.refraction },
         uIrid: { value: params.iridescence },
         uOpacity: { value: params.opacity },
+        uMirror: { value: 1 },
       },
       vertexShader: `
         attribute vec2 iPos;
@@ -186,6 +187,7 @@ export class BubbleField {
         uniform float uRefract;
         uniform float uIrid;
         uniform float uOpacity;
+        uniform float uMirror;
         varying float vA; varying float vSeed; varying float vPop; varying float vRad;
         varying vec2 vLocal;
 
@@ -218,7 +220,9 @@ export class BubbleField {
            * 已经踩过两次了）。
            */
           vec2 screen = gl_FragCoord.xy / uRes;
-          vec2 srcUv = vec2(1.0 - screen.x, screen.y);
+          // 前置摄像头画面是镜像的（背景平面 scale.x = -1），这里必须守同一个约定；
+          // 后置不镜像。不跟着翻的话泡泡里的画面是反的
+          vec2 srcUv = vec2(uMirror > 0.5 ? 1.0 - screen.x : screen.x, screen.y);
           vec2 off = n.xy * uRefract * (vRad / uRes.y) * 2.0;
           vec3 behind = texture2D(uSrc, clamp(srcUv + off, 0.001, 0.999)).rgb;
 
@@ -299,6 +303,10 @@ export class BubbleField {
     if (name === "refraction") this.mat.uniforms.uRefract.value = value;
     if (name === "iridescence") this.mat.uniforms.uIrid.value = value;
     (this.params as unknown as Record<string, number>)[name] = value;
+  }
+
+  setMirror(m: boolean) {
+    this.mat.uniforms.uMirror.value = m ? 1 : 0;
   }
 
   /** 折射要采的画面。引擎换源（摄像头 ↔ 离线静态图）时要重新传 */

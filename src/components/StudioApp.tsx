@@ -34,6 +34,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
   const [lockedTarget, setLockedTarget] = useState<TemplateListing | null>(null);
   const [busy, setBusy] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const [facing, setFacing] = useState<"user" | "environment">("user");
 
   /* ---------------- 引擎 ---------------- */
 
@@ -192,7 +193,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     if (!engine) return;
     setBusy(true);
     try {
-      await engine.startCamera();
+      await engine.startCamera(facing);
       engine.start();
       setPhase("live");
       void fetch("/api/events", {
@@ -236,6 +237,18 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
       setProblem(COPY.studio.micDenied);
     }
   }, []);
+
+  /**
+   * 前后置切换。
+   *
+   * 前置框不进全身 —— fluidity 这类需要全身入镜的模板必须用后置。
+   * 之前 facingMode 是写死的 "user"，而且没有任何切换入口。
+   */
+  const flipCamera = useCallback(() => {
+    const next = facing === "user" ? "environment" : "user";
+    setFacing(next);
+    engineRef.current?.startCamera(next).catch((e: Error) => setProblem(e.message));
+  }, [facing]);
 
   const toggleRecord = useCallback(() => {
     const canvas = canvasRef.current;
@@ -419,6 +432,14 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
           <input type="checkbox" checked={useMic} onChange={(e) => toggleMic(e.target.checked)} />
           {COPY.studio.micLabel}
         </label>
+        <button
+          onClick={flipCamera}
+          disabled={phase !== "live"}
+          title={COPY.studio.flipCamera}
+          className="rounded-full px-3.5 py-1.5 text-[13px] text-muted disabled:opacity-40 hover:text-fg"
+        >
+          {COPY.studio.flipCamera}
+        </button>
         <button
           onClick={toggleRecord}
           disabled={phase !== "live"}

@@ -149,6 +149,11 @@ export async function capture(page: Page, t: number): Promise<Buffer> {
   return Buffer.from(dataUrl.split(",")[1], "base64");
 }
 
+/** 切镜像（等价于换前后置摄像头）。 */
+export async function setMirrored(page: Page, m: boolean) {
+  await page.evaluate((v) => window.harness.setMirrored(v as boolean), m);
+}
+
 /** 拨一个滑块。给「controls 真的接上了」那条断言用。 */
 export async function setControl(page: Page, key: string, value: number) {
   await page.evaluate(([k, v]) => window.harness.setControl(k as string, v as number), [key, value] as [string, number]);
@@ -217,6 +222,7 @@ declare global {
       render(t: number): void;
       renderDirect(t: number): void;
       setControl(key: string, value: number): void;
+      setMirrored(m: boolean): void;
       snapshot(): string;
       bgMaterialType(): string;
     };
