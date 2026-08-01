@@ -261,6 +261,14 @@ export type ElementAsset =
       fillRatio: number;
       /** 编号位数。参考素材是 5 位 */
       digits: number;
+      /**
+       * 字高，相对肩宽。
+       *
+       * 实际会**吸到 7 的倍数**（5×7 点阵的行数），下限 7px —— 也就是每行
+       * 1 个像素，这是点阵还读得出来的极限。所以这个值调得再小也不会糊成噪点，
+       * 只会停在 7px。
+       */
+      digitSize: number;
       color: string;
       /** 必填。编号和抖动都是 hash(第几个, 第几个检测帧, seed) 的纯函数 */
       seed: number;

@@ -180,6 +180,7 @@ export class ElementRenderer {
             lineReach: a.lineReach,
             fillRatio: a.fillRatio,
             digits: a.digits,
+            digitSize: a.digitSize,
             color: a.color,
             opacity: elem.opacity ?? 1,
             seed: a.seed,

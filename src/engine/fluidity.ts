@@ -106,6 +106,8 @@ export interface FluidityParams {
   fillRatio: number;
   /** 编号位数 */
   digits: number;
+  /** 字高，相对肩宽。会吸到 7 的倍数（5×7 的行数），下限 7px */
+  digitSize: number;
   color: string;
   opacity: number;
   seed: number;
@@ -465,9 +467,14 @@ export class FluidityField {
        * （实测最亮像素就是 255,255,255），糊的是**边缘的采样**。
        * 像素风的字必须落在整像素上，这是这类字体的基本要求。
        */
-      // 5×7 的字：高度要吸到 **7** 的倍数，每行才正好占整数个像素。
-      // 换字形时忘了改这个数的话，格线又会落回半像素上（笔画粗细不匀、边上泛色）
-      const ds = Math.max(14, Math.round((sw * 0.055) / 7) * 7);
+      /*
+       * 字高。**吸到 7 的倍数**（5×7 的行数），每行才正好占整数个像素 ——
+       * 换字形时忘了改这个模数的话，格线会落回半像素上，笔画粗细不匀、边上泛色。
+       *
+       * 下限是 7px，也就是每行 1 个像素：5×7 点阵能读出来的极限。
+       * 再小就是一团噪点，不如不画。
+       */
+      const ds = Math.max(7, Math.round((sw * p.digitSize) / 7) * 7);
       const snap = (v: number) => Math.round(v);
       const num = Math.floor(hash1(i * 7919 + f * 13, p.seed) * Math.pow(10, p.digits));
       for (let k = 0; k < p.digits && di < this.maxBoxes * p.digits; k++) {
