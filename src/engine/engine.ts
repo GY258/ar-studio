@@ -30,6 +30,15 @@ import type { ControlValues, TemplateConfig, TemplateType } from "./types";
  */
 const SIM_STEP = 1 / 60;
 
+/**
+ * 手机上检测最多每秒跑几次。
+ *
+ * 20 是个折中：一帧姿态检测在手机上要二三十毫秒，30fps 全跑等于把主线程占满；
+ * 而低于 15 的话快速动作会看出覆盖层「跟不上手」。
+ * 桌面不限速 —— 那边一帧检测几毫秒，限了反而白白丢精度。
+ */
+const DETECT_HZ_MOBILE = 20;
+
 export interface EngineStats {
   fps: number;
   tracking: boolean;
@@ -43,6 +52,14 @@ export interface EngineStats {
    * 把「不适用」和「没追上」分开，UI 才有可能说对话。
    */
   needsTracking: boolean;
+  /**
+   * 摄像头**实际**给的分辨率和帧率，形如 "1080x1920@30"。
+   *
+   * 显示出来是为了让「缩放不对」「掉帧」这类反馈能落到具体数字上 ——
+   * 请求什么和拿到什么经常对不上，而只看画面根本分不清是取景问题
+   * 还是比例算错了。
+   */
+  camera: string;
 }
 
 export interface EngineOptions {
@@ -97,6 +114,15 @@ export class ArEngine {
   private applyOutside = true;
   /** 画面是不是镜像的。前置摄像头是（自拍看着才自然），后置不是 */
   private mirrored = true;
+  /**
+   * 摄像头**实际**给了什么，不是我们请求了什么。
+   *
+   * 这两个经常对不上：手机可能忽略 ideal 直接给自己的档位，也可能给一个
+   * 带旋转的横向流（videoWidth/Height 是横的，画面却是竖的）——
+   * 后者会让 cover 的比例算错，表现就是「缩放不对」。
+   * 猜是猜不出来的，所以把它显示出来。
+   */
+  private camInfo = "";
   /** source.effect.blocks，短边格数。resize 时要按新比例重算长边格数 */
   private blocks = 0;
   /** source.effect.radius，归一化到长边。resize 时要按新比例重算 uv 步长 */
@@ -111,6 +137,8 @@ export class ArEngine {
   private simT = -1;
   private lastT = 0;
   private lastVideoTime = -1;
+  /** 上一次真正跑检测的时刻，秒。手机上用它限速 */
+  private lastDetectT = -1e9;
   private fpsAcc = 0;
   private fpsN = 0;
   private fps = 0;
@@ -266,6 +294,8 @@ export class ArEngine {
     this.setMirrored(facing === "user");
     this.video.srcObject = stream;
     await this.video.play();
+    const st = stream.getVideoTracks()[0]?.getSettings?.();
+    if (st) this.camInfo = `${st.width}x${st.height}@${Math.round(st.frameRate ?? 0)}`;
     // videoWidth/videoHeight 在 play 后才可靠，再 resize 一次确保 cover 比例正确
     this.video.addEventListener("loadedmetadata", () => this.resize(), { once: true });
     this.resize();
@@ -679,6 +709,7 @@ export class ArEngine {
       needsTracking: this.perception.length > 0,
       tracking: this.isTracking(performance.now()),
       degraded: this.degraded,
+      camera: this.camInfo,
       perception: this.perception.join(","),
       templateType: this.templateType,
       elementCount: this.elements.count(),
@@ -1151,9 +1182,21 @@ export class ArEngine {
     // 检测和渲染解耦：感知只在有新视频帧时跑，渲染仍然满帧。
     // 按 perception 驱动，不再按 templateType 锁死 —— 一个模板同时要人脸和分割
     // 在旧写法里根本表达不出来。
+    /*
+     * 检测除了「有新视频帧」之外，手机上还要**限速**。
+     *
+     * 原来只要摄像头出了新帧就跑一次检测。桌面上没问题，手机上一帧姿态检测
+     * 要二三十毫秒，30fps 的摄像头等于每帧都把主线程占满 —— 渲染跟着掉，
+     * 录出来的视频也跟着卡。
+     *
+     * 渲染仍然满帧，只是覆盖层的更新慢一点。这在观感上几乎看不出来：
+     * fluidity 的 detectHz 本来就只有 14，泡泡和手部也不需要 30Hz 的位置更新。
+     */
     const frameTime = this.video ? this.video.currentTime : t;
-    if (frameTime !== this.lastVideoTime) {
+    const minGap = this.degraded ? 1 / DETECT_HZ_MOBILE : 0;
+    if (frameTime !== this.lastVideoTime && t - this.lastDetectT >= minGap) {
       this.lastVideoTime = frameTime;
+      this.lastDetectT = t;
       this.perceive(now);
     }
 
@@ -1204,6 +1247,7 @@ export class ArEngine {
         fps: this.fps,
         tracking: this.isTracking(now),
         degraded: this.degraded,
+      camera: this.camInfo,
         needsTracking: this.perception.length > 0,
       });
     }

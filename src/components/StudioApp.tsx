@@ -27,6 +27,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     tracking: false,
     degraded: false,
     needsTracking: true,
+    camera: "",
   });
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -352,7 +353,11 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     if (phase !== "live") return "";
     // 不需要感知的模板没有东西可追，说「在找人」是假信息
     const track = !stats.needsTracking ? "" : stats.tracking ? COPY.studio.tracking : COPY.studio.waiting;
-    const parts = [track, `${stats.fps} fps`, stats.degraded ? COPY.studio.degraded : ""].filter(Boolean);
+    // 把摄像头实际给的分辨率也显示出来：「缩放不对」「掉帧」这类反馈
+    // 只有落到具体数字上才查得动
+    const parts = [track, `${stats.fps} fps`, stats.camera, stats.degraded ? COPY.studio.degraded : ""].filter(
+      Boolean,
+    );
     return parts.join(" · ");
   }, [phase, stats]);
 
