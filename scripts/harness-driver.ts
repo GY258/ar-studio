@@ -149,6 +149,11 @@ export async function capture(page: Page, t: number): Promise<Buffer> {
   return Buffer.from(dataUrl.split(",")[1], "base64");
 }
 
+/** 数字缩放。 */
+export async function setZoom(page: Page, z: number) {
+  await page.evaluate((v) => window.harness.setZoom(v as number), z);
+}
+
 /** 切镜像（等价于换前后置摄像头）。 */
 export async function setMirrored(page: Page, m: boolean) {
   await page.evaluate((v) => window.harness.setMirrored(v as boolean), m);
@@ -223,6 +228,7 @@ declare global {
       renderDirect(t: number): void;
       setControl(key: string, value: number): void;
       setMirrored(m: boolean): void;
+      setZoom(z: number): void;
       snapshot(): string;
       bgMaterialType(): string;
     };

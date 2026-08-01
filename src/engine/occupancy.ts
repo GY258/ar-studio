@@ -12,6 +12,12 @@ export const GH = 63;
 export class OccupancyField {
   /** 画面是不是镜像的。前置是，后置不是 —— 见 element-renderer 的 nx2wx */
   private mirror = true;
+  /** 数字缩放倍率。世界坐标要先除回去才能查到正确的格子 */
+  private zoom = 1;
+
+  setZoom(z: number) {
+    this.zoom = z;
+  }
 
   setMirror(m: boolean) {
     this.mirror = m;
@@ -86,7 +92,8 @@ export class OccupancyField {
    * 改一个就得改另一个，否则人和特效会反向。
    */
   at(wx: number, wy: number): number {
-    const u = this.mirror ? 0.5 - wx / this.w : wx / this.w + 0.5;
+    const zx = wx / this.zoom;
+    const u = this.mirror ? 0.5 - zx / this.w : zx / this.w + 0.5;
     const v = 0.5 - wy / this.h;
     if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
     const gx = u * (GW - 1);

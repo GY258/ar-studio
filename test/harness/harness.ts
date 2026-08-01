@@ -135,6 +135,12 @@ class Harness {
     this.engine.stepTo(t);
   }
 
+  /** 数字缩放。给「放大之后元素还贴在人身上」那条断言用 */
+  setZoom(z: number) {
+    if (!this.engine) throw new Error("先调 setup()");
+    this.engine.setZoom(z);
+  }
+
   /** 切镜像（等价于换前后置摄像头）。给「镜像约定」那条断言用 */
   setMirrored(m: boolean) {
     if (!this.engine) throw new Error("先调 setup()");

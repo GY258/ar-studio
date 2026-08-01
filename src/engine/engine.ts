@@ -123,6 +123,17 @@ export class ArEngine {
    * 猜是猜不出来的，所以把它显示出来。
    */
   private camInfo = "";
+  /**
+   * 数字缩放倍率。1 = 原始取景。
+   *
+   * 为什么自己做而不是用摄像头的硬件变焦：`track.getCapabilities().zoom`
+   * 在 **iOS Safari 上不支持**（Android Chrome 才有）。而整条渲染管线在我们手里 ——
+   * 背景平面放大多少，归一化坐标转世界坐标就跟着放大多少，元素自然还贴在人身上。
+   *
+   * 代价是**数字缩放不增加细节**：放大 2 倍就是把像素放大 2 倍。
+   * 不过摄像头给的是 1080 宽、屏幕才 390pt，有足够余量。
+   */
+  private zoom = 1;
   /** source.effect.blocks，短边格数。resize 时要按新比例重算长边格数 */
   private blocks = 0;
   /** source.effect.radius，归一化到长边。resize 时要按新比例重算 uv 步长 */
@@ -318,6 +329,20 @@ export class ArEngine {
 
   isMirrored(): boolean {
     return this.mirrored;
+  }
+
+  /** 设置数字缩放。夹在 1~4 倍：小于 1 会露出画布外的黑边，大于 4 已经全是马赛克 */
+  setZoom(z: number) {
+    const next = Math.max(1, Math.min(4, z));
+    if (next === this.zoom) return;
+    this.zoom = next;
+    this.elements.setZoom(next);
+    this.field.setZoom(next);
+    this.resize();
+  }
+
+  getZoom(): number {
+    return this.zoom;
   }
 
   start() {
@@ -846,7 +871,12 @@ export class ArEngine {
       bgH = this.W / vidAspect;
     }
     // 镜像和占据场的 u 映射是一对，改一个就得改另一个
-    this.bg.scale.set(this.mirrored ? -bgW : bgW, bgH, 1);
+    /*
+     * 缩放作用在背景平面上，元素那边走 nx2wx 用同一个倍率 ——
+     * 两边必须同步，否则放大之后框会从人身上滑开。
+     */
+    const z = this.zoom;
+    this.bg.scale.set((this.mirrored ? -bgW : bgW) * z, bgH * z, 1);
     // 占据场要用 cover 后的尺寸，不是 viewport 尺寸。
     // 分割遮罩覆盖整个视频帧，视频通过 cover 显示在 bgW×bgH 的区域内，
     // 粒子碰撞要对齐这个实际显示区域。
@@ -888,6 +918,8 @@ export class ArEngine {
 
     let grabbed: ReturnType<ElementRenderer["hitTest"]> = null;
     let lastPointer = { x: 0, y: 0 };
+
+
 
     canvas.addEventListener("pointerdown", (ev) => {
       const w = toWorld(ev);
@@ -942,30 +974,53 @@ export class ArEngine {
       { passive: false },
     );
 
-    // 触屏双指捏合
+    /*
+     * 触屏双指捏合，两种含义共存：
+     *   捏在**可缩放的道具**上 → 缩那个道具（原有行为，粒子模板的喷头）
+     *   捏在**别处**           → 缩整个画面，和系统相机一个手势
+     *
+     * 按落点区分而不是加个模式开关：用户不该先想「我现在要缩什么」。
+     * 道具是稀疏的几个，捏中它的概率本来就低，所以「别处」是绝大多数情况。
+     *
+     * passive: false 是必须的 —— 不 preventDefault 的话 Safari 会把捏合
+     * 当成页面缩放，整个 UI 跟着放大。
+     */
     let pinchStart = 0;
     let pinchTarget: ReturnType<ElementRenderer["hitTest"]> = null;
+    let zoomStart = 1;
     const touchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-    canvas.addEventListener("touchstart", (ev) => {
-      if (ev.touches.length !== 2) return;
-      const r = canvas.getBoundingClientRect();
-      const mx = (ev.touches[0].clientX + ev.touches[1].clientX) / 2;
-      const my = (ev.touches[0].clientY + ev.touches[1].clientY) / 2;
-      pinchTarget = this.elements.hitTest(
-        ((mx - r.left) / r.width - 0.5) * this.W,
-        (0.5 - (my - r.top) / r.height) * this.H,
-      );
-      if (pinchTarget?.elem.interactive?.resize) pinchStart = touchDist(ev.touches);
-      else pinchTarget = null;
-    });
+    canvas.addEventListener(
+      "touchstart",
+      (ev) => {
+        if (ev.touches.length !== 2) return;
+        ev.preventDefault();
+        const r = canvas.getBoundingClientRect();
+        const mx = (ev.touches[0].clientX + ev.touches[1].clientX) / 2;
+        const my = (ev.touches[0].clientY + ev.touches[1].clientY) / 2;
+        const hit = this.elements.hitTest(
+          ((mx - r.left) / r.width - 0.5) * this.W,
+          (0.5 - (my - r.top) / r.height) * this.H,
+        );
+        pinchTarget = hit?.elem.interactive?.resize ? hit : null;
+        pinchStart = touchDist(ev.touches);
+        zoomStart = this.zoom;
+      },
+      { passive: false },
+    );
     canvas.addEventListener(
       "touchmove",
       (ev) => {
-        if (!pinchTarget || ev.touches.length !== 2 || pinchStart === 0) return;
+        if (ev.touches.length !== 2 || pinchStart === 0) return;
         ev.preventDefault();
         const d = touchDist(ev.touches);
-        this.elements.zoomBy(pinchTarget, d / pinchStart);
-        pinchStart = d;
+        if (pinchTarget) {
+          // 道具：按增量缩，所以每次更新基准
+          this.elements.zoomBy(pinchTarget, d / pinchStart);
+          pinchStart = d;
+        } else {
+          // 画面：按**起始距离**算绝对倍率，手指来回捏不会累积漂移
+          this.setZoom(zoomStart * (d / pinchStart));
+        }
       },
       { passive: false },
     );
