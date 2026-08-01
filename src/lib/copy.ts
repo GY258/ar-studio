@@ -53,6 +53,9 @@ export const COPY = {
     micLabel: "Record audio",
     flipCamera: "Flip camera",
     hideUi: "Hide UI",
+    recordStart: "Start recording",
+    recordStop: "Stop recording",
+    settings: "Settings",
     showUi: "Show controls",
     record: "Record",
     stop: "Stop",
@@ -62,6 +65,10 @@ export const COPY = {
     micDenied: "Microphone permission was denied — the clip will be silent.",
 
     resultDownload: (ext: string) => `Download ${ext}`,
+    saveToPhotos: "Save to Photos",
+    savedHint: "Pick “Save Video” in the share sheet.",
+    saveUnsupported: "This browser can’t save to Photos — use Download instead.",
+    saveWebmHint: "Photos only accepts MP4. This clip is WebM — download it instead.",
     resultRetake: "Retake",
     webmWarning:
       "This browser can only export WebM. Reels and TikTok won't take that format — you'll need to convert to MP4 before posting.",

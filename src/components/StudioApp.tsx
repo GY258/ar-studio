@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArEngine, type EngineStats } from "@/engine/engine";
 import { StudioRecorder, download, type RecordingResult } from "@/engine/recorder";
 import type { ControlValues, TemplateConfig, TemplateListing } from "@/engine/types";
+import { saveToPhotos } from "@/engine/recorder";
 import { COPY, t } from "@/lib/copy";
 import { PropThumb } from "./PropThumb";
 
@@ -43,6 +44,8 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
    * 是点一下画面收起 UI，这里照做。
    */
   const [uiHidden, setUiHidden] = useState(false);
+  /** 存相册的结果提示。null = 没提示 */
+  const [saveNote, setSaveNote] = useState<string | null>(null);
 
   /* ---------------- 引擎 ---------------- */
 
@@ -298,6 +301,22 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     });
   }, [result, config]);
 
+  /**
+   * 存到相册。
+   *
+   * 按钮**常驻**而不是「支持才显示」：不显示的话用户根本不知道有这条路，
+   * 而能不能用要到点下去才知道（canShare 依赖文件类型）。
+   * 点了不行就如实说，并留着旁边的下载按钮兜底。
+   */
+  const saveToAlbum = useCallback(async () => {
+    if (!result || !config) return;
+    setSaveNote(null);
+    const r = await saveToPhotos(result, config.slug);
+    if (r === "webm") setSaveNote(COPY.studio.saveWebmHint);
+    else if (r === "unsupported") setSaveNote(COPY.studio.saveUnsupported);
+    // ok / cancelled 都不提示 —— 用户自己取消不是错误
+  }, [result, config]);
+
   const statusLine = useMemo(() => {
     if (phase !== "live") return "";
     // 不需要感知的模板没有东西可追，说「在找人」是假信息
@@ -544,6 +563,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
           <div className="flex items-center justify-center gap-8 px-4">
             <button
               onClick={() => setShowControls(!showControls)}
+              aria-label={COPY.studio.settings}
               className="flex h-11 w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur text-white/80"
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -552,9 +572,15 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
               </svg>
             </button>
 
+            {/*
+              手机上这几个圆钮原来一个可访问名称都没有 —— 读屏软件念不出来，
+              自动化也点不到（冒烟里那条「录完之后有没有存相册按钮」因此
+              整段被跳过，突变都抓不到）。补上 aria-label 两个问题一起解决。
+            */}
             <button
               onClick={toggleRecord}
               disabled={phase !== "live"}
+              aria-label={recording ? COPY.studio.recordStop : COPY.studio.recordStart}
               className="relative flex h-[72px] w-[72px] items-center justify-center rounded-full border-[3px] border-white/80 disabled:opacity-40"
             >
               <span className={`rounded-full transition-all duration-200 ${
@@ -566,6 +592,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
 
             <button
               onClick={() => toggleMic(!useMic)}
+              aria-label={COPY.studio.micLabel}
               className={`flex h-11 w-11 items-center justify-center rounded-full backdrop-blur ${
                 useMic ? "bg-accent text-[#1A0F2E]" : "bg-black/50 text-white/80"
               }`}
@@ -668,19 +695,33 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
             {result.container === "webm" && (
               <p className="mt-3 text-note text-gold">{COPY.studio.webmWarning}</p>
             )}
-            <div className="mt-4 flex gap-3">
+            {saveNote && <p className="mt-3 text-note text-gold">{saveNote}</p>}
+            <div className="mt-4 flex flex-col gap-3">
+              {/*
+                「存到相册」放在最上面：手机上这才是绝大多数人要的动作。
+                原来只有「下载」，而 iOS Safari 的下载会**打开**文件而不是存下来，
+                用户得再长按视频→存储，正是 Gary 说的「有点麻烦」。
+              */}
               <button
-                onClick={saveResult}
-                className="flex-1 rounded-full bg-accent py-2.5 text-[14px] font-medium text-[#1A0F2E]"
+                onClick={saveToAlbum}
+                className="w-full rounded-full bg-accent py-2.5 text-[14px] font-medium text-[#1A0F2E]"
               >
-                {COPY.studio.resultDownload(result.container.toUpperCase())}
+                {COPY.studio.saveToPhotos}
               </button>
-              <button
-                onClick={() => { URL.revokeObjectURL(result.url); setResult(null); }}
-                className="rounded-full border border-line px-5 text-[13px] text-muted"
-              >
-                {COPY.studio.resultRetake}
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={saveResult}
+                  className="flex-1 rounded-full border border-line py-2.5 text-[13px] text-muted"
+                >
+                  {COPY.studio.resultDownload(result.container.toUpperCase())}
+                </button>
+                <button
+                  onClick={() => { URL.revokeObjectURL(result.url); setResult(null); setSaveNote(null); }}
+                  className="rounded-full border border-line px-5 text-[13px] text-muted"
+                >
+                  {COPY.studio.resultRetake}
+                </button>
+              </div>
             </div>
           </div>
         </div>

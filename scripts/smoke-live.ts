@@ -147,6 +147,25 @@ async function checkMobile(browser: Browser, baseUrl: string, slug: string): Pro
       if (!visible) problems.push(`手机上找不到「${label}」按钮 —— 多半只加进了桌面那一排`);
     }
 
+    /*
+     * 录一小段，验「存到相册」这条路在结果弹层里露出来了。
+     *
+     * 只验按钮在不在，不验真的存进去 —— Web Share 会调起**系统**分享面板，
+     * headless 里既没有面板也没有相册。能自动验的边界就到这儿：
+     * 按钮在、点击有处理函数；真的落进相册只能在真机上确认。
+     */
+    const rec = page.getByRole("button", { name: /record/i });
+    if (await rec.count()) {
+      await rec.first().click();
+      await page.waitForTimeout(1500);
+      await rec.first().click();
+      await page.waitForTimeout(1500);
+      const save = page.getByRole("button", { name: "Save to Photos" });
+      if ((await save.count()) === 0) {
+        problems.push("录完之后结果弹层里没有「Save to Photos」—— 手机上只剩下载这条麻烦路");
+      }
+    }
+
     const calls = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum)) as {
       width?: { ideal?: number };
       height?: { ideal?: number };

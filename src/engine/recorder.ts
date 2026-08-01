@@ -112,6 +112,42 @@ export class StudioRecorder {
   }
 }
 
+/**
+ * 直接存到相册。
+ *
+ * 网页存相册只有这一条正路：Web Share API 带文件，调起系统分享面板 ——
+ * iOS Safari 的面板里有「存储视频」，Android 的有「保存到相册」。
+ * `<a download>` 在 iOS 上不行：Safari 会**打开**文件而不是下载，
+ * 用户得长按视频再存，就是 Gary 说的「有点麻烦」。
+ *
+ * 三个前提缺一不可，所以先问 canShare 再调：
+ *   - HTTPS（生产满足，本地 http 不行）
+ *   - 用户手势里调用（按钮点击满足）
+ *   - 文件类型系统认。**webm 相册不收** —— 那是降级容器，
+ *     只有拿不到 mp4 编码器时才会出现，这时如实告诉用户比静默失败好。
+ *
+ * 返回没成功的原因，让 UI 决定说什么；用户自己取消不算失败。
+ */
+export async function saveToPhotos(
+  result: RecordingResult,
+  slug: string,
+): Promise<"ok" | "cancelled" | "unsupported" | "webm"> {
+  const name = `ar-${slug}-${Date.now()}.${result.container}`;
+  const file = new File([result.blob], name, { type: result.mime });
+  const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
+  if (typeof nav.share !== "function" || !nav.canShare?.({ files: [file] })) {
+    return result.container === "webm" ? "webm" : "unsupported";
+  }
+  try {
+    await nav.share({ files: [file] });
+    return "ok";
+  } catch (e) {
+    // 用户在面板上点了取消 —— 不是错误，别弹提示
+    if ((e as Error).name === "AbortError") return "cancelled";
+    return "unsupported";
+  }
+}
+
 export function download(result: RecordingResult, slug: string) {
   const a = document.createElement("a");
   a.href = result.url;
