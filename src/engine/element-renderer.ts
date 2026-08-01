@@ -172,6 +172,7 @@ export class ElementRenderer {
             boxes: a.boxes,
             lines: a.lines,
             detectHz: a.detectHz,
+            idleRate: a.idleRate,
             jitter: a.jitter,
             boxSize: a.boxSize,
             boxSizeSpread: a.boxSizeSpread,
@@ -789,6 +790,13 @@ export class ElementRenderer {
     }
   }
 
+  /** 这一帧 fluidity 的检测速率。测试用来断言「人一动线条就加速」 */
+  fluidityRate(): number {
+    let r = 0;
+    for (const it of this.items) r = Math.max(r, it.fluidity?.detectRate() ?? 0);
+    return r;
+  }
+
   /** 最低那个 fluidity 框的归一化 y。测试用来断言框铺到了腿和脚上 */
   fluidityLowestY(): number {
     let y = 0;
@@ -808,6 +816,7 @@ export class ElementRenderer {
       // 茎没有 buffer：它是当前帧的纯函数，没有要清的状态
       it.trail?.buffer?.clear();
       it.bubbles?.reset();
+      it.fluidity?.reset();
       it.bloom?.detector.clear();
     }
   }

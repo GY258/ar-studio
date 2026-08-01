@@ -417,6 +417,9 @@ function validateAsset(a: unknown, at: string, p: string[]) {
       p.push(`${at}.asset.detectHz 应在 [1, 60]（每秒重检测几次。这是「一帧一检测」那种跳动的节奏）`);
     }
     if (!inRange(asset.jitter, 0, 2)) p.push(`${at}.asset.jitter 应在 [0, 2]（框位置抖动，相对肩宽）`);
+    if (!inRange(asset.idleRate, 0, 1)) {
+      p.push(`${at}.asset.idleRate 应在 [0, 1]（人不动时降到 detectHz 的几分之几）`);
+    }
     if (!inRange(asset.boxSize, 0.01, 2)) {
       p.push(`${at}.asset.boxSize 应在 [0.01, 2]（框的**平均**大小，相对肩宽）`);
     }

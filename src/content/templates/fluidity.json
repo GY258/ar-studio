@@ -21,6 +21,7 @@
         "boxes": 64,
         "lines": 48,
         "detectHz": 22,
+        "idleRate": 0.18,
         "density": 0.3,
         "jitter": 0.3,
         "boxSize": 0.13,
@@ -145,6 +146,18 @@
       "step": 0.05,
       "default": 1,
       "target": "element.fluidity.opacity"
+    },
+    {
+      "key": "idle",
+      "label": {
+        "zh": "静止节奏",
+        "en": "Idle rate"
+      },
+      "min": 0,
+      "max": 1,
+      "step": 0.02,
+      "default": 0.18,
+      "target": "element.fluidity.idleRate"
     }
   ]
 }

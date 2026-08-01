@@ -89,6 +89,31 @@ export class FixturePoseProvider implements PoseLandmarkProvider {
  */
 const POSE_GRACE_MS = 400;
 
+/** 算运动强度时看哪些关节。只看四肢末端，理由见 measureMotion */
+const MOTION_JOINTS = [
+  POSE_ANCHORS.wrist_left,
+  POSE_ANCHORS.wrist_right,
+  POSE_ANCHORS.elbow_left,
+  POSE_ANCHORS.elbow_right,
+  POSE_ANCHORS.ankle_left,
+  POSE_ANCHORS.ankle_right,
+];
+/**
+ * 读到 1.0 需要多快，单位「肩宽/秒」。
+ *
+ * 真人卡点甩一下手臂，腕部大约 1 个肩宽走 0.15 秒 ≈ 6~7 肩宽/秒，
+ * 所以 2.5 这个门槛在真机上很容易顶满 —— 这是有意的：
+ * 参考素材里那一下是**满速**，不是「稍微快一点」。
+ */
+const MOTION_FULL = 2.5;
+/**
+ * 指数平滑系数。越大越黏。
+ *
+ * 0.82 大约是 5 帧的时间常数（30fps 下 ~0.17 秒）—— 够压掉检测噪声，
+ * 又不至于把「卡点」那一下的锐度磨平。这个效果的灵魂正是那一下。
+ */
+const MOTION_SMOOTH = 0.82;
+
 export interface PoseFrame {
   /** 33 点，归一化到画面，y 向下 */
   points: Landmark[];
@@ -104,12 +129,30 @@ export interface PoseFrame {
   spread: number;
   /** 躯干中心，归一化坐标。框和线的密度按到它的距离衰减 */
   center: { x: number; y: number };
+  /**
+   * 运动强度 0~1：四肢末端相对肩宽的移动速度。
+   *
+   * **这是这个追踪器里唯一的跨帧量。** 其余度量（shoulderWidth、spread）
+   * 都是当前帧的纯函数，而速度按定义就需要两帧 —— 从单帧姿态推不出来。
+   *
+   * 加它的理由：参考素材里人卡点一动，线条明显跟着加速；人站着不动时线条
+   * 变化得很慢。那是**速度**驱动的，不是姿态驱动的（慢慢张开手臂时姿态在变
+   * 但线条不该炸）。密度仍然走 spread，两者管不同的事。
+   *
+   * 代价是 fluidity 从此加入「需要 stepTo」那一族（和 trail / pinch-bloom /
+   * bubbles 一样）：不能直接跳到任意 t，得按定步长积过去。
+   */
+  motion: number;
 }
 
 export class PoseTracker {
   private provider: PoseLandmarkProvider | null = null;
   private last: Landmark[] | null = null;
   private lastSeenMs = -1e9;
+  /** 上一次算速度用的那一帧。只留一帧，够算一阶差分 */
+  private prev: { points: Landmark[]; ms: number } | null = null;
+  /** 平滑过的运动强度。见 MOTION_SMOOTH */
+  private motion = 0;
   private W = 1280;
   private H = 720;
 
@@ -134,9 +177,59 @@ export class PoseTracker {
     // 但不刷新 lastSeenMs，让 grace 正常过期
     if (poses === null) return;
     if (poses.length > 0) {
+      this.measureMotion(poses[0], nowMs);
       this.last = poses[0];
       this.lastSeenMs = nowMs;
     }
+  }
+
+  /**
+   * 一阶差分算运动强度，再做指数平滑。
+   *
+   * 不平滑的话它会逐帧抖到没法用：检测本身有噪声，静止的人也能读出
+   * 0.1~0.2 的「速度」。而这个量是拿来驱动节奏的，抖了整套线框就在
+   * 快慢之间乱跳，读起来像卡顿而不是「跟着动作走」。
+   */
+  private measureMotion(points: Landmark[], nowMs: number) {
+    const p = this.prev;
+    this.prev = { points, ms: nowMs };
+    if (!p) return;
+    const dt = (nowMs - p.ms) / 1000;
+    // 时间倒流或者间隔离谱（切模板、丢帧很久）就重来，别算出一个假的爆发
+    if (dt <= 1e-4 || dt > 0.5) {
+      this.motion = 0;
+      return;
+    }
+
+    const px = (arr: Landmark[], i: number) => ({ x: arr[i].x * this.W, y: arr[i].y * this.H });
+    const sl = px(points, POSE_ANCHORS.shoulder_left);
+    const sr = px(points, POSE_ANCHORS.shoulder_right);
+    const sw = Math.max(1, Math.hypot(sr.x - sl.x, sr.y - sl.y));
+
+    /*
+     * 只看四肢末端。躯干和头在整个人平移时也会动，
+     * 而「卡点」是手脚在动 —— 把躯干算进来的话，人走两步就误判成发力。
+     */
+    let sum = 0;
+    let peak = 0;
+    for (const j of MOTION_JOINTS) {
+      const a = px(points, j);
+      const b = px(p.points, j);
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      sum += d;
+      peak = Math.max(peak, d);
+    }
+    /*
+     * 均值和峰值各占一半，不是纯均值。
+     *
+     * 纯均值下「一条手臂猛地甩出去」会被另外五个不动的关节稀释掉一半以上 ——
+     * 而那正是「卡点」最典型的动作，也正是线条最该加速的那一刻。
+     * 纯峰值又会让检测噪声（某一帧某个点跳一下）直接顶满。
+     * 各占一半：整体在动和单肢发力都读得到，单点噪声顶不满。
+     */
+    const speed = (0.5 * (sum / MOTION_JOINTS.length) + 0.5 * peak) / sw / dt;
+    const raw = Math.max(0, Math.min(1, speed / MOTION_FULL));
+    this.motion = this.motion * MOTION_SMOOTH + raw * (1 - MOTION_SMOOTH);
   }
 
   /** 本帧可用的姿态。超过 grace 返回 null，元素据此隐藏。 */
@@ -165,6 +258,7 @@ export class PoseTracker {
       points: lm,
       shoulderWidth,
       spread,
+      motion: this.motion,
       center: {
         x: (lm[POSE_ANCHORS.shoulder_left].x + lm[POSE_ANCHORS.shoulder_right].x + hl.x / this.W + hr.x / this.W) / 4,
         y: (lm[POSE_ANCHORS.shoulder_left].y + lm[POSE_ANCHORS.shoulder_right].y + hl.y / this.H + hr.y / this.H) / 4,
@@ -182,6 +276,8 @@ export class PoseTracker {
   reset() {
     this.last = null;
     this.lastSeenMs = -1e9;
+    this.prev = null;
+    this.motion = 0;
   }
 
   dispose() {
