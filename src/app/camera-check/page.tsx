@@ -34,19 +34,40 @@ type Row = {
 /**
  * 要跑的问法。每一条都是一个**具体假设**，不是随便试试。
  *
- * 顺序从「完全不提要求」开始：如果连它都给横向流，那就说明
- * 竖向流压根不存在，后面所有花样都是白费 —— 这个对照组我之前一直没做。
+ * 真机第一轮（读真实帧尺寸，不是 getSettings）的结果，是这批问法的由来：
+ *
+ *     不提任何要求      → 480x640   **竖的**，但只有 480 宽
+ *     aspectRatio 3/4   → 853x640   横的（我要竖 4:3，iOS 按横向理解了）
+ *     aspectRatio 9/16  → 1137x640  横的
+ *     ideal 1080x1920   → 1920x1080 横的
+ *
+ * 结论很清楚：**一旦提尺寸/比例，iOS 就切到横向理解；只有什么都不要求
+ * 才给竖向**，而那一档默认只有 480x640 —— 放到 1179x2556 的屏幕上是 4 倍
+ * 放大，画面发虚。
+ *
+ * 所以这一轮问的是同一个问题：**怎么在保持竖向的前提下把分辨率提上去。**
+ * 分三类假设：只给高度不给宽度、只给一个维度、以及先拿到竖向流再
+ * applyConstraints 提分辨率（那时方向已经定了，也许不会被打回横向）。
  */
-const MATRIX: { label: string; video: MediaTrackConstraints }[] = [
-  { label: "不提任何要求", video: {} },
-  { label: "aspectRatio 3/4（竖 4:3，系统相机就是这个）", video: { aspectRatio: 3 / 4 } },
-  { label: "aspectRatio 9/16（竖 16:9）", video: { aspectRatio: 9 / 16 } },
-  { label: "aspectRatio exact 3/4", video: { aspectRatio: { exact: 3 / 4 } } },
-  { label: "ideal 1080x1920（我线上正在用的）", video: { width: { ideal: 1080 }, height: { ideal: 1920 } } },
-  { label: "exact 1080x1920", video: { width: { exact: 1080 }, height: { exact: 1920 } } },
-  { label: "ideal 1440x1080（横 4:3）", video: { width: { ideal: 1440 }, height: { ideal: 1080 } } },
-  { label: "ideal width 1280（Safari 认的预设值之一）", video: { width: { ideal: 1280 } } },
+const MATRIX: { label: string; video: MediaTrackConstraints; then?: MediaTrackConstraints }[] = [
+  { label: "不提任何要求（上一轮的赢家，480x640）", video: {} },
+  { label: "只给 height ideal 1280", video: { height: { ideal: 1280 } } },
+  { label: "只给 height ideal 1920", video: { height: { ideal: 1920 } } },
+  { label: "只给 width ideal 1080", video: { width: { ideal: 1080 } } },
+  { label: "只给 width ideal 720", video: { width: { ideal: 720 } } },
+  { label: "ideal 720x1280（竖 16:9，比 1080 温和）", video: { width: { ideal: 720 }, height: { ideal: 1280 } } },
+  {
+    label: "先不提要求 → 再 applyConstraints(height 1280)",
+    video: {},
+    then: { height: { ideal: 1280 } },
+  },
+  {
+    label: "先不提要求 → 再 applyConstraints(width 1080)",
+    video: {},
+    then: { width: { ideal: 1080 } },
+  },
 ];
+
 
 export default function CameraCheck() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -84,6 +105,14 @@ export default function CameraCheck() {
             audio: false,
           });
           const track = stream.getVideoTracks()[0];
+          /*
+           * 有的行是**两步**：先拿到竖向流，再 applyConstraints 提分辨率。
+           *
+           * 赌的是「方向已经定下来之后再要尺寸，不会被打回横向」——
+           * 一次性把尺寸和方向一起要，iOS 会按横向去匹配，这是上一轮实测的。
+           * 失败了也记下来，那同样是结论。
+           */
+          if (m.then) await track.applyConstraints(m.then).catch(() => {});
           const s = track.getSettings();
           /*
            * **必须真的播一帧再量。**
