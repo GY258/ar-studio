@@ -28,7 +28,9 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     degraded: false,
     needsTracking: true,
     camera: "",
+    camTried: "",
     zoom: 1,
+    fitZoom: 1,
   });
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -369,9 +371,15 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     const track = !stats.needsTracking ? "" : stats.tracking ? COPY.studio.tracking : COPY.studio.waiting;
     // 把摄像头实际给的分辨率也显示出来：「缩放不对」「掉帧」这类反馈
     // 只有落到具体数字上才查得动
-    const parts = [track, `${stats.fps} fps`, stats.camera, stats.degraded ? COPY.studio.degraded : ""].filter(
-      Boolean,
-    );
+    const parts = [
+      track,
+      `${stats.fps} fps`,
+      stats.camera,
+      // 每一档拿到什么。看着啰嗦，但「没试对」和「试了但设备不给」
+      // 只看最终分辨率是分不出来的 —— 之前的反复就卡在这
+      stats.camTried,
+      stats.degraded ? COPY.studio.degraded : "",
+    ].filter(Boolean);
     return parts.join(" · ");
   }, [phase, stats]);
 
@@ -587,12 +595,15 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
              style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}>
 
           {/*
-            缩放档位。0.5 在这里的意思和系统相机的 .5x 一样 ——
-            iOS 只给横向流，竖屏 cover 之后只剩 26% 的宽度，
-            往回缩才看得到接近系统相机那样的取景（代价是上下黑边）。
+            缩放档位。只放大不缩小 —— 缩小必然出黑边，而这个产品要满屏。
           */}
           <div className="flex justify-center gap-2 px-4">
-            {[0.5, 1, 2, 3].map((z) => (
+            {/*
+              最低就是 1×（满屏）。低于 1 会露出上下黑边 —— 系统相机确实是那么做的
+              （4:3 画面 + 上下控件栏），但这里不要黑边，所以取景的改善只能靠
+              **拿到视野更大的流**（4:3 而不是 16:9），不能靠把画面缩小。
+            */}
+            {[1, 2, 3].map((z) => (
               <button
                 key={z}
                 onClick={() => setZoom(z)}

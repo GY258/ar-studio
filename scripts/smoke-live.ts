@@ -231,14 +231,26 @@ async function checkMobile(browser: Browser, baseUrl: string, slug: string): Pro
     }
 
     /*
-     * 竖屏必须请求竖向流。
+     * 竖屏第一次开流的约束**只能给一个轴**，而且必须给。
      *
-     * 断言的是**请求里带了方向信息**，不是拿到了什么 —— 假摄像头强制流的尺寸，
-     * 拿到什么在这里没有意义。而这次的 bug 恰恰在请求那一侧：
-     * 原来写死 width:1080/height:1920，iOS 按自己的距离函数在原生横向档位里挑，
-     * 两者像素数完全一样、在「最近」上是平手，等于**没给方向信息**，于是保持横向。
-     * 现在第一档不指定宽高（让浏览器按设备方向给），拿到的方向不对再用
-     * aspectRatio 重试 —— 所以这里检查：要么没有宽高约束，要么带了竖向的提示。
+     * 验的是请求那一侧，不是拿到什么 —— 假摄像头强制流的尺寸，
+     * 拿到什么在这里没有意义。
+     *
+     * ⚠️ 这条断言前后错了两次，两次都是因为我拿推测当结论：
+     *   v1「第一次不能带宽高」—— 推的，实测恰恰是带宽高那档管用
+     *   v2「第一次要带竖向提示」—— 也是推的，`width:1080,height:1920`
+     *      完全符合「竖向提示」，而它拿到的是 1920x1080 横向流
+     *
+     * 真机 /camera-check 测出来的规律是**转置**：iOS 按传感器的横向坐标系
+     * 理解 width/height，给回来的帧是转置的 —— 我写的 width 变成画面的高。
+     *
+     *     只给 height 1280      → 1280x1706  竖的
+     *     只给 width 1080       → 607x1080   竖的
+     *     width 720 height 1280 → 1280x720   **横的**
+     *
+     * 所以要害是「**别同时写死两个轴**」：两个都写死就把转置后的横向帧钉死了，
+     * 留一个轴自由，设备才会按自己的方向去配。同时也不能什么都不给 ——
+     * 那档实测是 480x640，屏幕 1179 物理像素宽，放大 2.5 倍就是糊的。
      */
     const gum = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum)) as {
       width?: { ideal?: number };
@@ -248,24 +260,35 @@ async function checkMobile(browser: Browser, baseUrl: string, slug: string): Pro
     const first = gum[0];
     if (!first) {
       problems.push("没有捕获到 getUserMedia 的视频约束 —— 摄像头这条路可能压根没走到");
-    } else if (first.width || first.height) {
+    } else if (first.width?.ideal && first.height?.ideal) {
       problems.push(
-        "第一次开流就写死了宽高 —— iOS 会在原生横向档位里挑最近的，等于没给方向信息，" +
-          "结果竖屏拿到横向流、cover 裁掉 74% 的画面",
+        "第一次开流同时写死了 width 和 height —— iOS 会按转置给横向帧" +
+          "（实测 720x1280 → 1280x720），必须留一个轴自由",
       );
-    }
-    const anyPortraitHint = gum.some(
-      (c) => (c.aspectRatio?.ideal ?? 1) < 1 || (c.height?.ideal ?? 0) > (c.width?.ideal ?? 0),
-    );
-    if (gum.length > 1 && !anyPortraitHint) {
-      problems.push("重试时也没给竖向提示 —— 方向对不上的话应该用 aspectRatio 再要一次");
+    } else if (!first.width?.ideal && !first.height?.ideal) {
+      problems.push("第一次开流没要分辨率 —— 实测默认档只有 480x640，屏幕上是 2.5 倍放大");
     }
 
-    const calls = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum)) as {
-      width?: { ideal?: number };
-      height?: { ideal?: number };
-    }[];
-    void calls;
+    /*
+     * 自检页 /camera-check 得能跑完整个矩阵。
+     *
+     * 它是我**唯一**能问真机的渠道 —— iOS Safari 给什么流猜不出来，
+     * WebKit 里没有 mediaDevices，桌面 Safari 是另一套采集栈。
+     * 它要是悄悄坏了，我会以为「Gary 没跑」而不是「页面坏了」，
+     * 然后接着靠猜，回到一轮一轮试的老路。
+     */
+    const cc = await ctx.newPage();
+    await cc.goto(`${baseUrl}/camera-check`, { waitUntil: "networkidle" });
+    await cc.getByRole("button", { name: "测前置" }).click();
+    // 逐条跑 + 每条之间要等上一路关掉，比单个操作慢得多
+    await cc.waitForSelector("textarea", { timeout: 60_000 });
+    const report = await cc.locator("textarea").inputValue();
+    // 行数写死成矩阵长度会让「加一条问法」自动挂；只验「每条都有结论」
+    const lines = report.split("\n").filter((l) => l.trim().startsWith("→"));
+    const blank = lines.filter((l) => !/\d+x\d+|❌/.test(l));
+    if (lines.length < 4) problems.push(`/camera-check 只跑出 ${lines.length} 条结论，矩阵没跑完`);
+    if (blank.length) problems.push(`/camera-check 有 ${blank.length} 条既没分辨率也没报错 —— 结果读不出来`);
+    await cc.close();
   } catch (e) {
     /*
      * 失败时把当时的画面存下来。

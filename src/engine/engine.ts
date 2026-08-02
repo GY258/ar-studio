@@ -53,6 +53,15 @@ export interface EngineStats {
    */
   needsTracking: boolean;
   /**
+   * 开流时试过哪几档、每档实际拿到什么，形如 "explicit:1080x1920 aspect:640x1137"。
+   *
+   * 显示出来是因为「拿到的是横向流」有两种完全不同的原因：**没试对**
+   * 和**试了但设备不给**，而只看最终分辨率这两者长得一模一样。
+   * 之前的反复就卡在分不清这两者。微信的 WKWebView 和 Safari 也不是
+   * 同一套摄像头行为，更需要看到每一档的真实结果。
+   */
+  camTried: string;
+  /**
    * 摄像头**实际**给的分辨率和帧率，形如 "1080x1920@30"。
    *
    * 显示出来是为了让「缩放不对」「掉帧」这类反馈能落到具体数字上 ——
@@ -63,6 +72,11 @@ export interface EngineStats {
   /** 当前缩放倍率。UI 靠它让档位按钮跟着捏合走 —— 两套控件不同步的话
    *  捏完之后高亮的还是旧档位，看着像坏了 */
   zoom: number;
+  /**
+   * 「完整视野」对应的倍率。UI 用它当最低那一档 ——
+   * 固定的 0.5 在 16:9 横向流 + 竖屏上还差得远（实际要 0.31 才不裁）。
+   */
+  fitZoom: number;
 }
 
 export interface EngineOptions {
@@ -141,6 +155,14 @@ export class ArEngine {
    * 「按了没反应」。**「重试」必须有终点**，否则它就是个循环。
    */
   private canMatchOrientation = true;
+  /**
+   * 「完整视野」对应的缩放倍率：缩到这个值时视频的宽度正好铺满画布宽度。
+   *
+   * 固定给 0.5 是不够的 —— 1920x1080 的流塞进竖屏，cover 只显示宽度的 31%，
+   * 0.5 档翻倍也才 63%，仍然裁掉 37%。真正的下限得从两个长宽比算出来，
+   * 不能拍脑袋。低于它只是往两边加黑边，没有意义，所以它同时是缩放的下限。
+   */
+  private fitZoom = 1;
   /**
    * 数字缩放倍率。1 = 原始取景。
    *
@@ -308,23 +330,58 @@ export class ArEngine {
   private async openStream(
     facing: "user" | "environment",
     deviceId: string | undefined,
-    strategy: "auto" | "aspect" | "explicit",
-    portraitView: boolean,
+    strategy: "tall" | "fit" | "auto",
+    exactFacing: boolean,
   ): Promise<MediaStream> {
+    /*
+     * facingMode 分硬软两种问法。
+     *
+     * `facingMode: "environment"` 是**软约束** —— 设备完全可以无视它继续给前置，
+     * 而且不会报错。「切后置没反应」大概率就是这么来的：代码以为切了，
+     * 实际拿回来的还是同一路流，从外面看跟按钮坏了一模一样。
+     * `{ exact: ... }` 拿不到会抛 OverconstrainedError，那是个**明确答案**。
+     *
+     * 但 exact 也可能在某些环境下直接开不了摄像头，所以外面还有一轮 ideal 兜底：
+     * 「方向不对但能用」比「什么都没有」好。
+     */
     const base: MediaTrackConstraints = {
-      facingMode: facing,
+      facingMode: exactFacing ? { exact: facing } : facing,
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     };
+    /*
+     * ⚠️ **iOS 把 width/height 当成传感器的横向坐标系，给回来的帧是转置的。**
+     *
+     * 真机实测（读真实帧尺寸；每一行 getSettings 都正好报成实际的转置）：
+     *
+     *     不提任何要求          → 480x640    竖的，但只有 480 宽
+     *     只给 height 1280      → 1280x1706  竖的 ✓
+     *     只给 height 1920      → 1920x2560  竖的 ✓
+     *     只给 width 1080       → 607x1080   竖的 ✓
+     *     width 720 height 1280 → 1280x720   横的
+     *
+     * 规则完全一致：**我写的 width 变成画面的高，我写的 height 变成画面的宽。**
+     * 所以想要一帧 1280 宽的竖向画面，要写的是 `height: 1280`。
+     * 我之前一直按字面意思写「竖向就是 width 1080 / height 1920」，
+     * 于是每次都精确地拿到它的转置 —— 1920x1080 横向流。
+     * 「iPhone 不给竖向流」从来不是真的，是我把两个轴写反了。
+     *
+     * 三档都按这条规则写，都能拿到竖向帧，区别只是清晰度和开销：
+     *
+     *   tall  height:1280 → 1280x1706（比 0.75）cover 到 0.565 后可见 964x1706
+     *   fit   width:1080  → 607x1080 （比 0.562）几乎不用裁，但只有 607 宽
+     *   auto  什么都不提   → 480x640  兜底，保证一定开得起来
+     *
+     * tall 排第一：它裁掉 25% 宽度之后**仍然**比 fit 清晰得多
+     * （964 对 607），而屏幕是 1179 物理像素宽 —— fit 那档要放大 2 倍，糊。
+     * 两者裁完的视野是一样的：0.75 和 0.562 都源自同一块 4:3 传感器，
+     * 前者 cover 时被裁掉的宽度，正好就是后者已经被相机裁掉的那部分。
+     */
     const video: MediaTrackConstraints =
-      strategy === "auto"
-        ? base
-        : strategy === "aspect"
-          ? { ...base, aspectRatio: { ideal: portraitView ? 9 / 16 : 16 / 9 } }
-          : {
-              ...base,
-              width: { ideal: portraitView ? 1080 : 1920 },
-              height: { ideal: portraitView ? 1920 : 1080 },
-            };
+      strategy === "tall"
+        ? { ...base, height: { ideal: 1280 } }
+        : strategy === "fit"
+          ? { ...base, width: { ideal: 1080 } }
+          : base;
     return navigator.mediaDevices.getUserMedia({ video, audio: false });
   }
 
@@ -350,39 +407,97 @@ export class ArEngine {
     let stream: MediaStream | null = null;
 
     /*
-     * 依次尝试，拿到方向对得上的就停。
+     * 每一档都要**真的播一帧**才能知道拿到了什么。
      *
-     * 不用 exact：拿不到就抛异常，整个页面开不了摄像头 —— 而「方向不对但能用」
-     * 比「什么都没有」好得多。所以是**尽力而为 + 兜底**，最后一档一定会成功。
+     * `track.getSettings()` 在 iOS 上会把**我请求的值回读给我** ——
+     * 请求 1080x1920 就答 1080x1920，而视频播起来是 1920x1080。
+     * 上一轮我就是被它骗的：ladder 第一档「匹配成功」直接 break，
+     * 后面视野更大的 4:3 压根没试，而状态栏两个数字自相矛盾
+     * （`1920x1080@30 · explicit:1080x1920`）—— 那就是这个谎的指纹。
+     *
+     * `video.videoWidth/Height` 是解码器给的真实帧尺寸，骗不了人。
      */
+    const measure = async (s: MediaStream): Promise<{ w: number; h: number }> => {
+      /*
+       * 每次都用**新的** video 元素。
+       *
+       * 复用同一个的话，第二路流刚 srcObject 上去、元数据还没来的时候，
+       * videoWidth 读到的是**上一路的**尺寸 —— 那就是又一个「读到的不是真的」，
+       * 和我刚要修的 getSettings 是同一类坑，只是更难发现。
+       */
+      const v = document.createElement("video");
+      v.muted = true;
+      v.playsInline = true;
+      v.srcObject = s;
+      await new Promise<void>((res) => {
+        const done = () => res();
+        v.addEventListener("loadedmetadata", done, { once: true });
+        // 元数据一直不来也不能把整个开摄像头卡死
+        setTimeout(done, 1500);
+      });
+      const out = { w: v.videoWidth, h: v.videoHeight };
+      v.srcObject = null;
+      return out;
+    };
+
+    /*
+     * 两轮：先用**硬**约束的 facingMode（exact），拿不到再退回软约束。
+     *
+     * 软约束下设备可以无视 facingMode 继续给同一路流、而且不报错 ——
+     * 「切后置没反应」就是这么来的：代码以为切了，实际拿回来的还是前置，
+     * 从外面看跟按钮坏了完全一样。硬约束拿不到会抛，那是明确答案。
+     * 但硬约束也可能在某些环境下直接开不了，所以留一轮软约束兜底。
+     */
+    const viewAspect = this.W / this.H;
     let matched = false;
-    for (const strategy of ["auto", "aspect", "explicit"] as const) {
-      try {
-        const s = await this.openStream(facing, deviceId, strategy, portraitView);
-        const st = s.getVideoTracks()[0]?.getSettings?.();
-        const portraitStream = (st?.height ?? 0) > (st?.width ?? 0);
-        tried.push(`${strategy}:${st?.width}x${st?.height}`);
-        if (stream) stream.getTracks().forEach((t) => t.stop());
-        stream = s;
-        if (portraitStream === portraitView) {
-          matched = true;
-          break;
+    for (const exactFacing of [true, false]) {
+      if (stream) break;
+      let bestScore = Infinity;
+      /*
+       * 档位顺序。auto（不提要求）实测是 640x480，全场最低，所以只当最后的兜底 ——
+       * 它的作用是「保证摄像头一定能开」，不是「优先」。
+       */
+      for (const strategy of ["tall", "fit", "auto"] as const) {
+        try {
+          const s = await this.openStream(facing, deviceId, strategy, exactFacing);
+          const { w, h } = await measure(s);
+          const tag = `${exactFacing ? "" : "~"}${strategy}`;
+          tried.push(`${tag}:${w}x${h}`);
+          if (!w || !h) {
+            s.getTracks().forEach((t) => t.stop());
+            continue;
+          }
+          /*
+           * 分数 = **cover 之后真正看得见的像素数**。
+           *
+           * 不能用总像素：1920x1080 像素最多，但竖屏 cover 只剩中间 32% 的宽度，
+           * 可见的反而最少 —— 脸被顶满屏幕就是这么来的。
+           * 也不能用「比例贴视口」：那会选中 607x1080，比例完美但只有 607 宽，
+           * 而屏幕是 1179 物理像素宽，放大 2 倍就是糊的（上一版的问题）。
+           *
+           * 「裁完还剩多少像素」把这两件事合成一个量：横向流因为被裁掉大半而落选，
+           * 低分辨率的竖向流因为本来就没多少像素而落选。
+           */
+          const visible = Math.min(w, h * viewAspect) * h;
+          const score = -visible;
+          if (score < bestScore) {
+            if (stream) (stream as MediaStream).getTracks().forEach((t) => t.stop());
+            bestScore = score;
+            stream = s;
+            matched = h > w === portraitView;
+          } else {
+            s.getTracks().forEach((t) => t.stop());
+          }
+        } catch (e) {
+          // 把错误名记下来。之前是 catch {} 全吞掉，「切后置没反应」
+          // 就完全没有线索 —— 而 OverconstrainedError 和 NotAllowedError
+          // 是两个完全不同的问题
+          tried.push(`${exactFacing ? "" : "~"}${strategy}:${(e as Error).name || "失败"}`);
         }
-      } catch {
-        tried.push(`${strategy}:失败`);
       }
     }
     if (!stream) throw new Error("开不了摄像头");
     this.canMatchOrientation = matched;
-
-    /*
-     * 设备给不了对得上的方向时，**默认缩到 0.5**。
-     *
-     * 16:9 横向流塞进 9:16 竖屏，cover 只显示宽度的 26% —— 一上来就是大特写。
-     * 缩到 0.5 能看到接近两倍宽的场景（代价是上下黑边），这是这种设备上
-     * 唯一合理的默认取景。用户仍然可以点回 1×。
-     */
-    if (!matched && this.zoom === 1) this.setZoom(0.5);
 
     this.video.srcObject = stream;
     await this.video.play();
@@ -433,7 +548,14 @@ export class ArEngine {
    * 下限 0.3：再小主体已经小到没法用，而黑边占了大半个屏幕。
    */
   setZoom(z: number) {
-    const next = Math.max(0.3, Math.min(4, z));
+    /*
+     * 下限就是 1，也就是**满屏**。
+     *
+     * 低于 1 会露出上下黑边 —— 系统相机确实是那么做的（4:3 画面 + 上下控件栏），
+     * 但 Gary 明确说不要黑边。所以取景的改善只能靠**拿到视野更大的流**
+     * （4:3 而不是 16:9），不能靠把画面缩小。
+     */
+    const next = Math.max(1, Math.min(4, z));
     if (next === this.zoom) return;
     this.zoom = next;
     this.elements.setZoom(next);
@@ -443,6 +565,11 @@ export class ArEngine {
 
   getZoom(): number {
     return this.zoom;
+  }
+
+  /** 「完整视野」对应的倍率。UI 拿它当最低那一档 */
+  getFitZoom(): number {
+    return this.fitZoom;
   }
 
   start() {
@@ -835,7 +962,17 @@ export class ArEngine {
       tracking: this.isTracking(performance.now()),
       degraded: this.degraded,
       camera: this.camInfo,
+      /**
+       * 试过哪几档、每档实际拿到什么。
+       *
+       * 显示出来是因为「拿到的是横向流」有两种完全不同的原因：**没试对**
+       * 和**试了但设备不给**，而只看最终分辨率这两者长得一模一样。
+       * 之前就是分不清，才一轮一轮猜。微信的 WKWebView 和 Safari 还不是
+       * 同一套摄像头行为，更需要看到每一档的真实结果。
+       */
+      camTried: this.camCaps,
       zoom: this.zoom,
+      fitZoom: this.fitZoom,
       perception: this.perception.join(","),
       templateType: this.templateType,
       elementCount: this.elements.count(),
@@ -987,6 +1124,13 @@ export class ArEngine {
     const { w: vw, h: vh } = sourceSize(this.source, this.W, this.H);
     const viewAspect = this.W / this.H;
     const vidAspect = vw / vh;
+    /*
+     * 缩到多少能看到完整的横向视野。
+     *
+     * cover 下视频宽度被裁成 viewAspect / vidAspect；缩到这个倍率时正好不裁。
+     * 视频本来就比画布窄（竖向流塞进竖屏）时它是 1 —— 那种情况没什么可缩的。
+     */
+    this.fitZoom = Math.min(1, viewAspect / vidAspect);
     let bgW: number, bgH: number;
     if (vidAspect > viewAspect) {
       // 视频比容器宽，按高度匹配，左右裁
@@ -1430,7 +1574,17 @@ export class ArEngine {
         tracking: this.isTracking(now),
         degraded: this.degraded,
       camera: this.camInfo,
+      /**
+       * 试过哪几档、每档实际拿到什么。
+       *
+       * 显示出来是因为「拿到的是横向流」有两种完全不同的原因：**没试对**
+       * 和**试了但设备不给**，而只看最终分辨率这两者长得一模一样。
+       * 之前就是分不清，才一轮一轮猜。微信的 WKWebView 和 Safari 还不是
+       * 同一套摄像头行为，更需要看到每一档的真实结果。
+       */
+      camTried: this.camCaps,
       zoom: this.zoom,
+      fitZoom: this.fitZoom,
         needsTracking: this.perception.length > 0,
       });
     }
