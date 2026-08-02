@@ -266,6 +266,27 @@ async function checkMobile(browser: Browser, baseUrl: string, slug: string): Pro
       height?: { ideal?: number };
     }[];
     void calls;
+
+    /*
+     * 自检页 /camera-check 得能跑完整个矩阵。
+     *
+     * 它是我**唯一**能问真机的渠道 —— iOS Safari 给什么流猜不出来，
+     * WebKit 里没有 mediaDevices，桌面 Safari 是另一套采集栈。
+     * 它要是悄悄坏了，我会以为「Gary 没跑」而不是「页面坏了」，
+     * 然后接着靠猜，回到一轮一轮试的老路。
+     */
+    const cc = await ctx.newPage();
+    await cc.goto(`${baseUrl}/camera-check`, { waitUntil: "networkidle" });
+    await cc.getByRole("button", { name: "测前置" }).click();
+    // 逐条跑 + 每条之间要等上一路关掉，比单个操作慢得多
+    await cc.waitForSelector("textarea", { timeout: 60_000 });
+    const report = await cc.locator("textarea").inputValue();
+    // 行数写死成矩阵长度会让「加一条问法」自动挂；只验「每条都有结论」
+    const lines = report.split("\n").filter((l) => l.trim().startsWith("→"));
+    const blank = lines.filter((l) => !/\d+x\d+|❌/.test(l));
+    if (lines.length < 4) problems.push(`/camera-check 只跑出 ${lines.length} 条结论，矩阵没跑完`);
+    if (blank.length) problems.push(`/camera-check 有 ${blank.length} 条既没分辨率也没报错 —— 结果读不出来`);
+    await cc.close();
   } catch (e) {
     /*
      * 失败时把当时的画面存下来。
