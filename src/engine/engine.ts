@@ -419,15 +419,6 @@ export class ArEngine {
     if (!stream) throw new Error("开不了摄像头");
     this.canMatchOrientation = matched;
 
-    /*
-     * 设备给不了对得上的方向时，**默认缩到 0.5**。
-     *
-     * 16:9 横向流塞进 9:16 竖屏，cover 只显示宽度的 26% —— 一上来就是大特写。
-     * 缩到 0.5 能看到接近两倍宽的场景（代价是上下黑边），这是这种设备上
-     * 唯一合理的默认取景。用户仍然可以点回 1×。
-     */
-    if (!matched && this.zoom === 1) this.setZoom(this.fitZoom);
-
     this.video.srcObject = stream;
     await this.video.play();
 
@@ -477,8 +468,14 @@ export class ArEngine {
    * 下限 0.3：再小主体已经小到没法用，而黑边占了大半个屏幕。
    */
   setZoom(z: number) {
-    // 下限就是「完整视野」—— 再往下只是往两边加黑边，没有意义
-    const next = Math.max(Math.min(this.fitZoom, 1), Math.min(4, z));
+    /*
+     * 下限就是 1，也就是**满屏**。
+     *
+     * 低于 1 会露出上下黑边 —— 系统相机确实是那么做的（4:3 画面 + 上下控件栏），
+     * 但 Gary 明确说不要黑边。所以取景的改善只能靠**拿到视野更大的流**
+     * （4:3 而不是 16:9），不能靠把画面缩小。
+     */
+    const next = Math.max(1, Math.min(4, z));
     if (next === this.zoom) return;
     this.zoom = next;
     this.elements.setZoom(next);

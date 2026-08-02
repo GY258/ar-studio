@@ -588,17 +588,15 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
              style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}>
 
           {/*
-            缩放档位。最低那一档是**算出来的「完整视野」**，不是固定的 0.5 ——
-            1920x1080 的流塞进竖屏，cover 只显示宽度的 31%，0.5 档翻倍也才 63%，
-            仍然裁掉 37%。真正不裁需要缩到 0.31，那个数只能从两个长宽比算。
-            标签直接显示算出来的值，用户看到的就是「这台设备最宽能到多少」。
+            缩放档位。只放大不缩小 —— 缩小必然出黑边，而这个产品要满屏。
           */}
           <div className="flex justify-center gap-2 px-4">
             {/*
-              fitZoom 等于 1 时（流本来就够竖，没什么可缩的）要去掉那一档 ——
-              不去重的话会出现两个并排的「1×」，而且两个都高亮。
+              最低就是 1×（满屏）。低于 1 会露出上下黑边 —— 系统相机确实是那么做的
+              （4:3 画面 + 上下控件栏），但这里不要黑边，所以取景的改善只能靠
+              **拿到视野更大的流**（4:3 而不是 16:9），不能靠把画面缩小。
             */}
-            {(stats.fitZoom < 0.95 ? [stats.fitZoom, 1, 2, 3] : [1, 2, 3]).map((z) => (
+            {[1, 2, 3].map((z) => (
               <button
                 key={z}
                 onClick={() => setZoom(z)}
