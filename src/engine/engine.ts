@@ -53,6 +53,15 @@ export interface EngineStats {
    */
   needsTracking: boolean;
   /**
+   * 开流时试过哪几档、每档实际拿到什么，形如 "explicit:1080x1920 aspect:640x1137"。
+   *
+   * 显示出来是因为「拿到的是横向流」有两种完全不同的原因：**没试对**
+   * 和**试了但设备不给**，而只看最终分辨率这两者长得一模一样。
+   * 之前的反复就卡在分不清这两者。微信的 WKWebView 和 Safari 也不是
+   * 同一套摄像头行为，更需要看到每一档的真实结果。
+   */
+  camTried: string;
+  /**
    * 摄像头**实际**给的分辨率和帧率，形如 "1080x1920@30"。
    *
    * 显示出来是为了让「缩放不对」「掉帧」这类反馈能落到具体数字上 ——
@@ -323,9 +332,21 @@ export class ArEngine {
     deviceId: string | undefined,
     strategy: "auto" | "fourthree" | "aspect" | "explicit",
     portraitView: boolean,
+    exactFacing: boolean,
   ): Promise<MediaStream> {
+    /*
+     * facingMode 分硬软两种问法。
+     *
+     * `facingMode: "environment"` 是**软约束** —— 设备完全可以无视它继续给前置，
+     * 而且不会报错。「切后置没反应」大概率就是这么来的：代码以为切了，
+     * 实际拿回来的还是同一路流，从外面看跟按钮坏了一模一样。
+     * `{ exact: ... }` 拿不到会抛 OverconstrainedError，那是个**明确答案**。
+     *
+     * 但 exact 也可能在某些环境下直接开不了摄像头，所以外面还有一轮 ideal 兜底：
+     * 「方向不对但能用」比「什么都没有」好。
+     */
     const base: MediaTrackConstraints = {
-      facingMode: facing,
+      facingMode: exactFacing ? { exact: facing } : facing,
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     };
     /*
@@ -385,58 +406,59 @@ export class ArEngine {
     let stream: MediaStream | null = null;
 
     /*
-     * 依次尝试，拿到方向对得上的就停。
+     * 两轮：先用**硬**约束的 facingMode（exact），拿不到再退回软约束。
      *
-     * 不用 exact：拿不到就抛异常，整个页面开不了摄像头 —— 而「方向不对但能用」
-     * 比「什么都没有」好得多。所以是**尽力而为 + 兜底**，最后一档一定会成功。
-     */
-    /*
-     * 依次尝试。方向对得上就停；都对不上时**留下视野最大的那个**。
-     *
-     * 原来是「留最后一次尝试的结果」，那没道理 —— 最后一档是写死宽高的兜底，
-     * 恰恰是视野最窄的。设备给不了竖向流时（实测 iPhone 就是这样），
-     * 该留下的是 4:3 那个：它保留了更多纵向视野，竖屏裁切后可见范围最大。
+     * 软约束下设备可以无视 facingMode 继续给同一路流、而且不报错 ——
+     * 「切后置没反应」就是这么来的：代码以为切了，实际拿回来的还是前置，
+     * 从外面看跟按钮坏了完全一样。硬约束拿不到会抛，那是明确答案。
+     * 但硬约束也可能在某些环境（比如各种 App 内置浏览器）下直接开不了，
+     * 所以留一轮软约束兜底：「摄像头不对但能用」好过「什么都没有」。
      */
     let matched = false;
-    let bestArea = -1;
-    /*
-     * 顺序按**实测**排，不按「从宽松到严格」排。
-     *
-     * 原来 auto 在第一档，理由是「先看设备自己想给什么」—— 实测那是 640x480，
-     * 全场最低，而且是横的。它排第一意味着**只要方向恰好对得上就直接采纳**，
-     * 画质最差的那一档反而最容易中。
-     *
-     * 现在先要那个实测能拿到、又正好贴合视口的（1080x1920），
-     * auto 退到最后一档只当兜底 —— 它的作用是「保证摄像头一定能开」，
-     * 不是「优先」。
-     */
-    for (const strategy of ["explicit", "aspect", "fourthree", "auto"] as const) {
-      try {
-        const s = await this.openStream(facing, deviceId, strategy, portraitView);
-        const st = s.getVideoTracks()[0]?.getSettings?.();
-        const portraitStream = (st?.height ?? 0) > (st?.width ?? 0);
-        tried.push(`${strategy}:${st?.width}x${st?.height}`);
-        if (portraitStream === portraitView) {
-          if (stream) stream.getTracks().forEach((t) => t.stop());
-          stream = s;
-          matched = true;
-          break;
+    for (const exactFacing of [true, false]) {
+      if (stream) break;
+      let bestArea = -1;
+      /*
+       * 档位顺序按**实测**排，不按「从宽松到严格」排。
+       *
+       * 原来 auto 在第一档，理由是「先看设备自己想给什么」—— 实测那是 640x480，
+       * 全场最低，而且是横的。它排第一意味着**只要方向恰好对得上就直接采纳**，
+       * 画质最差的那一档反而最容易中。
+       *
+       * 现在先要那个实测能拿到、又正好贴合视口的（1080x1920），
+       * auto 退到最后一档只当兜底 —— 它的作用是「保证摄像头一定能开」，
+       * 不是「优先」。
+       */
+      for (const strategy of ["explicit", "aspect", "fourthree", "auto"] as const) {
+        try {
+          const s = await this.openStream(facing, deviceId, strategy, portraitView, exactFacing);
+          const st = s.getVideoTracks()[0]?.getSettings?.();
+          const portraitStream = (st?.height ?? 0) > (st?.width ?? 0);
+          // 记下这一档真实拿到什么。exact 和 ideal 两轮要分得开 ——
+          // 「硬约束全挂、软约束给了个不对的」和「一开始就给对了」得能一眼区分
+          tried.push(`${exactFacing ? "" : "~"}${strategy}:${st?.width}x${st?.height}`);
+          if (portraitStream === portraitView) {
+            if (stream) (stream as MediaStream).getTracks().forEach((t) => t.stop());
+            stream = s;
+            matched = true;
+            break;
+          }
+          /*
+           * 方向不对时按「竖屏裁切后还剩多少可见面积」挑。
+           * cover 保留整个高度、把宽度裁成 viewAspect/vidAspect，
+           * 所以可见面积 ∝ 高 × 高 × viewAspect —— 高度越大越好。
+           */
+          const area = (st?.height ?? 0) * (st?.height ?? 0);
+          if (area > bestArea) {
+            if (stream) (stream as MediaStream).getTracks().forEach((t) => t.stop());
+            bestArea = area;
+            stream = s;
+          } else {
+            s.getTracks().forEach((t) => t.stop());
+          }
+        } catch {
+          tried.push(`${exactFacing ? "" : "~"}${strategy}:失败`);
         }
-        /*
-         * 方向不对时按「竖屏裁切后还剩多少可见面积」挑。
-         * cover 保留整个高度、把宽度裁成 viewAspect/vidAspect，
-         * 所以可见面积 ∝ 高 × 高 × viewAspect —— 高度越大越好。
-         */
-        const area = (st?.height ?? 0) * (st?.height ?? 0);
-        if (area > bestArea) {
-          if (stream) stream.getTracks().forEach((t) => t.stop());
-          bestArea = area;
-          stream = s;
-        } else {
-          s.getTracks().forEach((t) => t.stop());
-        }
-      } catch {
-        tried.push(`${strategy}:失败`);
       }
     }
     if (!stream) throw new Error("开不了摄像头");
@@ -905,6 +927,15 @@ export class ArEngine {
       tracking: this.isTracking(performance.now()),
       degraded: this.degraded,
       camera: this.camInfo,
+      /**
+       * 试过哪几档、每档实际拿到什么。
+       *
+       * 显示出来是因为「拿到的是横向流」有两种完全不同的原因：**没试对**
+       * 和**试了但设备不给**，而只看最终分辨率这两者长得一模一样。
+       * 之前就是分不清，才一轮一轮猜。微信的 WKWebView 和 Safari 还不是
+       * 同一套摄像头行为，更需要看到每一档的真实结果。
+       */
+      camTried: this.camCaps,
       zoom: this.zoom,
       fitZoom: this.fitZoom,
       perception: this.perception.join(","),
@@ -1508,6 +1539,15 @@ export class ArEngine {
         tracking: this.isTracking(now),
         degraded: this.degraded,
       camera: this.camInfo,
+      /**
+       * 试过哪几档、每档实际拿到什么。
+       *
+       * 显示出来是因为「拿到的是横向流」有两种完全不同的原因：**没试对**
+       * 和**试了但设备不给**，而只看最终分辨率这两者长得一模一样。
+       * 之前就是分不清，才一轮一轮猜。微信的 WKWebView 和 Safari 还不是
+       * 同一套摄像头行为，更需要看到每一档的真实结果。
+       */
+      camTried: this.camCaps,
       zoom: this.zoom,
       fitZoom: this.fitZoom,
         needsTracking: this.perception.length > 0,
