@@ -85,14 +85,39 @@ export default function CameraCheck() {
           });
           const track = stream.getVideoTracks()[0];
           const s = track.getSettings();
-          const w = s.width ?? 0;
-          const h = s.height ?? 0;
+          /*
+           * **必须真的播一帧再量。**
+           *
+           * 这一页上一版直接信 `track.getSettings()`，于是报「ideal 1080x1920
+           * 拿到了 1080x1920」，我照着改完，真机状态栏是 `1920x1080`。
+           * iOS 的 getSettings 会把**请求的值回读回来**，这一页从头到尾没播过
+           * 一帧，所以它复述的是我自己的问题，不是设备的回答 ——
+           * 一个只会附和的诊断工具比没有更坏，我按它的结论改错了一轮。
+           *
+           * videoWidth/Height 是解码器给的真实帧尺寸。两者不一致时两个都列出来。
+           */
+          const v = document.createElement("video");
+          v.muted = true;
+          v.playsInline = true;
+          v.srcObject = stream;
+          await new Promise<void>((res) => {
+            const done = () => res();
+            v.addEventListener("loadedmetadata", done, { once: true });
+            setTimeout(done, 2000);
+          });
+          const w = v.videoWidth || 0;
+          const h = v.videoHeight || 0;
+          v.srcObject = null;
           const caps = track.getCapabilities?.() as
             | { width?: { max?: number }; height?: { max?: number } }
             | undefined;
+          const claimed = `${s.width}x${s.height}`;
           out.push({
             label: m.label,
-            got: `${w}x${h}${s.frameRate ? ` @${Math.round(s.frameRate)}` : ""}`,
+            got:
+              `${w}x${h}${s.frameRate ? ` @${Math.round(s.frameRate)}` : ""}` +
+              // 声称的和实际的不一样时一定要显出来 —— 这个差正是上一轮判断错的原因
+              (claimed !== `${w}x${h}` ? `（getSettings 声称 ${claimed}）` : ""),
             aspect: h ? (w / h).toFixed(3) : "?",
             caps: caps?.width?.max ? `上限 ${caps.width.max}x${caps.height?.max ?? "?"}` : undefined,
           });

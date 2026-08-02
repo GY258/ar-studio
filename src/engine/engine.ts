@@ -406,58 +406,88 @@ export class ArEngine {
     let stream: MediaStream | null = null;
 
     /*
+     * 每一档都要**真的播一帧**才能知道拿到了什么。
+     *
+     * `track.getSettings()` 在 iOS 上会把**我请求的值回读给我** ——
+     * 请求 1080x1920 就答 1080x1920，而视频播起来是 1920x1080。
+     * 上一轮我就是被它骗的：ladder 第一档「匹配成功」直接 break，
+     * 后面视野更大的 4:3 压根没试，而状态栏两个数字自相矛盾
+     * （`1920x1080@30 · explicit:1080x1920`）—— 那就是这个谎的指纹。
+     *
+     * `video.videoWidth/Height` 是解码器给的真实帧尺寸，骗不了人。
+     */
+    const measure = async (s: MediaStream): Promise<{ w: number; h: number }> => {
+      /*
+       * 每次都用**新的** video 元素。
+       *
+       * 复用同一个的话，第二路流刚 srcObject 上去、元数据还没来的时候，
+       * videoWidth 读到的是**上一路的**尺寸 —— 那就是又一个「读到的不是真的」，
+       * 和我刚要修的 getSettings 是同一类坑，只是更难发现。
+       */
+      const v = document.createElement("video");
+      v.muted = true;
+      v.playsInline = true;
+      v.srcObject = s;
+      await new Promise<void>((res) => {
+        const done = () => res();
+        v.addEventListener("loadedmetadata", done, { once: true });
+        // 元数据一直不来也不能把整个开摄像头卡死
+        setTimeout(done, 1500);
+      });
+      const out = { w: v.videoWidth, h: v.videoHeight };
+      v.srcObject = null;
+      return out;
+    };
+
+    /*
      * 两轮：先用**硬**约束的 facingMode（exact），拿不到再退回软约束。
      *
      * 软约束下设备可以无视 facingMode 继续给同一路流、而且不报错 ——
      * 「切后置没反应」就是这么来的：代码以为切了，实际拿回来的还是前置，
      * 从外面看跟按钮坏了完全一样。硬约束拿不到会抛，那是明确答案。
-     * 但硬约束也可能在某些环境（比如各种 App 内置浏览器）下直接开不了，
-     * 所以留一轮软约束兜底：「摄像头不对但能用」好过「什么都没有」。
+     * 但硬约束也可能在某些环境下直接开不了，所以留一轮软约束兜底。
      */
+    const viewAspect = this.W / this.H;
     let matched = false;
     for (const exactFacing of [true, false]) {
       if (stream) break;
-      let bestArea = -1;
+      let bestScore = Infinity;
       /*
-       * 档位顺序按**实测**排，不按「从宽松到严格」排。
-       *
-       * 原来 auto 在第一档，理由是「先看设备自己想给什么」—— 实测那是 640x480，
-       * 全场最低，而且是横的。它排第一意味着**只要方向恰好对得上就直接采纳**，
-       * 画质最差的那一档反而最容易中。
-       *
-       * 现在先要那个实测能拿到、又正好贴合视口的（1080x1920），
-       * auto 退到最后一档只当兜底 —— 它的作用是「保证摄像头一定能开」，
-       * 不是「优先」。
+       * 档位顺序。auto（不提要求）实测是 640x480，全场最低，所以只当最后的兜底 ——
+       * 它的作用是「保证摄像头一定能开」，不是「优先」。
        */
       for (const strategy of ["explicit", "aspect", "fourthree", "auto"] as const) {
         try {
           const s = await this.openStream(facing, deviceId, strategy, portraitView, exactFacing);
-          const st = s.getVideoTracks()[0]?.getSettings?.();
-          const portraitStream = (st?.height ?? 0) > (st?.width ?? 0);
-          // 记下这一档真实拿到什么。exact 和 ideal 两轮要分得开 ——
-          // 「硬约束全挂、软约束给了个不对的」和「一开始就给对了」得能一眼区分
-          tried.push(`${exactFacing ? "" : "~"}${strategy}:${st?.width}x${st?.height}`);
-          if (portraitStream === portraitView) {
-            if (stream) (stream as MediaStream).getTracks().forEach((t) => t.stop());
-            stream = s;
-            matched = true;
-            break;
+          const { w, h } = await measure(s);
+          const tag = `${exactFacing ? "" : "~"}${strategy}`;
+          tried.push(`${tag}:${w}x${h}`);
+          if (!w || !h) {
+            s.getTracks().forEach((t) => t.stop());
+            continue;
           }
           /*
-           * 方向不对时按「竖屏裁切后还剩多少可见面积」挑。
-           * cover 保留整个高度、把宽度裁成 viewAspect/vidAspect，
-           * 所以可见面积 ∝ 高 × 高 × viewAspect —— 高度越大越好。
+           * 按「和视口有多接近」挑，不按分辨率挑。
+           *
+           * cover 会把画面裁成视口的比例，所以**比例越接近视口，裁掉的越少**。
+           * 视口 0.565：4:3(1.333) 能看到 42% 的宽度，16:9(1.778) 只剩 32% ——
+           * 分辨率上 1920x1080 更高，可它裁得更狠，脸就是这么被顶满屏幕的。
+           * 这也是为什么不能拿像素数当分数：那会一路选到最窄的那个。
            */
-          const area = (st?.height ?? 0) * (st?.height ?? 0);
-          if (area > bestArea) {
+          const score = Math.abs(Math.log(w / h / viewAspect));
+          if (score < bestScore) {
             if (stream) (stream as MediaStream).getTracks().forEach((t) => t.stop());
-            bestArea = area;
+            bestScore = score;
             stream = s;
+            matched = h > w === portraitView;
           } else {
             s.getTracks().forEach((t) => t.stop());
           }
-        } catch {
-          tried.push(`${exactFacing ? "" : "~"}${strategy}:失败`);
+        } catch (e) {
+          // 把错误名记下来。之前是 catch {} 全吞掉，「切后置没反应」
+          // 就完全没有线索 —— 而 OverconstrainedError 和 NotAllowedError
+          // 是两个完全不同的问题
+          tried.push(`${exactFacing ? "" : "~"}${strategy}:${(e as Error).name || "失败"}`);
         }
       }
     }
