@@ -329,12 +329,24 @@ export class ArEngine {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     };
     /*
-     * fourthree 这一档是照着**系统相机**来的：它在竖屏用的是 4:3，不是 16:9。
+     * 各档的**实测结果**（iPhone / iOS 18.7，前后置一致，/camera-check 跑出来的）：
      *
-     * 为什么这一档有用，即使拿到的仍然是横向流：手机的 16:9 通常是 4:3 的
-     * **纵向裁切**。竖屏 cover 会保留整个高度、裁掉宽度 —— 拿 4:3 就等于
-     * 拿回了那部分被裁掉的高度，可见范围明显更大（宽度上也从 31% 涨到 42%）。
-     * 这是「拿不到竖向流」时能做的最实在的改善，不是又一次绕开。
+     *   auto（不提要求）      640x480    横的，而且是全场最低的分辨率
+     *   aspectRatio 3/4       640x853    竖的
+     *   aspectRatio 9/16      640x1137   竖的
+     *   ideal 1080x1920       1080x1920  竖的，比 0.563
+     *   ideal 1440x1080       1440x1080  横的
+     *
+     * 也就是说**竖向流一直都拿得到** —— 我之前「iPhone 只给横向流」的判断是错的，
+     * 错在我只用过 ideal 宽高、没有单独试过 aspectRatio，也没做「不提要求」这个对照组。
+     *
+     * 视口是 0.565，而 1080x1920 是 0.563 —— **几乎完全吻合，cover 基本不裁**。
+     * 所以它排第一档。
+     *
+     * 3/4（640x853）看着视野更宽，但那是错觉：0.75 的画面 cover 进 0.565 的视口，
+     * 宽度会被裁掉 25%，裁完和 9:16 是**同一块画面** —— 传感器本来就是 4:3
+     * （上限 4032x3024），9:16 就是它横向裁出来的。既然最终画面一样，
+     * 就该要那个分辨率高、又不用裁的。
      */
     const video: MediaTrackConstraints =
       strategy === "auto"
@@ -387,7 +399,18 @@ export class ArEngine {
      */
     let matched = false;
     let bestArea = -1;
-    for (const strategy of ["auto", "fourthree", "aspect", "explicit"] as const) {
+    /*
+     * 顺序按**实测**排，不按「从宽松到严格」排。
+     *
+     * 原来 auto 在第一档，理由是「先看设备自己想给什么」—— 实测那是 640x480，
+     * 全场最低，而且是横的。它排第一意味着**只要方向恰好对得上就直接采纳**，
+     * 画质最差的那一档反而最容易中。
+     *
+     * 现在先要那个实测能拿到、又正好贴合视口的（1080x1920），
+     * auto 退到最后一档只当兜底 —— 它的作用是「保证摄像头一定能开」，
+     * 不是「优先」。
+     */
+    for (const strategy of ["explicit", "aspect", "fourthree", "auto"] as const) {
       try {
         const s = await this.openStream(facing, deviceId, strategy, portraitView);
         const st = s.getVideoTracks()[0]?.getSettings?.();
