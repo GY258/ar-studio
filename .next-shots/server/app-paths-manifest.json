@@ -1,7 +1,7 @@
 {
-  "/studio/[template]/page": "app/studio/[template]/page.js",
-  "/api/events/route": "app/api/events/route.js",
   "/page": "app/page.js",
+  "/api/events/route": "app/api/events/route.js",
   "/api/templates/route": "app/api/templates/route.js",
+  "/studio/[template]/page": "app/studio/[template]/page.js",
   "/api/templates/[slug]/config/route": "app/api/templates/[slug]/config/route.js"
 }

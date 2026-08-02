@@ -29,6 +29,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     needsTracking: true,
     camera: "",
     zoom: 1,
+    fitZoom: 1,
   });
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -587,12 +588,17 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
              style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}>
 
           {/*
-            缩放档位。0.5 在这里的意思和系统相机的 .5x 一样 ——
-            iOS 只给横向流，竖屏 cover 之后只剩 26% 的宽度，
-            往回缩才看得到接近系统相机那样的取景（代价是上下黑边）。
+            缩放档位。最低那一档是**算出来的「完整视野」**，不是固定的 0.5 ——
+            1920x1080 的流塞进竖屏，cover 只显示宽度的 31%，0.5 档翻倍也才 63%，
+            仍然裁掉 37%。真正不裁需要缩到 0.31，那个数只能从两个长宽比算。
+            标签直接显示算出来的值，用户看到的就是「这台设备最宽能到多少」。
           */}
           <div className="flex justify-center gap-2 px-4">
-            {[0.5, 1, 2, 3].map((z) => (
+            {/*
+              fitZoom 等于 1 时（流本来就够竖，没什么可缩的）要去掉那一档 ——
+              不去重的话会出现两个并排的「1×」，而且两个都高亮。
+            */}
+            {(stats.fitZoom < 0.95 ? [stats.fitZoom, 1, 2, 3] : [1, 2, 3]).map((z) => (
               <button
                 key={z}
                 onClick={() => setZoom(z)}

@@ -63,6 +63,11 @@ export interface EngineStats {
   /** 当前缩放倍率。UI 靠它让档位按钮跟着捏合走 —— 两套控件不同步的话
    *  捏完之后高亮的还是旧档位，看着像坏了 */
   zoom: number;
+  /**
+   * 「完整视野」对应的倍率。UI 用它当最低那一档 ——
+   * 固定的 0.5 在 16:9 横向流 + 竖屏上还差得远（实际要 0.31 才不裁）。
+   */
+  fitZoom: number;
 }
 
 export interface EngineOptions {
@@ -141,6 +146,14 @@ export class ArEngine {
    * 「按了没反应」。**「重试」必须有终点**，否则它就是个循环。
    */
   private canMatchOrientation = true;
+  /**
+   * 「完整视野」对应的缩放倍率：缩到这个值时视频的宽度正好铺满画布宽度。
+   *
+   * 固定给 0.5 是不够的 —— 1920x1080 的流塞进竖屏，cover 只显示宽度的 31%，
+   * 0.5 档翻倍也才 63%，仍然裁掉 37%。真正的下限得从两个长宽比算出来，
+   * 不能拍脑袋。低于它只是往两边加黑边，没有意义，所以它同时是缩放的下限。
+   */
+  private fitZoom = 1;
   /**
    * 数字缩放倍率。1 = 原始取景。
    *
@@ -308,23 +321,33 @@ export class ArEngine {
   private async openStream(
     facing: "user" | "environment",
     deviceId: string | undefined,
-    strategy: "auto" | "aspect" | "explicit",
+    strategy: "auto" | "fourthree" | "aspect" | "explicit",
     portraitView: boolean,
   ): Promise<MediaStream> {
     const base: MediaTrackConstraints = {
       facingMode: facing,
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     };
+    /*
+     * fourthree 这一档是照着**系统相机**来的：它在竖屏用的是 4:3，不是 16:9。
+     *
+     * 为什么这一档有用，即使拿到的仍然是横向流：手机的 16:9 通常是 4:3 的
+     * **纵向裁切**。竖屏 cover 会保留整个高度、裁掉宽度 —— 拿 4:3 就等于
+     * 拿回了那部分被裁掉的高度，可见范围明显更大（宽度上也从 31% 涨到 42%）。
+     * 这是「拿不到竖向流」时能做的最实在的改善，不是又一次绕开。
+     */
     const video: MediaTrackConstraints =
       strategy === "auto"
         ? base
-        : strategy === "aspect"
-          ? { ...base, aspectRatio: { ideal: portraitView ? 9 / 16 : 16 / 9 } }
-          : {
-              ...base,
-              width: { ideal: portraitView ? 1080 : 1920 },
-              height: { ideal: portraitView ? 1920 : 1080 },
-            };
+        : strategy === "fourthree"
+          ? { ...base, aspectRatio: { ideal: portraitView ? 3 / 4 : 4 / 3 } }
+          : strategy === "aspect"
+            ? { ...base, aspectRatio: { ideal: portraitView ? 9 / 16 : 16 / 9 } }
+            : {
+                ...base,
+                width: { ideal: portraitView ? 1080 : 1920 },
+                height: { ideal: portraitView ? 1920 : 1080 },
+              };
     return navigator.mediaDevices.getUserMedia({ video, audio: false });
   }
 
@@ -355,18 +378,39 @@ export class ArEngine {
      * 不用 exact：拿不到就抛异常，整个页面开不了摄像头 —— 而「方向不对但能用」
      * 比「什么都没有」好得多。所以是**尽力而为 + 兜底**，最后一档一定会成功。
      */
+    /*
+     * 依次尝试。方向对得上就停；都对不上时**留下视野最大的那个**。
+     *
+     * 原来是「留最后一次尝试的结果」，那没道理 —— 最后一档是写死宽高的兜底，
+     * 恰恰是视野最窄的。设备给不了竖向流时（实测 iPhone 就是这样），
+     * 该留下的是 4:3 那个：它保留了更多纵向视野，竖屏裁切后可见范围最大。
+     */
     let matched = false;
-    for (const strategy of ["auto", "aspect", "explicit"] as const) {
+    let bestArea = -1;
+    for (const strategy of ["auto", "fourthree", "aspect", "explicit"] as const) {
       try {
         const s = await this.openStream(facing, deviceId, strategy, portraitView);
         const st = s.getVideoTracks()[0]?.getSettings?.();
         const portraitStream = (st?.height ?? 0) > (st?.width ?? 0);
         tried.push(`${strategy}:${st?.width}x${st?.height}`);
-        if (stream) stream.getTracks().forEach((t) => t.stop());
-        stream = s;
         if (portraitStream === portraitView) {
+          if (stream) stream.getTracks().forEach((t) => t.stop());
+          stream = s;
           matched = true;
           break;
+        }
+        /*
+         * 方向不对时按「竖屏裁切后还剩多少可见面积」挑。
+         * cover 保留整个高度、把宽度裁成 viewAspect/vidAspect，
+         * 所以可见面积 ∝ 高 × 高 × viewAspect —— 高度越大越好。
+         */
+        const area = (st?.height ?? 0) * (st?.height ?? 0);
+        if (area > bestArea) {
+          if (stream) stream.getTracks().forEach((t) => t.stop());
+          bestArea = area;
+          stream = s;
+        } else {
+          s.getTracks().forEach((t) => t.stop());
         }
       } catch {
         tried.push(`${strategy}:失败`);
@@ -382,7 +426,7 @@ export class ArEngine {
      * 缩到 0.5 能看到接近两倍宽的场景（代价是上下黑边），这是这种设备上
      * 唯一合理的默认取景。用户仍然可以点回 1×。
      */
-    if (!matched && this.zoom === 1) this.setZoom(0.5);
+    if (!matched && this.zoom === 1) this.setZoom(this.fitZoom);
 
     this.video.srcObject = stream;
     await this.video.play();
@@ -433,7 +477,8 @@ export class ArEngine {
    * 下限 0.3：再小主体已经小到没法用，而黑边占了大半个屏幕。
    */
   setZoom(z: number) {
-    const next = Math.max(0.3, Math.min(4, z));
+    // 下限就是「完整视野」—— 再往下只是往两边加黑边，没有意义
+    const next = Math.max(Math.min(this.fitZoom, 1), Math.min(4, z));
     if (next === this.zoom) return;
     this.zoom = next;
     this.elements.setZoom(next);
@@ -443,6 +488,11 @@ export class ArEngine {
 
   getZoom(): number {
     return this.zoom;
+  }
+
+  /** 「完整视野」对应的倍率。UI 拿它当最低那一档 */
+  getFitZoom(): number {
+    return this.fitZoom;
   }
 
   start() {
@@ -836,6 +886,7 @@ export class ArEngine {
       degraded: this.degraded,
       camera: this.camInfo,
       zoom: this.zoom,
+      fitZoom: this.fitZoom,
       perception: this.perception.join(","),
       templateType: this.templateType,
       elementCount: this.elements.count(),
@@ -987,6 +1038,13 @@ export class ArEngine {
     const { w: vw, h: vh } = sourceSize(this.source, this.W, this.H);
     const viewAspect = this.W / this.H;
     const vidAspect = vw / vh;
+    /*
+     * 缩到多少能看到完整的横向视野。
+     *
+     * cover 下视频宽度被裁成 viewAspect / vidAspect；缩到这个倍率时正好不裁。
+     * 视频本来就比画布窄（竖向流塞进竖屏）时它是 1 —— 那种情况没什么可缩的。
+     */
+    this.fitZoom = Math.min(1, viewAspect / vidAspect);
     let bgW: number, bgH: number;
     if (vidAspect > viewAspect) {
       // 视频比容器宽，按高度匹配，左右裁
@@ -1431,6 +1489,7 @@ export class ArEngine {
         degraded: this.degraded,
       camera: this.camInfo,
       zoom: this.zoom,
+      fitZoom: this.fitZoom,
         needsTracking: this.perception.length > 0,
       });
     }

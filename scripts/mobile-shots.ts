@@ -88,7 +88,8 @@ async function walkTemplate(browser: Browser, baseUrl: string, slug: string) {
 
   // 0.5 档：iOS 只给横向流，竖屏 cover 之后只剩 26% 的宽度，
   // 往回缩才看得到接近系统相机那样的取景。这一张就是验它长什么样
-  const half = page.getByRole("button", { name: "0.5" });
+  // 最低那一档现在是算出来的小数，名字不固定 —— 按位置取第一个缩放钮
+  const half = page.locator("button:visible").filter({ hasText: /^0\.\d$/ });
   if (await half.count()) {
     await half.first().click();
     await page.waitForTimeout(800);
