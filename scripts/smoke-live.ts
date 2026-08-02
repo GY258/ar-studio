@@ -231,46 +231,43 @@ async function checkMobile(browser: Browser, baseUrl: string, slug: string): Pro
     }
 
     /*
-     * 竖屏必须**第一次**就请求竖向流。
+     * 竖屏第一次开流的约束**只能给一个轴**，而且必须给。
      *
-     * 断言的是**请求里带了方向信息**，不是拿到了什么 —— 假摄像头强制流的尺寸，
+     * 验的是请求那一侧，不是拿到什么 —— 假摄像头强制流的尺寸，
      * 拿到什么在这里没有意义。
      *
-     * ⚠️ 这条断言上一版是反的：它要求第一次开流**不能**带宽高，理由是
-     * 「写死 1080x1920 的话 iOS 会在横向档位里挑最近的、等于没给方向信息」。
-     * 那是我推的，没验过。真机跑 /camera-check 的结果正好相反：
+     * ⚠️ 这条断言前后错了两次，两次都是因为我拿推测当结论：
+     *   v1「第一次不能带宽高」—— 推的，实测恰恰是带宽高那档管用
+     *   v2「第一次要带竖向提示」—— 也是推的，`width:1080,height:1920`
+     *      完全符合「竖向提示」，而它拿到的是 1920x1080 横向流
      *
-     *     不提任何要求       → 640x480    横的，全场最低分辨率
-     *     ideal 1080x1920   → 1080x1920  竖的，正好贴合视口
+     * 真机 /camera-check 测出来的规律是**转置**：iOS 按传感器的横向坐标系
+     * 理解 width/height，给回来的帧是转置的 —— 我写的 width 变成画面的高。
      *
-     * 也就是说**带宽高的那一档才是管用的**，而「不提要求」拿到的是最差的流。
-     * 旧断言会把正确的修法判成错的 —— 一条从猜测里长出来的断言，
-     * 比没有断言更坏，因为它会锁死错误的行为。
+     *     只给 height 1280      → 1280x1706  竖的
+     *     只给 width 1080       → 607x1080   竖的
+     *     width 720 height 1280 → 1280x720   **横的**
      *
-     * 现在验的是那个**实测成立**的性质：第一次就得带竖向信息
-     * （aspectRatio < 1 或者 height > width），别再拿 640x480 当首选。
+     * 所以要害是「**别同时写死两个轴**」：两个都写死就把转置后的横向帧钉死了，
+     * 留一个轴自由，设备才会按自己的方向去配。同时也不能什么都不给 ——
+     * 那档实测是 480x640，屏幕 1179 物理像素宽，放大 2.5 倍就是糊的。
      */
     const gum = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum)) as {
       width?: { ideal?: number };
       height?: { ideal?: number };
       aspectRatio?: { ideal?: number };
     }[];
-    const portraitHint = (c?: (typeof gum)[number]) =>
-      !!c && ((c.aspectRatio?.ideal ?? 9) < 1 || (c.height?.ideal ?? 0) > (c.width?.ideal ?? 0));
-    if (!gum[0]) {
+    const first = gum[0];
+    if (!first) {
       problems.push("没有捕获到 getUserMedia 的视频约束 —— 摄像头这条路可能压根没走到");
-    } else if (!portraitHint(gum[0])) {
+    } else if (first.width?.ideal && first.height?.ideal) {
       problems.push(
-        "第一次开流没带竖向信息 —— 实测「不提要求」在 iPhone 上给的是 640x480 横向流，" +
-          "首选必须是竖向档（真机数据见 /camera-check）",
+        "第一次开流同时写死了 width 和 height —— iOS 会按转置给横向帧" +
+          "（实测 720x1280 → 1280x720），必须留一个轴自由",
       );
+    } else if (!first.width?.ideal && !first.height?.ideal) {
+      problems.push("第一次开流没要分辨率 —— 实测默认档只有 480x640，屏幕上是 2.5 倍放大");
     }
-
-    const calls = (await page.evaluate(() => (window as unknown as { __gum: unknown[] }).__gum)) as {
-      width?: { ideal?: number };
-      height?: { ideal?: number };
-    }[];
-    void calls;
 
     /*
      * 自检页 /camera-check 得能跑完整个矩阵。

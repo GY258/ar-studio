@@ -330,8 +330,7 @@ export class ArEngine {
   private async openStream(
     facing: "user" | "environment",
     deviceId: string | undefined,
-    strategy: "auto" | "fourthree" | "aspect" | "explicit",
-    portraitView: boolean,
+    strategy: "tall" | "fit" | "auto",
     exactFacing: boolean,
   ): Promise<MediaStream> {
     /*
@@ -350,37 +349,39 @@ export class ArEngine {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     };
     /*
-     * 各档的**实测结果**（iPhone / iOS 18.7，前后置一致，/camera-check 跑出来的）：
+     * ⚠️ **iOS 把 width/height 当成传感器的横向坐标系，给回来的帧是转置的。**
      *
-     *   auto（不提要求）      640x480    横的，而且是全场最低的分辨率
-     *   aspectRatio 3/4       640x853    竖的
-     *   aspectRatio 9/16      640x1137   竖的
-     *   ideal 1080x1920       1080x1920  竖的，比 0.563
-     *   ideal 1440x1080       1440x1080  横的
+     * 真机实测（读真实帧尺寸；每一行 getSettings 都正好报成实际的转置）：
      *
-     * 也就是说**竖向流一直都拿得到** —— 我之前「iPhone 只给横向流」的判断是错的，
-     * 错在我只用过 ideal 宽高、没有单独试过 aspectRatio，也没做「不提要求」这个对照组。
+     *     不提任何要求          → 480x640    竖的，但只有 480 宽
+     *     只给 height 1280      → 1280x1706  竖的 ✓
+     *     只给 height 1920      → 1920x2560  竖的 ✓
+     *     只给 width 1080       → 607x1080   竖的 ✓
+     *     width 720 height 1280 → 1280x720   横的
      *
-     * 视口是 0.565，而 1080x1920 是 0.563 —— **几乎完全吻合，cover 基本不裁**。
-     * 所以它排第一档。
+     * 规则完全一致：**我写的 width 变成画面的高，我写的 height 变成画面的宽。**
+     * 所以想要一帧 1280 宽的竖向画面，要写的是 `height: 1280`。
+     * 我之前一直按字面意思写「竖向就是 width 1080 / height 1920」，
+     * 于是每次都精确地拿到它的转置 —— 1920x1080 横向流。
+     * 「iPhone 不给竖向流」从来不是真的，是我把两个轴写反了。
      *
-     * 3/4（640x853）看着视野更宽，但那是错觉：0.75 的画面 cover 进 0.565 的视口，
-     * 宽度会被裁掉 25%，裁完和 9:16 是**同一块画面** —— 传感器本来就是 4:3
-     * （上限 4032x3024），9:16 就是它横向裁出来的。既然最终画面一样，
-     * 就该要那个分辨率高、又不用裁的。
+     * 三档都按这条规则写，都能拿到竖向帧，区别只是清晰度和开销：
+     *
+     *   tall  height:1280 → 1280x1706（比 0.75）cover 到 0.565 后可见 964x1706
+     *   fit   width:1080  → 607x1080 （比 0.562）几乎不用裁，但只有 607 宽
+     *   auto  什么都不提   → 480x640  兜底，保证一定开得起来
+     *
+     * tall 排第一：它裁掉 25% 宽度之后**仍然**比 fit 清晰得多
+     * （964 对 607），而屏幕是 1179 物理像素宽 —— fit 那档要放大 2 倍，糊。
+     * 两者裁完的视野是一样的：0.75 和 0.562 都源自同一块 4:3 传感器，
+     * 前者 cover 时被裁掉的宽度，正好就是后者已经被相机裁掉的那部分。
      */
     const video: MediaTrackConstraints =
-      strategy === "auto"
-        ? base
-        : strategy === "fourthree"
-          ? { ...base, aspectRatio: { ideal: portraitView ? 3 / 4 : 4 / 3 } }
-          : strategy === "aspect"
-            ? { ...base, aspectRatio: { ideal: portraitView ? 9 / 16 : 16 / 9 } }
-            : {
-                ...base,
-                width: { ideal: portraitView ? 1080 : 1920 },
-                height: { ideal: portraitView ? 1920 : 1080 },
-              };
+      strategy === "tall"
+        ? { ...base, height: { ideal: 1280 } }
+        : strategy === "fit"
+          ? { ...base, width: { ideal: 1080 } }
+          : base;
     return navigator.mediaDevices.getUserMedia({ video, audio: false });
   }
 
@@ -456,9 +457,9 @@ export class ArEngine {
        * 档位顺序。auto（不提要求）实测是 640x480，全场最低，所以只当最后的兜底 ——
        * 它的作用是「保证摄像头一定能开」，不是「优先」。
        */
-      for (const strategy of ["explicit", "aspect", "fourthree", "auto"] as const) {
+      for (const strategy of ["tall", "fit", "auto"] as const) {
         try {
-          const s = await this.openStream(facing, deviceId, strategy, portraitView, exactFacing);
+          const s = await this.openStream(facing, deviceId, strategy, exactFacing);
           const { w, h } = await measure(s);
           const tag = `${exactFacing ? "" : "~"}${strategy}`;
           tried.push(`${tag}:${w}x${h}`);
@@ -467,14 +468,18 @@ export class ArEngine {
             continue;
           }
           /*
-           * 按「和视口有多接近」挑，不按分辨率挑。
+           * 分数 = **cover 之后真正看得见的像素数**。
            *
-           * cover 会把画面裁成视口的比例，所以**比例越接近视口，裁掉的越少**。
-           * 视口 0.565：4:3(1.333) 能看到 42% 的宽度，16:9(1.778) 只剩 32% ——
-           * 分辨率上 1920x1080 更高，可它裁得更狠，脸就是这么被顶满屏幕的。
-           * 这也是为什么不能拿像素数当分数：那会一路选到最窄的那个。
+           * 不能用总像素：1920x1080 像素最多，但竖屏 cover 只剩中间 32% 的宽度，
+           * 可见的反而最少 —— 脸被顶满屏幕就是这么来的。
+           * 也不能用「比例贴视口」：那会选中 607x1080，比例完美但只有 607 宽，
+           * 而屏幕是 1179 物理像素宽，放大 2 倍就是糊的（上一版的问题）。
+           *
+           * 「裁完还剩多少像素」把这两件事合成一个量：横向流因为被裁掉大半而落选，
+           * 低分辨率的竖向流因为本来就没多少像素而落选。
            */
-          const score = Math.abs(Math.log(w / h / viewAspect));
+          const visible = Math.min(w, h * viewAspect) * h;
+          const score = -visible;
           if (score < bestScore) {
             if (stream) (stream as MediaStream).getTracks().forEach((t) => t.stop());
             bestScore = score;
