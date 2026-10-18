@@ -15,17 +15,25 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen">
-      {/* 导航：极简，右侧只有一个 CTA */}
+      {/* 导航：极简，Instagram 放在这里是因为「关注我们」是主页最关键的动作之一 */}
       <header className="sticky top-0 z-20 border-b border-line/60 bg-bg/80 backdrop-blur">
         <nav className="mx-auto flex h-16 max-w-content items-center justify-between px-6">
-          <span className="font-mono text-note tracking-[0.18em] text-fg">{COPY.brand}</span>
+          <span className="whitespace-nowrap font-mono text-note tracking-[0.18em] text-fg">{COPY.brand}</span>
           <div className="flex items-center gap-4">
-            <Link href="/feedback" className="text-[14px] text-muted hover:text-fg transition">
+            <a
+              href={COPY.home.instagramUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[14px] text-muted hover:text-fg transition"
+            >
+              Instagram
+            </a>
+            <Link href="/feedback" className="hidden text-[14px] text-muted transition hover:text-fg sm:inline">
               Feedback
             </Link>
             <Link
               href="/studio"
-              className="rounded-full bg-accent px-5 py-2 text-[14px] font-medium text-[#1A0F2E] ease-brand transition hover:-translate-y-px"
+              className="whitespace-nowrap rounded-full bg-accent px-5 py-2 text-[14px] font-medium text-[#1A0F2E] ease-brand transition hover:-translate-y-px"
             >
               {COPY.nav.cta}
             </Link>
@@ -34,7 +42,7 @@ export default function HomePage() {
       </header>
 
       {/* Hero */}
-      <section className="mx-auto max-w-content px-6 pb-24 pt-20 md:pt-30">
+      <section className="mx-auto max-w-content px-6 pb-20 pt-20 md:pt-30">
         <h1 className="text-hero font-medium">
           {COPY.home.heroLines.map((line, i) => (
             <span
@@ -56,95 +64,94 @@ export default function HomePage() {
           >
             {COPY.home.ctaPrimary}
           </Link>
-          <a
-            href="#examples"
-            className="rounded-full border border-line px-7 py-3.5 text-[15px] text-fg"
-          >
+          <a href="#gallery" className="rounded-full border border-line px-7 py-3.5 text-[15px] text-fg">
             {COPY.home.ctaSecondary}
           </a>
         </div>
       </section>
 
+      {/* 关于我们 + Instagram：紧跟在 hero 后面，先认识人再看作品 */}
+      <section className="border-t border-line">
+        <div className="mx-auto grid max-w-content gap-12 px-6 py-20 md:grid-cols-[3fr_2fr] md:gap-16">
+          <div>
+            <h2 className="text-section font-medium">{COPY.home.aboutTitle}</h2>
+            <div className="mt-8 max-w-[58ch] space-y-5 text-body text-muted">
+              {COPY.home.aboutParagraphs.map((para) => (
+                <p key={para}>{para}</p>
+              ))}
+            </div>
+          </div>
+          <div className="self-start rounded-2xl border border-line bg-surface p-8">
+            <h3 className="text-card font-medium">{COPY.home.instagramTitle}</h3>
+            <p className="mt-3 text-body text-muted">{COPY.home.instagramBody}</p>
+            <a
+              href={COPY.home.instagramUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-6 inline-block rounded-full bg-accent px-6 py-3 text-[15px] font-medium text-[#1A0F2E] ease-brand transition hover:-translate-y-px"
+            >
+              {COPY.home.instagramHandle} ↗
+            </a>
+          </div>
+        </div>
+      </section>
+
       {/* 示例片段：3:4 竖幅、静音循环 */}
       {DEMOS.length > 0 && (
-        <section id="examples" className="mx-auto max-w-content scroll-mt-20 px-6 pb-24">
-          <h2 className="text-section font-medium">{COPY.home.examplesTitle}</h2>
-          <p className="mt-4 max-w-[52ch] text-body text-muted">{COPY.home.examplesBody}</p>
-          <div className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-3">
-            {DEMOS.map((demo) => {
-              const tpl = templates.find((x) => x.slug === demo.template);
-              return (
-                <Link
-                  key={demo.template}
-                  href={`/studio/${demo.template}`}
-                  className="group overflow-hidden rounded-xl border border-line bg-surface ease-brand transition hover:border-[#34343C]"
-                >
-                  <video
-                    src={demo.video}
-                    poster={demo.poster}
-                    autoPlay
-                    muted
-                    loop
-                    playsInline
-                    preload="metadata"
-                    className="aspect-[3/4] w-full bg-bg object-cover"
-                  />
-                  {tpl && <span className="block px-4 py-3 text-card font-medium">{t(tpl.name)}</span>}
-                </Link>
-              );
-            })}
+        <section id="gallery" className="scroll-mt-16 border-t border-line">
+          <div className="mx-auto max-w-content px-6 py-20">
+            <h2 className="text-section font-medium">{COPY.home.examplesTitle}</h2>
+            <p className="mt-4 max-w-[52ch] text-body text-muted">{COPY.home.examplesBody}</p>
+            <div className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-3">
+              {DEMOS.map((demo) => {
+                const tpl = templates.find((x) => x.slug === demo.template);
+                return (
+                  <Link
+                    key={demo.template}
+                    href={`/studio/${demo.template}`}
+                    className="group overflow-hidden rounded-xl border border-line bg-surface ease-brand transition hover:border-[#34343C]"
+                  >
+                    <video
+                      src={demo.video}
+                      poster={demo.poster}
+                      autoPlay
+                      muted
+                      loop
+                      playsInline
+                      preload="metadata"
+                      className="aspect-[3/4] w-full bg-bg object-cover"
+                    />
+                    {tpl && <span className="block px-4 py-3 text-card font-medium">{t(tpl.name)}</span>}
+                  </Link>
+                );
+              })}
+            </div>
           </div>
         </section>
       )}
 
+      {/* 留言 */}
+      <section className="border-t border-line bg-surface/40">
+        <div className="mx-auto max-w-content px-6 py-20">
+          <h2 className="text-section font-medium">{COPY.home.ideaTitle}</h2>
+          <p className="mt-4 max-w-[52ch] text-body text-muted">{COPY.home.ideaBody}</p>
+          <Link
+            href="/feedback"
+            className="mt-8 inline-block rounded-full bg-accent px-6 py-3 text-[15px] font-medium text-[#1A0F2E] ease-brand transition hover:-translate-y-px"
+          >
+            {COPY.home.ideaCta}
+          </Link>
+        </div>
+      </section>
+
       {/* 隐私：这是真实的技术事实，也是转化的关键说服点 */}
-      <section className="border-y border-line bg-surface/40">
+      <section className="border-t border-line">
         <div className="mx-auto max-w-content px-6 py-16">
           <p className="max-w-[38ch] text-section font-medium">
             {COPY.home.privacyTitle}
             <span className="text-muted">{COPY.home.privacyTitleMuted}</span>
           </p>
           <p className="mt-6 max-w-[58ch] text-body text-muted">{COPY.home.privacyBody}</p>
-        </div>
-      </section>
-
-      {/* 关于我们 */}
-      <section className="border-t border-line">
-        <div className="mx-auto max-w-content px-6 py-24">
-          <h2 className="text-section font-medium">{COPY.home.aboutTitle}</h2>
-          <div className="mt-8 max-w-[58ch] space-y-5 text-body text-muted">
-            {COPY.home.aboutParagraphs.map((para) => (
-              <p key={para}>{para}</p>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* 留言 + Instagram */}
-      <section className="border-t border-line bg-surface/40">
-        <div className="mx-auto grid max-w-content gap-14 px-6 py-20 md:grid-cols-2">
-          <div>
-            <h3 className="text-card font-medium">{COPY.home.ideaTitle}</h3>
-            <p className="mt-3 max-w-[46ch] text-body text-muted">{COPY.home.ideaBody}</p>
-            <Link
-              href="/feedback"
-              className="mt-6 inline-block rounded-full bg-accent px-6 py-3 text-[15px] font-medium text-[#1A0F2E] ease-brand transition hover:-translate-y-px"
-            >
-              {COPY.home.ideaCta}
-            </Link>
-          </div>
-          <div>
-            <h3 className="text-card font-medium">{COPY.home.instagramTitle}</h3>
-            <p className="mt-3 max-w-[46ch] text-body text-muted">{COPY.home.instagramBody}</p>
-            <a
-              href={COPY.home.instagramUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-6 inline-block rounded-full border border-line px-6 py-3 text-[15px] text-fg ease-brand transition hover:border-accent/60"
-            >
-              {COPY.home.instagramHandle} ↗
-            </a>
-          </div>
         </div>
       </section>
 

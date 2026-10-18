@@ -20,9 +20,9 @@ export const COPY = {
     heroBody:
       "A free AI-powered instant camera inspired by the filters we fell in love with on Instagram. Take a photo, try a new look, and turn an ordinary moment into something special.",
     ctaPrimary: "Try the camera →",
-    ctaSecondary: "See examples ↓",
+    ctaSecondary: "See the gallery ↓",
 
-    examplesTitle: "Examples",
+    examplesTitle: "Gallery",
     examplesBody: "Real clips, straight out of the camera. Tap one to try that look yourself.",
 
     aboutTitle: "A little about us ♡",
