@@ -48,13 +48,6 @@ export const COPY = {
     privacyBody:
       "Person detection and effect rendering both finish inside your browser. Not a single camera frame reaches our servers. That isn't a promise — it's how this stack works.",
 
-    steps: [
-      { n: "01", t: "Pick a template", d: "Snow Cloud is free. Open it and shoot — no account needed." },
-      { n: "02", t: "Shoot into your camera", d: "Snow settles on your head and shoulders. Water splashes and runs off." },
-      { n: "03", t: "Download the clip", d: "Recording is built in. Stop and you have a file, ready for Reels." },
-    ],
-
-    templatesTitle: "Templates",
   },
 
   templates: {

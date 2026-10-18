@@ -13,8 +13,10 @@ export interface Demo {
 }
 
 export const DEMOS: Demo[] = [
-  { template: "colorful-me", video: "/demos/grass-colorful-me.mp4", poster: "/demos/grass-colorful-me.jpg" },
-  { template: "black-lodge", video: "/demos/phantom-black-lodge.mp4", poster: "/demos/phantom-black-lodge.jpg" },
+  { template: "colorful-me", video: "/demos/walk-colorful-me.mp4", poster: "/demos/walk-colorful-me.jpg" },
+  { template: "black-lodge", video: "/demos/window-black-lodge.mp4", poster: "/demos/window-black-lodge.jpg" },
+  { template: "fluidity", video: "/demos/dinner-fluidity.mp4", poster: "/demos/dinner-fluidity.jpg" },
   { template: "signal-lost", video: "/demos/sky-signal-lost.mp4", poster: "/demos/sky-signal-lost.jpg" },
+  { template: "crying", video: "/demos/night-crying.mp4", poster: "/demos/night-crying.jpg" },
   { template: "lowres-life", video: "/demos/grass-lowres-life.mp4", poster: "/demos/grass-lowres-life.jpg" },
 ];

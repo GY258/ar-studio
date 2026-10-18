@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { allTemplates } from "@/lib/templates";
 import { COPY, t } from "@/lib/copy";
-import { PropThumb } from "@/components/PropThumb";
 import { DEMOS } from "@/lib/demos";
 
 /**
@@ -11,8 +10,7 @@ import { DEMOS } from "@/lib/demos";
  * 这里继承的是那种编辑设计式的克制，不是具体色彩。
  */
 export default function HomePage() {
-  // hidden 是测试探针和调试模板（mask-debug、hand-stem…），不该出现在主页
-  const templates = allTemplates().filter((tpl) => !tpl.hidden);
+  const templates = allTemplates();
   const lastHeroLine = COPY.home.heroLines.length - 1;
 
   return (
@@ -53,14 +51,13 @@ export default function HomePage() {
         </p>
         <div className="mt-10 flex flex-wrap items-center gap-4 animate-rise [animation-delay:240ms]">
           <Link
-            href="/studio/cloud"
+            href={`/studio/${DEMOS[0]?.template ?? "cloud"}`}
             className="rounded-full bg-accent px-7 py-3.5 text-[15px] font-medium text-[#1A0F2E]"
           >
             {COPY.home.ctaPrimary}
           </Link>
-          {/* 还没有示例片段时，这个按钮退回到页面下方的模板列表 */}
           <a
-            href={DEMOS.length ? "#examples" : "#templates"}
+            href="#examples"
             className="rounded-full border border-line px-7 py-3.5 text-[15px] text-fg"
           >
             {COPY.home.ctaSecondary}
@@ -73,7 +70,7 @@ export default function HomePage() {
         <section id="examples" className="mx-auto max-w-content scroll-mt-20 px-6 pb-24">
           <h2 className="text-section font-medium">{COPY.home.examplesTitle}</h2>
           <p className="mt-4 max-w-[52ch] text-body text-muted">{COPY.home.examplesBody}</p>
-          <div className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-3">
             {DEMOS.map((demo) => {
               const tpl = templates.find((x) => x.slug === demo.template);
               return (
@@ -108,50 +105,6 @@ export default function HomePage() {
             <span className="text-muted">{COPY.home.privacyTitleMuted}</span>
           </p>
           <p className="mt-6 max-w-[58ch] text-body text-muted">{COPY.home.privacyBody}</p>
-        </div>
-      </section>
-
-      {/* 三步 */}
-      <section className="mx-auto max-w-content px-6 py-24">
-        <div className="grid gap-10 md:grid-cols-3">
-          {COPY.home.steps.map((s) => (
-            <div key={s.n}>
-              <span className="font-mono text-note text-accent">{s.n}</span>
-              <h3 className="mt-3 text-card font-medium">{s.t}</h3>
-              <p className="mt-2 text-body text-muted">{s.d}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* 模板库预览 */}
-      <section id="templates" className="mx-auto max-w-content scroll-mt-20 px-6 pb-24">
-        <h2 className="text-section font-medium">{COPY.home.templatesTitle}</h2>
-        <div className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-4">
-          {templates.map((tpl) => {
-            const paid = tpl.priceCents > 0;
-            return (
-              <Link
-                key={tpl.slug}
-                href={`/studio/${tpl.slug}`}
-                className="group relative overflow-hidden rounded-xl border border-line bg-surface p-4 ease-brand transition hover:border-[#34343C]"
-              >
-                {tpl.preview.shape && (
-                  <PropThumb
-                    shape={tpl.preview.shape}
-                    ratio={1.25}
-                    className={`w-full ${paid ? "opacity-[.42] group-hover:opacity-70" : ""} ease-brand transition-opacity`}
-                  />
-                )}
-                <div className="mt-3 flex items-baseline justify-between">
-                  <span className="text-card font-medium">{t(tpl.name)}</span>
-                  <span className={`font-mono text-note ${paid ? "text-gold" : "text-muted"}`}>
-                    {paid ? `$${(tpl.priceCents / 100).toFixed(2)}` : COPY.templates.free}
-                  </span>
-                </div>
-              </Link>
-            );
-          })}
         </div>
       </section>
 

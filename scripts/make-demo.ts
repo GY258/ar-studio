@@ -10,7 +10,7 @@
  * 只有最终的 mp4 / jpg 写进 public/demos/。
  *
  * 用法：
- *   npm run make:demo -- <照片> <模板 slug> [<模板 slug> ...] [--seconds 6] [--name gary]
+ *   npm run make:demo -- <照片> <模板 slug> [<模板 slug> ...] [--seconds 6] [--name gary] [--set idle=0.6 ...]
  *
  * 需要外网（录制要下 MediaPipe 模型）和 ffmpeg。
  */
@@ -18,7 +18,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { launchHarness, loadTemplate, capture, setMirrored, type FixtureName } from "./harness-driver";
+import { launchHarness, loadTemplate, capture, setMirrored, setControl, type FixtureName } from "./harness-driver";
 
 const ROOT = process.cwd();
 const WORK = path.join(ROOT, ".demo-work");
@@ -36,10 +36,15 @@ function parseArgs() {
   const argv = process.argv.slice(2).filter((a) => a !== "--");
   let seconds = 6;
   let name = "";
+  const sets: [string, number][] = [];
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--seconds") seconds = Number(argv[++i]);
     else if (argv[i] === "--name") name = argv[++i];
+    else if (argv[i] === "--set") {
+      const [k, v] = argv[++i].split("=");
+      sets.push([k, Number(v)]);
+    }
     else rest.push(argv[i]);
   }
   const [photo, ...slugs] = rest;
@@ -59,7 +64,7 @@ function parseArgs() {
   }
   // fixture 名只用安全字符，它会拼进 URL 和文件名
   name ||= path.basename(photo, path.extname(photo)).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  return { photo: path.resolve(photo), slugs, seconds, name };
+  return { photo: path.resolve(photo), slugs, seconds, name, sets };
 }
 
 /**
@@ -82,7 +87,7 @@ function preparePhoto(photo: string, dest: string) {
 }
 
 async function main() {
-  const { photo, slugs, seconds, name } = parseArgs();
+  const { photo, slugs, seconds, name, sets } = parseArgs();
   const fixtures = path.join(WORK, "fixtures");
   fs.mkdirSync(fixtures, { recursive: true });
   fs.mkdirSync(OUT, { recursive: true });
@@ -106,6 +111,9 @@ async function main() {
       await loadTemplate(harness.page, path.join(TEMPLATES, `${slug}.json`), name as FixtureName, SIZE);
       // 引擎默认按前置摄像头镜像。照片不是自拍预览，镜像了帽子上的字和构图都是反的
       await setMirrored(harness.page, false);
+      // 拨滑块，key 是模板 controls 里的 key。照片不会动，靠运动驱动的效果
+      // （fluidity 的节奏）要把静止时的参数调起来才有看头
+      for (const [k, v] of sets) await setControl(harness.page, k, v);
       const total = Math.round(seconds * FPS);
       for (let i = 0; i < total; i++) {
         const png = await capture(harness.page, i / FPS);
