@@ -41,64 +41,69 @@ export default function HomePage() {
         </nav>
       </header>
 
-      {/* Hero */}
-      <section className="mx-auto max-w-content px-6 pb-20 pt-20 md:pt-30">
-        <h1 className="text-hero font-medium">
-          {COPY.home.heroLines.map((line, i) => (
-            <span
-              key={line}
-              className={`block animate-rise ${i === lastHeroLine ? "text-accent" : ""}`}
-              style={{ animationDelay: `${i * 60}ms` }}
-            >
-              {line}
-            </span>
-          ))}
-        </h1>
-        <p className="mt-10 max-w-[52ch] text-body text-muted animate-rise [animation-delay:180ms]">
-          {COPY.home.heroBody}
-        </p>
-        <div className="mt-10 flex flex-wrap items-center gap-4 animate-rise [animation-delay:240ms]">
-          <Link
-            href={`/studio/${DEMOS[0]?.template ?? "cloud"}`}
-            className="rounded-full bg-accent px-7 py-3.5 text-[15px] font-medium text-[#1A0F2E]"
-          >
-            {COPY.home.ctaPrimary}
-          </Link>
-          <a href="#gallery" className="rounded-full border border-line px-7 py-3.5 text-[15px] text-fg">
-            {COPY.home.ctaSecondary}
-          </a>
-        </div>
-      </section>
-
-      {/* 关于我们 + Instagram：紧跟在 hero 后面，先认识人再看作品 */}
-      <section className="border-t border-line">
-        <div className="mx-auto grid max-w-content gap-12 px-6 py-20 md:grid-cols-[3fr_2fr] md:gap-16">
+      {/* 关于我们 + Instagram：主页第一屏就是我们俩，先认识人再看作品 */}
+      <section>
+        <div className="mx-auto grid max-w-content gap-12 px-6 pb-20 pt-16 md:grid-cols-[3fr_2fr] md:gap-16 md:pt-24">
           <div>
-            <h2 className="text-section font-medium">{COPY.home.aboutTitle}</h2>
-            <div className="mt-8 max-w-[58ch] space-y-5 text-body text-muted">
+            <h1 className="animate-rise text-[clamp(40px,6vw,84px)] font-medium leading-[0.98] tracking-[-0.03em]">
+              {COPY.home.aboutTitle}
+            </h1>
+            <div className="mt-8 max-w-[58ch] space-y-5 text-body text-muted animate-rise [animation-delay:120ms]">
               {COPY.home.aboutParagraphs.map((para) => (
                 <p key={para}>{para}</p>
               ))}
             </div>
           </div>
-          <div className="self-start rounded-2xl border border-line bg-surface p-8">
-            <h3 className="text-card font-medium">{COPY.home.instagramTitle}</h3>
-            <p className="mt-3 text-body text-muted">{COPY.home.instagramBody}</p>
-            <a
-              href={COPY.home.instagramUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-6 inline-block rounded-full bg-accent px-6 py-3 text-[15px] font-medium text-[#1A0F2E] ease-brand transition hover:-translate-y-px"
-            >
-              {COPY.home.instagramHandle} ↗
-            </a>
-          </div>
+
+          {/*
+            长得像一个 Instagram 主页预览，而不是一张通用的「关注我们」卡片：
+            有头像、有账号、有几张真照片，整块都能点。
+          */}
+          <a
+            href={COPY.home.instagramUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group block self-start rounded-2xl border border-line bg-surface p-5 ease-brand transition hover:border-[#34343C] animate-rise [animation-delay:200ms]"
+          >
+            <div className="flex items-center gap-3">
+              <img
+                src="/about/avatar.jpg"
+                alt=""
+                width={48}
+                height={48}
+                className="h-12 w-12 rounded-full object-cover ring-2 ring-accent ring-offset-2 ring-offset-surface"
+              />
+              <div className="min-w-0">
+                <div className="truncate text-[15px] font-medium text-fg">{COPY.home.instagramHandle.slice(1)}</div>
+                <div className="text-note text-muted">Instagram</div>
+              </div>
+              <span className="ml-auto whitespace-nowrap rounded-full bg-accent px-4 py-1.5 text-[13px] font-medium text-[#1A0F2E]">
+                Follow
+              </span>
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-1 overflow-hidden rounded-lg">
+              {COPY.home.instagramPhotos.map((src) => (
+                <img
+                  key={src}
+                  src={src}
+                  alt=""
+                  width={180}
+                  height={180}
+                  loading="lazy"
+                  className="aspect-square w-full object-cover ease-brand transition group-hover:opacity-90"
+                />
+              ))}
+            </div>
+            <p className="mt-4 text-[14px] leading-relaxed text-muted">
+              <span className="text-fg">{COPY.home.instagramTitle}.</span> {COPY.home.instagramBody}
+            </p>
+          </a>
         </div>
       </section>
 
       {/* 示例片段：3:4 竖幅、静音循环 */}
       {DEMOS.length > 0 && (
-        <section id="gallery" className="scroll-mt-16 border-t border-line">
+        <section id="gallery" className="border-t border-line">
           <div className="mx-auto max-w-content px-6 py-20">
             <h2 className="text-section font-medium">{COPY.home.examplesTitle}</h2>
             <p className="mt-4 max-w-[52ch] text-body text-muted">{COPY.home.examplesBody}</p>
@@ -152,6 +157,28 @@ export default function HomePage() {
             <span className="text-muted">{COPY.home.privacyTitleMuted}</span>
           </p>
           <p className="mt-6 max-w-[58ch] text-body text-muted">{COPY.home.privacyBody}</p>
+        </div>
+      </section>
+
+      {/* 收尾：标语 + 去相机。原来的 hero，放到最下面 */}
+      <section className="border-t border-line">
+        <div className="mx-auto max-w-content px-6 py-24 md:py-30">
+          <h2 className="text-hero font-medium">
+            {COPY.home.heroLines.map((line, i) => (
+              <span key={line} className={`block ${i === lastHeroLine ? "text-accent" : ""}`}>
+                {line}
+              </span>
+            ))}
+          </h2>
+          <p className="mt-10 max-w-[52ch] text-body text-muted">{COPY.home.heroBody}</p>
+          <div className="mt-10 flex flex-wrap items-center gap-4">
+            <Link
+              href={`/studio/${DEMOS[0]?.template ?? "cloud"}`}
+              className="rounded-full bg-accent px-7 py-3.5 text-[15px] font-medium text-[#1A0F2E]"
+            >
+              {COPY.home.ctaPrimary}
+            </Link>
+          </div>
         </div>
       </section>
 

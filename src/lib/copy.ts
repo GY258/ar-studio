@@ -20,7 +20,6 @@ export const COPY = {
     heroBody:
       "A free AI-powered instant camera inspired by the filters we fell in love with on Instagram. Take a photo, try a new look, and turn an ordinary moment into something special.",
     ctaPrimary: "Try the camera →",
-    ctaSecondary: "See the gallery ↓",
 
     examplesTitle: "Gallery",
     examplesBody: "Real clips, straight out of the camera. Tap one to try that look yourself.",
@@ -42,6 +41,7 @@ export const COPY = {
     instagramHandle: "@ginagary.moments",
     // 分享链接里带的 ?rpxt= 是追踪参数，主页上不要
     instagramUrl: "https://www.instagram.com/ginagary.moments/",
+    instagramPhotos: ["/about/ig-1.jpg", "/about/ig-2.jpg", "/about/ig-3.jpg"],
 
     privacyTitle: "Your footage never uploads.",
     privacyTitleMuted: " Everything runs on your device.",
