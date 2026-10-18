@@ -1028,6 +1028,12 @@ export class ElementRenderer {
       let cx: number;
       let cy: number;
       let roll = 0;
+      /*
+       * 锚点偏移、动画外扩、头/手的 roll 都是按**镜像画面**（前置摄像头）写的。
+       * 后置不镜像时整套布局要关于锚点左右翻过来：x 偏移取反、roll 取反。
+       * 少了这一步，头一歪王冠就甩到脸侧，成对的元素会叠到脸上。
+       */
+      const sx = this.mirror ? 1 : -1;
 
       if (elem.anchor.space === "screen") {
         // screen 空间的 nx 说的就是屏幕位置，**永远不镜像** ——
@@ -1044,14 +1050,14 @@ export class ElementRenderer {
         cy = this.ny2wy(lm.y);
         // 手部元素默认**不**跟手转：emoji 立着好看，而且手的 roll 抖动比头大得多。
         // 要跟就显式写 followRoll: true
-        roll = elem.followRoll ? hand!.roll : 0;
+        roll = elem.followRoll ? hand!.roll * sx : 0;
 
         const [ox, oy] = elem.anchor.offset ?? [0, 0];
         // 偏移以掌宽为单位。跟脸那边以 IOD 为单位是一个道理：
         // 用像素的话人一退远偏移就不成比例了
-        cx += ox * hand!.palmWidth;
+        cx += sx * ox * hand!.palmWidth;
         cy += -oy * hand!.palmWidth + anim.positionY;
-        cx += anim.outwardX;
+        cx += sx * anim.outwardX;
       } else {
         const lm = tracker.landmarkAt(face!, elem.anchor.landmark);
         if (!lm) {
@@ -1060,12 +1066,12 @@ export class ElementRenderer {
         }
         cx = this.nx2wx(lm.x);
         cy = this.ny2wy(lm.y);
-        roll = face!.roll;
+        roll = face!.roll * sx;
 
         const [ox, oy] = elem.anchor.offset ?? [0, 0];
         const mir = elem.anchor.mirror ? -1 : 1;
         // 偏移和动画位移都以 IOD 为单位，且要跟着头一起转
-        const offX = ox * face!.iod + anim.outwardX * mir;
+        const offX = sx * (ox * face!.iod + anim.outwardX * mir);
         const offY = -oy * face!.iod + anim.positionY;
         const cos = Math.cos(-roll);
         const sin = Math.sin(-roll);

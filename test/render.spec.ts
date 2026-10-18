@@ -916,6 +916,15 @@ test("换后置摄像头：元素跟着不镜像，不能贴到镜像的位置�
   // 所以两边的包围盒不会严格对称
   expect(Math.abs(cm!.x + cp!.x - 1), `重心该关于中心翻过去（${cm!.x.toFixed(3)} / ${cp!.x.toFixed(3)}）`)
     .toBeLessThan(0.06);
+
+  /*
+   * 光看包围盒重心不够：black-lodge 左右对称，偏移方向和头部 roll 在后置下
+   * 都算反了（王冠甩到脸侧、两台老虎机叠到脸上）的时候，包围盒照样大致居中。
+   * 这里逐像素比「镜像那张翻过来」和「非镜像那张」的元素区域 —— 元素素材本身
+   * 不翻转，所以不会完全重合，但位置对的话重叠度很高，算反了会掉到一半以下。
+   */
+  const iou = maskIoU(flipX(mirrored), plain, baseFlipped);
+  expect(iou, `非镜像下元素该落在镜像那张翻过来的位置上（IoU ${iou.toFixed(2)}）`).toBeGreaterThan(0.6);
 });
 
 test("滑块对非 particle 模板真的有用", async () => {
