@@ -22,7 +22,10 @@ import { chromium } from "@playwright/test";
 import { PNG } from "pngjs";
 
 const ROOT = process.cwd();
-const FIXTURES = path.join(ROOT, "test/fixtures");
+// make:demo 会把用户照片放在仓库外的临时目录里录，不进 test/fixtures
+const FIXTURES = process.env.AR_FIXTURES_DIR
+  ? path.resolve(process.env.AR_FIXTURES_DIR)
+  : path.join(ROOT, "test/fixtures");
 const DEFAULT_NAMES = ["front", "side", "far", "noface", "hands", "body"];
 
 interface Recorded {
