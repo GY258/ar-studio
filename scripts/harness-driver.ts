@@ -61,7 +61,11 @@ export interface Harness {
  * 用本地 http 服务而不是 file://：fetch() 和 canvas.getImageData() 在 file://
  * 下会撞跨域/污染画布，mask 读不回来。
  */
-export async function launchHarness(): Promise<Harness> {
+export async function launchHarness(
+  viewport: { width: number; height: number } = VIEWPORT,
+  // make:demo 渲染用户照片时，fixture 放在仓库外的临时目录
+  fixturesDir: string = FIXTURES_DIR,
+): Promise<Harness> {
   const bundle = await buildBundle();
 
   const server = http.createServer((req, res) => {
@@ -75,7 +79,7 @@ export async function launchHarness(): Promise<Harness> {
 
     const file =
       url === "/" ? path.join(HARNESS_DIR, "harness.html")
-      : url.startsWith("/fixtures/") ? path.join(FIXTURES_DIR, url.slice("/fixtures/".length))
+      : url.startsWith("/fixtures/") ? path.join(fixturesDir, url.slice("/fixtures/".length))
       : null;
 
     if (!file || !fs.existsSync(file)) {
@@ -103,7 +107,7 @@ export async function launchHarness(): Promise<Harness> {
     );
   }
 
-  const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
   page.on("pageerror", (e) => console.error(`[harness] ${e.message}`));
   await page.goto(`http://127.0.0.1:${port}/`);
   await page.waitForFunction(() => Boolean((window as unknown as { harness?: unknown }).harness));
@@ -118,12 +122,17 @@ export async function launchHarness(): Promise<Harness> {
 }
 
 /** 装一个模板，返回展开后的元素数。 */
-export async function loadTemplate(page: Page, templatePath: string, fixture: FixtureName) {
+export async function loadTemplate(
+  page: Page,
+  templatePath: string,
+  fixture: FixtureName,
+  size: { width: number; height: number } = VIEWPORT,
+) {
   const raw = JSON.parse(fs.readFileSync(templatePath, "utf8"));
   await page.evaluate(
     async ([f, w, h]) =>
       window.harness.setup({ fixture: f as FixtureName, width: w as number, height: h as number }),
-    [fixture, VIEWPORT.width, VIEWPORT.height] as const,
+    [fixture, size.width, size.height] as const,
   );
   return page.evaluate((r) => window.harness.loadTemplate(r), raw);
 }

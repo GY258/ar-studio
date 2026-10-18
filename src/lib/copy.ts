@@ -16,11 +16,32 @@ export const COPY = {
   },
 
   home: {
-    heroLines: ["Real snow.", "On your shoulders.", "In your browser."],
+    heroLines: ["Little moments,", "a little more magical."],
     heroBody:
-      "AR effects that land on you — not a flat filter stuck to the screen. Pick a template, hit record, and download a clip ready to post. No app, no upload, everything runs on your device.",
-    ctaPrimary: "Start free",
-    ctaSecondary: "Browse templates",
+      "A free AI-powered instant camera inspired by the filters we fell in love with on Instagram. Take a photo, try a new look, and turn an ordinary moment into something special.",
+    ctaPrimary: "Try the camera →",
+    ctaSecondary: "See examples ↓",
+
+    examplesTitle: "Examples",
+    examplesBody: "Real clips, straight out of the camera. Tap one to try that look yourself.",
+
+    aboutTitle: "A little about us ♡",
+    aboutParagraphs: [
+      "We're a long-distance couple who love building little things that make people's lives a bit more fun.",
+      "We saw a filter trending on Instagram and thought, why not make a free instant camera that everyone can use? So we built one.",
+      "One of us loves AI engineering. The other brings a passion for Spanish travel and culture. Together, we're exploring how small ideas and a little technology can bring people joy.",
+    ],
+
+    ideaTitle: "Have an idea? We'd love to hear it.",
+    ideaBody:
+      "Tell us what feature you'd like us to build next. This little project is for everyone, and your ideas can help shape it.",
+    ideaCta: "Leave us a message",
+
+    instagramTitle: "Follow our journey on Instagram",
+    instagramBody: "We're building this together, one little idea at a time. Follow along to see what we make next.",
+    instagramHandle: "@ginagary.moments",
+    // 分享链接里带的 ?rpxt= 是追踪参数，主页上不要
+    instagramUrl: "https://www.instagram.com/ginagary.moments/",
 
     privacyTitle: "Your footage never uploads.",
     privacyTitleMuted: " Everything runs on your device.",

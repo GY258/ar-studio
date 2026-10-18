@@ -2,6 +2,7 @@ import Link from "next/link";
 import { allTemplates } from "@/lib/templates";
 import { COPY, t } from "@/lib/copy";
 import { PropThumb } from "@/components/PropThumb";
+import { DEMOS } from "@/lib/demos";
 
 /**
  * 主页承担 SEO、品牌、转化，和工作台视觉语言统一但密度完全不同（PRD 3）。
@@ -10,7 +11,9 @@ import { PropThumb } from "@/components/PropThumb";
  * 这里继承的是那种编辑设计式的克制，不是具体色彩。
  */
 export default function HomePage() {
-  const templates = allTemplates();
+  // hidden 是测试探针和调试模板（mask-debug、hand-stem…），不该出现在主页
+  const templates = allTemplates().filter((tpl) => !tpl.hidden);
+  const lastHeroLine = COPY.home.heroLines.length - 1;
 
   return (
     <main className="min-h-screen">
@@ -38,7 +41,7 @@ export default function HomePage() {
           {COPY.home.heroLines.map((line, i) => (
             <span
               key={line}
-              className={`block animate-rise ${i === 2 ? "text-accent" : ""}`}
+              className={`block animate-rise ${i === lastHeroLine ? "text-accent" : ""}`}
               style={{ animationDelay: `${i * 60}ms` }}
             >
               {line}
@@ -55,11 +58,47 @@ export default function HomePage() {
           >
             {COPY.home.ctaPrimary}
           </Link>
-          <Link href="/templates" className="rounded-full border border-line px-7 py-3.5 text-[15px] text-fg">
+          {/* 还没有示例片段时，这个按钮退回到页面下方的模板列表 */}
+          <a
+            href={DEMOS.length ? "#examples" : "#templates"}
+            className="rounded-full border border-line px-7 py-3.5 text-[15px] text-fg"
+          >
             {COPY.home.ctaSecondary}
-          </Link>
+          </a>
         </div>
       </section>
+
+      {/* 示例片段：竖屏、静音循环，和用户在手机上拍出来的样子一致 */}
+      {DEMOS.length > 0 && (
+        <section id="examples" className="mx-auto max-w-content scroll-mt-20 px-6 pb-24">
+          <h2 className="text-section font-medium">{COPY.home.examplesTitle}</h2>
+          <p className="mt-4 max-w-[52ch] text-body text-muted">{COPY.home.examplesBody}</p>
+          <div className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-4">
+            {DEMOS.map((demo) => {
+              const tpl = templates.find((x) => x.slug === demo.template);
+              return (
+                <Link
+                  key={demo.template}
+                  href={`/studio/${demo.template}`}
+                  className="group overflow-hidden rounded-xl border border-line bg-surface ease-brand transition hover:border-[#34343C]"
+                >
+                  <video
+                    src={demo.video}
+                    poster={demo.poster}
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    preload="metadata"
+                    className="aspect-[9/16] w-full bg-bg object-cover"
+                  />
+                  {tpl && <span className="block px-4 py-3 text-card font-medium">{t(tpl.name)}</span>}
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* 隐私：这是真实的技术事实，也是转化的关键说服点 */}
       <section className="border-y border-line bg-surface/40">
@@ -86,7 +125,7 @@ export default function HomePage() {
       </section>
 
       {/* 模板库预览 */}
-      <section className="mx-auto max-w-content px-6 pb-24">
+      <section id="templates" className="mx-auto max-w-content scroll-mt-20 px-6 pb-24">
         <h2 className="text-section font-medium">{COPY.home.templatesTitle}</h2>
         <div className="mt-10 grid grid-cols-2 gap-4 md:grid-cols-4">
           {templates.map((tpl) => {
@@ -116,6 +155,46 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* 关于我们 */}
+      <section className="border-t border-line">
+        <div className="mx-auto max-w-content px-6 py-24">
+          <h2 className="text-section font-medium">{COPY.home.aboutTitle}</h2>
+          <div className="mt-8 max-w-[58ch] space-y-5 text-body text-muted">
+            {COPY.home.aboutParagraphs.map((para) => (
+              <p key={para}>{para}</p>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* 留言 + Instagram */}
+      <section className="border-t border-line bg-surface/40">
+        <div className="mx-auto grid max-w-content gap-14 px-6 py-20 md:grid-cols-2">
+          <div>
+            <h3 className="text-card font-medium">{COPY.home.ideaTitle}</h3>
+            <p className="mt-3 max-w-[46ch] text-body text-muted">{COPY.home.ideaBody}</p>
+            <Link
+              href="/feedback"
+              className="mt-6 inline-block rounded-full bg-accent px-6 py-3 text-[15px] font-medium text-[#1A0F2E] ease-brand transition hover:-translate-y-px"
+            >
+              {COPY.home.ideaCta}
+            </Link>
+          </div>
+          <div>
+            <h3 className="text-card font-medium">{COPY.home.instagramTitle}</h3>
+            <p className="mt-3 max-w-[46ch] text-body text-muted">{COPY.home.instagramBody}</p>
+            <a
+              href={COPY.home.instagramUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-6 inline-block rounded-full border border-line px-6 py-3 text-[15px] text-fg ease-brand transition hover:border-accent/60"
+            >
+              {COPY.home.instagramHandle} ↗
+            </a>
+          </div>
+        </div>
+      </section>
+
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-content flex-wrap items-center justify-between gap-4 px-6 py-10 text-note text-muted">
           <span className="font-mono tracking-[0.18em]">{COPY.brand}</span>
@@ -129,6 +208,9 @@ export default function HomePage() {
             <Link href="/feedback" className="hover:text-fg">
               Feedback
             </Link>
+            <a href={COPY.home.instagramUrl} target="_blank" rel="noopener noreferrer" className="hover:text-fg">
+              Instagram
+            </a>
           </div>
         </div>
       </footer>
