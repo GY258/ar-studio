@@ -21,3 +21,6 @@ test-results
 
 # make:demo 的中间产物：用户照片和逐帧 PNG，不进仓库
 .demo-work
+
+# 用户本人照片（make:demo 的输入），不进仓库
+file/

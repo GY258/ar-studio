@@ -18,16 +18,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { launchHarness, loadTemplate, capture, type FixtureName } from "./harness-driver";
+import { launchHarness, loadTemplate, capture, setMirrored, type FixtureName } from "./harness-driver";
 
 const ROOT = process.cwd();
 const WORK = path.join(ROOT, ".demo-work");
 const OUT = path.join(ROOT, "public/demos");
 const TEMPLATES = path.join(ROOT, "src/content/templates");
 
-// 竖屏 9:16，和用户在手机上拍出来的一致；720p 够主页卡片用，文件也小
-const SIZE = { width: 720, height: 1280 };
+// 3:4 竖幅：手机照片原生就是这个比例，裁成 9:16 会把并排的两个人切掉一截
+const SIZE = { width: 768, height: 1024 };
 const FPS = 30;
+/** 开头放原图的秒数和擦除过渡的秒数 */
+const BEFORE = 1;
+const WIPE = 0.6;
 
 function parseArgs() {
   const argv = process.argv.slice(2).filter((a) => a !== "--");
@@ -101,18 +104,26 @@ async function main() {
       fs.mkdirSync(frames, { recursive: true });
 
       await loadTemplate(harness.page, path.join(TEMPLATES, `${slug}.json`), name as FixtureName, SIZE);
+      // 引擎默认按前置摄像头镜像。照片不是自拍预览，镜像了帽子上的字和构图都是反的
+      await setMirrored(harness.page, false);
       const total = Math.round(seconds * FPS);
       for (let i = 0; i < total; i++) {
         const png = await capture(harness.page, i / FPS);
         fs.writeFileSync(path.join(frames, `${String(i).padStart(4, "0")}.png`), png);
       }
 
-      const base = path.join(OUT, slug);
+      const base = path.join(OUT, `${name}-${slug}`);
+      // 先放 BEFORE 秒原图，再从左往右擦出效果。照片是静止的，很多效果（比如
+      // 只留人物彩色）套上去就是一张定格图 —— 没有前后对比，看的人根本不知道滤镜做了什么
       execFileSync("ffmpeg", [
         "-y", "-loglevel", "error",
+        "-loop", "1", "-framerate", String(FPS), "-t", String(BEFORE + WIPE), "-i", path.join(fixtures, `${name}.png`),
         "-framerate", String(FPS), "-i", path.join(frames, "%04d.png"),
+        "-filter_complex",
+        `[0]format=yuv420p,settb=AVTB[a];[1]format=yuv420p,settb=AVTB[b];` +
+          `[a][b]xfade=transition=wiperight:duration=${WIPE}:offset=${BEFORE}`,
         // yuv420p + faststart：iOS Safari 才肯内联自动播放，而且不用下完就能开始播
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "26", "-preset", "slow",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "24", "-preset", "slow",
         "-movflags", "+faststart", "-an",
         `${base}.mp4`,
       ]);
@@ -125,7 +136,7 @@ async function main() {
       ]);
 
       const kb = (fs.statSync(`${base}.mp4`).size / 1024).toFixed(0);
-      console.log(`✓ ${slug}  →  public/demos/${slug}.mp4 (${kb} KB) + .jpg`);
+      console.log(`✓ ${slug}  →  public/demos/${name}-${slug}.mp4 (${kb} KB) + .jpg`);
     }
   } finally {
     await harness.close();
@@ -133,7 +144,9 @@ async function main() {
 
   console.log(
     `\n把新片段加进 src/lib/demos.ts：\n` +
-      slugs.map((s) => `  { template: "${s}", video: "/demos/${s}.mp4", poster: "/demos/${s}.jpg" },`).join("\n"),
+      slugs
+        .map((s) => `  { template: "${s}", video: "/demos/${name}-${s}.mp4", poster: "/demos/${name}-${s}.jpg" },`)
+        .join("\n"),
   );
 }
 

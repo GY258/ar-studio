@@ -68,7 +68,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* 示例片段：竖屏、静音循环，和用户在手机上拍出来的样子一致 */}
+      {/* 示例片段：3:4 竖幅、静音循环 */}
       {DEMOS.length > 0 && (
         <section id="examples" className="mx-auto max-w-content scroll-mt-20 px-6 pb-24">
           <h2 className="text-section font-medium">{COPY.home.examplesTitle}</h2>
@@ -90,7 +90,7 @@ export default function HomePage() {
                     loop
                     playsInline
                     preload="metadata"
-                    className="aspect-[9/16] w-full bg-bg object-cover"
+                    className="aspect-[3/4] w-full bg-bg object-cover"
                   />
                   {tpl && <span className="block px-4 py-3 text-card font-medium">{t(tpl.name)}</span>}
                 </Link>
