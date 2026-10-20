@@ -27,13 +27,36 @@ export interface Substance {
    * add 只给真正在发光的东西（金粉、火星），白色的雪用 add 会在浅色背景上消失。
    */
   blend?: "normal" | "add";
+  /**
+   * 撞到人时法向速度反弹回去多少 0~1。缺省 0 —— 法向速度直接消掉，只沿表面滑，
+   * 雪和水要的就是这个。糖果、弹珠这类硬东西要弹开，给 0.3~0.6。
+   */
+  bounce?: number;
+  /**
+   * 给了就不画圆点 / 液滴，改画贴图：每颗粒子从这一套里抽一张，带旋转。
+   * 大小走这里的 size，不走 substance.size（那个是像素半径，跟屏幕大小无关）。
+   */
+  sprites?: SpriteSet;
 }
+
+/** 粒子贴图。set 是内置的一套程序化贴图，见 engine/sprites.ts。 */
+export interface SpriteSet {
+  set: "halloween-candy";
+  /** 一颗有多宽，占画面短边的比例，[最小, 最大] */
+  size: [number, number];
+  /** 最大自转速度，弧度/秒 */
+  spin: number;
+}
+// 注意：用了 sprites 的物质，gravity / speed / wind 都按「短边 = 1000」换算，不是像素。
+// 糖果要从杯口落到头顶上，像素单位的话换个屏幕落点就漂了。见 particles.ts 的 physicsUnit
 
 /** 发射器（道具）。asset 缺省时用内置的程序化贴图，零外部素材也能跑。 */
 export interface Emitter {
   asset?: string;
-  shape?: "cloud" | "shower" | "glass" | "cup";
+  shape?: "cloud" | "shower" | "glass" | "cup" | "ghost";
   aspect: number;
+  /** 道具有多宽，占画面**短边**的比例（横屏桌面上按宽度算会大得离谱）。缺省按老规则（约 0.2 屏宽） */
+  scale?: number;
   port: { x: number; y: number };
   band: number;
   tilt?: number;
@@ -48,7 +71,8 @@ export type SubstanceKnob =
   | "size"
   | "speed"
   | "spread"
-  | "splash";
+  | "splash"
+  | "bounce";
 
 /**
  * 滑块绑到哪。

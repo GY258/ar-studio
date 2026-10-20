@@ -19,6 +19,7 @@ import { PNG } from "pngjs";
 import { expandGenerators } from "../src/engine/generators";
 import { applyEase, evaluateAnimations } from "../src/engine/animations";
 import { PinchDetector } from "../src/engine/trail";
+import { carryControls } from "../src/engine/resolve";
 import { migrateElements } from "../src/lib/migrate";
 import {
   launchHarness,
@@ -1532,4 +1533,89 @@ test("生成器抖动：带 seed 的 jitter 重复展开逐元素相同，且确
   // trail 的 step:0 + decay:1 本来让四滴尺寸完全相同，抖动之后必须不同
   expect(new Set(plain.map((e) => e.size.scale)).size).toBe(1);
   expect(new Set(a.map((e) => e.size.scale)).size).toBeGreaterThan(1);
+});
+
+/** 糖果像素：t 时刻和 t=0（只有幽灵、还没倒出任何东西）不同的像素。 */
+function candyPixels(frame: PNG, empty: PNG): Uint8Array {
+  const out = new Uint8Array(frame.width * frame.height);
+  for (let i = 0; i < out.length; i++) {
+    const k = i << 2;
+    const d =
+      Math.abs(frame.data[k] - empty.data[k]) +
+      Math.abs(frame.data[k + 1] - empty.data[k + 1]) +
+      Math.abs(frame.data[k + 2] - empty.data[k + 2]);
+    out[i] = d > 36 ? 1 : 0;
+  }
+  return out;
+}
+
+test("糖果：粒子在离线渲染里真的出现，撞到人会弹开而不是穿进脸里", async () => {
+  /*
+   * 粒子以前只在实时循环里推进，离线 harness 里根本看不见 —— 粒子模板一条渲染回归都没有。
+   * 现在 advance() 也推进粒子，这条先证明「看得见」，再证明碰撞真的生效。
+   *
+   * 判据：糖果像素落在**人体内部**（蒙版往里缩 24px，排除轮廓附近那圈合法的接触）的比例。
+   * 碰撞没接上的话，倒在头上的糖果直接穿过脸往下掉，这个比例会到三成以上。
+   */
+  const tpl = path.join(TEMPLATES, "candy-ghost.json");
+  await loadTemplate(harness.page, tpl, "front");
+  const empty = decode(await capture(harness.page, 0));
+  const frame = decode(await capture(harness.page, 3));
+  const candy = candyPixels(frame, empty);
+
+  // 默认是前置镜像，蒙版要跟着画面翻过去
+  const mask = flipX(decode(fs.readFileSync(path.join(ROOT, "test/fixtures/front.mask.png"))));
+  const W = mask.width;
+  const H = mask.height;
+  const person = (x: number, y: number) =>
+    x >= 0 && y >= 0 && x < W && y < H && mask.data[((y * W + x) << 2)] > 127;
+  const R = 24;
+  let total = 0;
+  let inside = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!candy[y * W + x]) continue;
+      total++;
+      if (person(x, y) && person(x - R, y) && person(x + R, y) && person(x, y - R) && person(x, y + R)) inside++;
+    }
+  }
+  expect(total / (W * H), "t=3 时应该已经倒出一串糖果").toBeGreaterThan(0.004);
+  expect(inside / total, `糖果不该穿进人体（${((inside / total) * 100).toFixed(1)}% 在体内）`).toBeLessThan(0.03);
+});
+
+test("糖果：同一个 t 渲染两次逐位相同（粒子随机数是播种的）", async () => {
+  /*
+   * 粒子进了离线渲染之后，「同一份输入渲染多少次都是同一张图」也要对它成立 ——
+   * 不然 demo 每次重出都不一样，以后给粒子模板加 golden 也录不出来。
+   * 先走到更晚的时刻再倒回来：倒流会 resetSim，粒子池和种子都得跟着清。
+   */
+  const tpl = path.join(TEMPLATES, "candy-ghost.json");
+  await loadTemplate(harness.page, tpl, "front");
+  const first = await capture(harness.page, 2);
+  await capture(harness.page, 3);
+  const again = await capture(harness.page, 2);
+  expect(again.equals(first), "倒流回同一个 t 必须逐位相同").toBe(true);
+});
+
+test("糖果：弹性滑块真的接上了", async () => {
+  const tpl = path.join(TEMPLATES, "candy-ghost.json");
+  await loadTemplate(harness.page, tpl, "front");
+  const bouncy = decode(await capture(harness.page, 3));
+  await loadTemplate(harness.page, tpl, "front");
+  await setControl(harness.page, "bounce", 0);
+  const flat = decode(await capture(harness.page, 3));
+  expect(diffRatio(bouncy, flat), "弹性调到 0 之后糖果的轨迹应该变").toBeGreaterThan(0.002);
+});
+
+test("切模板：同名滑块只在新范围里才沿用", () => {
+  /*
+   * 糖果的 rate 是每秒几十颗，花洒的 rate 是每秒上千滴。原来同名就原样带过去，
+   * 从糖果切到花洒水量变成 34 —— 本地手机视口真机走一遍时撞上的。
+   */
+  const shower = JSON.parse(fs.readFileSync(path.join(TEMPLATES, "shower.json"), "utf8")).controls;
+  const golddust = JSON.parse(fs.readFileSync(path.join(TEMPLATES, "golddust.json"), "utf8")).controls;
+  const fromCandy = carryControls({ rate: 34, wind: 50 }, shower);
+  expect(fromCandy.rate, "超出新范围的值退回新模板的默认").toBe(1100);
+  expect(fromCandy.wind, "在范围里的照样沿用").toBe(50);
+  expect(carryControls({ rate: 1500 }, golddust).rate, "雪 → 金粉，拨过的量要留住").toBe(1500);
 });

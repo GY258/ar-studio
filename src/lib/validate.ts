@@ -8,9 +8,10 @@ import { TUNABLE_PARAMS, parseElementTarget } from "@/engine/tunables";
 import { sanitizeSvg } from "@/engine/svg-sanitize";
 import { migrateElements } from "./migrate";
 
-const SHAPES = ["cloud", "shower", "glass", "cup"];
+const SHAPES = ["cloud", "shower", "glass", "cup", "ghost"];
+const SPRITE_SETS = ["halloween-candy"];
 const PERCEPTIONS = ["segmentation", "face", "hands", "pose"];
-const KNOBS = ["gravity", "friction", "streak", "size", "speed", "spread", "splash"];
+const KNOBS = ["gravity", "friction", "streak", "size", "speed", "spread", "splash", "bounce"];
 const MODES = ["absolute", "scale"];
 const TEMPLATE_TYPES = ["particle", "overlay", "facetrack"];
 
@@ -84,6 +85,9 @@ export function validateTemplate(raw: Raw): string[] {
     if (!port || !num(port.x) || !num(port.y)) p.push("emitter.port 需要 {x, y}");
     if (!num(e.band) || (e.band as number) < 0) p.push("emitter.band 必须是 ≥0 的数字");
     if (e.tilt !== undefined && !num(e.tilt)) p.push("emitter.tilt 是弧度数字");
+    if (e.scale !== undefined && (!num(e.scale) || e.scale <= 0 || e.scale > 1)) {
+      p.push("emitter.scale 是道具宽度占画面短边的比例，0~1");
+    }
     if (typeof e.draggable !== "boolean") p.push("emitter.draggable 必填 true/false");
     const def = e.default as Raw | undefined;
     if (!def || !num(def.x) || !num(def.y)) p.push("emitter.default 需要 {x, y}");
@@ -110,6 +114,19 @@ export function validateTemplate(raw: Raw): string[] {
         `substance.blend "${s.blend}" 无效，只能是 normal（缺省）或 add。` +
           `add 是发光，只给金粉、火星这类真的在发光的东西 —— 白色的雪用 add 在浅色背景上会消失`,
       );
+    }
+    if (s.bounce !== undefined && (!num(s.bounce) || s.bounce < 0 || s.bounce > 1)) {
+      p.push("substance.bounce 必须在 0~1 之间（撞到人后法向速度弹回去的比例）");
+    }
+    if (s.sprites !== undefined) {
+      const sp = s.sprites as Raw;
+      if (!SPRITE_SETS.includes(sp.set as string)) {
+        p.push(`substance.sprites.set "${sp.set}" 不认识，可选：${SPRITE_SETS.join(" / ")}`);
+      }
+      if (!pair(sp.size) || sp.size[0] <= 0 || sp.size[0] > sp.size[1]) {
+        p.push("substance.sprites.size 必须是 [最小, 最大]，占画面短边的比例");
+      }
+      if (!num(sp.spin) || sp.spin < 0) p.push("substance.sprites.spin 必须是 ≥0 的弧度/秒");
     }
   }
 
