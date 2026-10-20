@@ -107,7 +107,142 @@ const cup: Painter = (g, w, h) => {
   g.restore();
 };
 
-const PAINTERS: Record<NonNullable<Emitter["shape"]>, Painter> = { cloud, shower, glass, cup };
+/**
+ * 床单鬼端着马克杯往下倒。鬼在左上，杯口朝右下 —— 模板的 port 要对准杯口，
+ * 改了这里的杯子位置记得同步改 JSON 里的 port。
+ */
+const ghost: Painter = (g, w, h) => {
+  const s = w / 512;
+  const INK = "#2A1830";
+  g.save();
+  g.scale(s, s);
+  g.lineJoin = "round";
+  g.lineCap = "round";
+  g.lineWidth = 9;
+  g.strokeStyle = INK;
+
+  // 身子：圆顶 + 往右下飘的床单，下摆三道波浪
+  const body = () => {
+    g.beginPath();
+    g.moveTo(70, 300);
+    g.bezierCurveTo(40, 220, 60, 70, 180, 50);
+    g.bezierCurveTo(290, 34, 330, 130, 318, 210);
+    g.bezierCurveTo(312, 260, 330, 300, 350, 330);
+    g.quadraticCurveTo(318, 336, 300, 362);
+    g.quadraticCurveTo(268, 330, 236, 376);
+    g.quadraticCurveTo(200, 336, 160, 372);
+    g.quadraticCurveTo(130, 330, 96, 350);
+    g.quadraticCurveTo(70, 340, 70, 300);
+    g.closePath();
+  };
+  body();
+  g.fillStyle = "#FBF7F2";
+  g.fill();
+  // 背光面压一层淡紫，床单才有体积
+  g.save();
+  body();
+  g.clip();
+  g.fillStyle = "rgba(196,184,214,.55)";
+  g.beginPath();
+  g.ellipse(80, 290, 70, 120, 0.3, 0, Math.PI * 2);
+  g.fill();
+  g.beginPath();
+  g.ellipse(250, 360, 120, 40, 0, 0, Math.PI * 2);
+  g.fill();
+  g.restore();
+  body();
+  g.stroke();
+  // 床单褶子
+  g.lineWidth = 5;
+  g.strokeStyle = "rgba(42,24,48,.35)";
+  g.beginPath();
+  g.moveTo(150, 260);
+  g.quadraticCurveTo(160, 310, 158, 360);
+  g.moveTo(230, 270);
+  g.quadraticCurveTo(240, 320, 236, 368);
+  g.stroke();
+
+  // 脸
+  g.fillStyle = INK;
+  g.beginPath();
+  g.ellipse(196, 150, 13, 20, 0, 0, Math.PI * 2);
+  g.ellipse(258, 146, 13, 20, 0, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#fff";
+  g.beginPath();
+  g.arc(200, 142, 5, 0, Math.PI * 2);
+  g.arc(262, 138, 5, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "rgba(255,140,150,.45)";
+  g.beginPath();
+  g.ellipse(176, 186, 15, 8, 0, 0, Math.PI * 2);
+  g.ellipse(282, 180, 15, 8, 0, 0, Math.PI * 2);
+  g.fill();
+  g.lineWidth = 6;
+  g.strokeStyle = INK;
+  g.beginPath();
+  g.arc(228, 178, 14, 0.35, Math.PI - 0.35);
+  g.stroke();
+
+  // 杯子：倒着拿，杯口朝右下
+  g.save();
+  g.translate(372, 246);
+  g.rotate(-0.95);
+  g.lineWidth = 9;
+  g.strokeStyle = INK;
+  // 把手：在杯身侧面（转过去之后朝右上）
+  g.lineWidth = 14;
+  g.beginPath();
+  g.arc(56, -12, 28, -Math.PI / 2, Math.PI / 2);
+  g.stroke();
+  g.lineWidth = 6;
+  g.strokeStyle = "#FBF7F2";
+  g.beginPath();
+  g.arc(56, -12, 28, -Math.PI / 2 + 0.15, Math.PI / 2 - 0.15);
+  g.stroke();
+  g.lineWidth = 9;
+  g.strokeStyle = INK;
+  g.beginPath();
+  g.roundRect(-56, -70, 112, 120, [10, 10, 22, 22]);
+  g.fillStyle = "#FBF7F2";
+  g.fill();
+  g.stroke();
+  g.fillStyle = "rgba(196,184,214,.6)";
+  g.fillRect(24, -62, 26, 104);
+  // 杯口和里面那一层糖
+  g.beginPath();
+  g.ellipse(0, 50, 56, 18, 0, 0, Math.PI * 2);
+  g.fillStyle = "#4A2A1E";
+  g.fill();
+  g.stroke();
+  for (const [x, c] of [
+    [-26, "#F7931E"],
+    [0, "#8E4FC9"],
+    [24, "#4DB35A"],
+  ] as const) {
+    g.beginPath();
+    g.arc(x, 52, 9, 0, Math.PI * 2);
+    g.fillStyle = c;
+    g.fill();
+  }
+  g.restore();
+
+  // 抓着杯子的那只「手」：床单伸出来的一截，压在杯身上
+  g.beginPath();
+  g.moveTo(300, 250);
+  g.quadraticCurveTo(340, 236, 372, 262);
+  g.quadraticCurveTo(366, 290, 330, 292);
+  g.quadraticCurveTo(306, 290, 300, 276);
+  g.closePath();
+  g.fillStyle = "#FBF7F2";
+  g.fill();
+  g.lineWidth = 9;
+  g.strokeStyle = INK;
+  g.stroke();
+  g.restore();
+};
+
+const PAINTERS: Record<NonNullable<Emitter["shape"]>, Painter> = { cloud, shower, glass, cup, ghost };
 
 export function paintProp(shape: NonNullable<Emitter["shape"]>, canvas: HTMLCanvasElement) {
   const g = canvas.getContext("2d");

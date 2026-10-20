@@ -5,6 +5,7 @@ import { ArEngine, type EngineStats } from "@/engine/engine";
 import { StudioRecorder, download, type RecordingResult } from "@/engine/recorder";
 import type { ControlValues, TemplateConfig, TemplateListing } from "@/engine/types";
 import { saveToPhotos } from "@/engine/recorder";
+import { carryControls } from "@/engine/resolve";
 import { COPY, t } from "@/lib/copy";
 import { PropThumb } from "./PropThumb";
 
@@ -132,8 +133,7 @@ export function StudioApp({ initialSlug }: { initialSlug: string }) {
     setConfig(cfg);
     engineRef.current?.setTemplate(cfg);
     setValues((prev) => {
-      const next: ControlValues = {};
-      for (const c of cfg.controls) next[c.key] = prev[c.key] ?? c.default;
+      const next = carryControls(prev, cfg.controls);
       engineRef.current?.setControls(next);
       return next;
     });

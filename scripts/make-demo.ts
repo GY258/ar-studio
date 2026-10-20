@@ -143,8 +143,17 @@ async function main() {
         "-q:v", "4", `${base}.jpg`,
       ]);
 
+      // 缩略图取第 3 秒（成片里的第 4 秒）：第 1 秒的 poster 上，倒糖、流泪这类
+      // 慢慢攒起来的效果还没成型，缩成一个圆就看不出是什么滤镜
+      const stillFrame = Math.min(total - 1, 3 * FPS);
+      execFileSync("ffmpeg", [
+        "-y", "-loglevel", "error",
+        "-i", path.join(frames, `${String(stillFrame).padStart(4, "0")}.png`),
+        "-q:v", "4", `${base}-still.jpg`,
+      ]);
+
       const kb = (fs.statSync(`${base}.mp4`).size / 1024).toFixed(0);
-      console.log(`✓ ${slug}  →  public/demos/${name}-${slug}.mp4 (${kb} KB) + .jpg`);
+      console.log(`✓ ${slug}  →  public/demos/${name}-${slug}.mp4 (${kb} KB) + .jpg + -still.jpg`);
     }
   } finally {
     await harness.close();
@@ -153,7 +162,7 @@ async function main() {
   console.log(
     `\n把新片段加进 src/lib/demos.ts：\n` +
       slugs
-        .map((s) => `  { template: "${s}", video: "/demos/${name}-${s}.mp4", poster: "/demos/${name}-${s}.jpg" },`)
+        .map((s) => `  demo("${name}", "${s}", "<一句话介绍>"),`)
         .join("\n"),
   );
 }

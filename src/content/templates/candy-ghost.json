@@ -1,0 +1,100 @@
+{
+  "slug": "candy-ghost",
+  "name": {
+    "zh": "捣蛋鬼的糖",
+    "en": "Trick or Treat"
+  },
+  "category": "candy",
+  "sort_order": 5,
+  "price_cents": 0,
+  "preview": {
+    "shape": "ghost"
+  },
+  "perception": [
+    "segmentation"
+  ],
+  "emitter": {
+    "shape": "ghost",
+    "aspect": 0.8,
+    "scale": 0.46,
+    "port": {
+      "x": 0.3,
+      "y": 0.17
+    },
+    "band": 0.05,
+    "tilt": 0.6,
+    "draggable": true,
+    "default": {
+      "x": -0.14,
+      "y": 0.33
+    }
+  },
+  "substance": {
+    "gravity": -1400,
+    "friction": 0.12,
+    "streak": 0,
+    "color": [
+      1,
+      0.6,
+      0.2
+    ],
+    "size": [
+      1,
+      1
+    ],
+    "speed": [
+      220,
+      360
+    ],
+    "spread": 0.5,
+    "splash": 0,
+    "settle": false,
+    "twinkle": false,
+    "bounce": 0.45,
+    "sprites": {
+      "set": "halloween-candy",
+      "size": [
+        0.055,
+        0.08
+      ],
+      "spin": 4
+    }
+  },
+  "controls": [
+    {
+      "key": "rate",
+      "label": {
+        "zh": "糖量",
+        "en": "Candy"
+      },
+      "min": 4,
+      "max": 60,
+      "default": 34,
+      "step": 1
+    },
+    {
+      "key": "bounce",
+      "label": {
+        "zh": "弹性",
+        "en": "Bounce"
+      },
+      "min": 0,
+      "max": 180,
+      "default": 100,
+      "step": 10,
+      "target": "substance.bounce",
+      "mode": "scale"
+    },
+    {
+      "key": "wind",
+      "label": {
+        "zh": "风",
+        "en": "Wind"
+      },
+      "min": -300,
+      "max": 300,
+      "default": 0,
+      "step": 10
+    }
+  ]
+}

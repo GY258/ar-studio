@@ -8,46 +8,67 @@ import type { LocalizedText } from "@/engine/types";
  * 真要做 i18n 时，改的是这份数据的形状，不是几十个组件。
  */
 
+// 句首的数字拼成单词读起来更顺（"Seven looks" 而不是 "7 looks"）
+const NUMBER_WORDS: Record<number, string> = {
+  2: "Two", 3: "Three", 4: "Four", 5: "Five", 6: "Six", 7: "Seven", 8: "Eight", 9: "Nine", 10: "Ten", 11: "Eleven", 12: "Twelve",
+};
+
 export const COPY = {
   brand: "AR STUDIO",
 
-  nav: {
-    cta: "Start creating",
-  },
-
   home: {
-    heroLines: ["Little moments,", "a little more magical."],
-    heroBody:
-      "A free AI-powered instant camera inspired by the filters we fell in love with on Instagram. Take a photo, try a new look, and turn an ordinary moment into something special.",
-    ctaPrimary: "Try the camera →",
+    nav: [
+      { href: "/#filters", label: "Filters" },
+      { href: "/#gallery", label: "Gallery" },
+      { href: "/#privacy", label: "Privacy" },
+      { href: "/#about", label: "About" },
+    ],
 
-    examplesTitle: "Gallery",
+    heroLines: ["Little moments,", "a little more magical."],
+    heroBody: "A free camera with AR filters that runs right in your browser. No app, no upload.",
+    ctaPrimary: "Open the camera",
+    pickerLabel: "Choose a filter",
+
+    filtersTitle: "Explore our filters",
+    filtersBody: (n: number) => `${NUMBER_WORDS[n] ?? n} looks, each one live in your browser. Pick a mood and start playing.`,
+    filterCta: "Try this filter",
+
+    privacyTitle: "Your footage never uploads. Everything runs on your device.",
+    privacyBody:
+      "Person detection and effect rendering both finish inside your browser. Not a single camera frame reaches our servers. That isn't a promise. It's how the stack works.",
+    privacyCta: "Read our privacy policy",
+
+    examplesTitle: "From our gallery",
     examplesBody: "Real clips, straight out of the camera. Tap one to try that look yourself.",
 
-    aboutTitle: "A little about us ♡",
+    aboutTitle: "A little about us",
     aboutParagraphs: [
       "We're a long-distance couple who love building little things that make people's lives a bit more fun.",
       "We saw a filter trending on Instagram and thought, why not make a free instant camera that everyone can use? So we built one.",
       "One of us loves AI engineering. The other brings a passion for Spanish travel and culture. Together, we're exploring how small ideas and a little technology can bring people joy.",
     ],
+    // 大图在前，两张小图在后
+    aboutPhotos: [
+      { src: "/about/ig-3.jpg", alt: "The two of us sitting on a grassy hill" },
+      { src: "/about/ig-1.jpg", alt: "Walking hand in hand through a park" },
+      { src: "/about/ig-2.jpg", alt: "Together at an evening dinner" },
+    ],
+    instagramCta: "Follow our journey on Instagram",
+    // 分享链接里带的 ?rpxt= 是追踪参数，主页上不要
+    instagramUrl: "https://www.instagram.com/ginagary.moments/",
 
     ideaTitle: "Have an idea? We'd love to hear it.",
     ideaBody:
       "Tell us what feature you'd like us to build next. This little project is for everyone, and your ideas can help shape it.",
-    ideaCta: "Leave us a message",
+    ideaLabel: "Your idea",
+    ideaPlaceholder: "Tell us your idea...",
+    ideaCta: "Share an idea",
+    ideaSending: "Sending…",
+    ideaThanks: "Thanks! We got it.",
+    ideaFailed: "Something went wrong. Please try again.",
 
-    instagramTitle: "Follow our journey on Instagram",
-    instagramBody: "We're building this together, one little idea at a time. Follow along to see what we make next.",
-    instagramHandle: "@ginagary.moments",
-    // 分享链接里带的 ?rpxt= 是追踪参数，主页上不要
-    instagramUrl: "https://www.instagram.com/ginagary.moments/",
-    instagramPhotos: ["/about/ig-1.jpg", "/about/ig-2.jpg", "/about/ig-3.jpg"],
-
-    privacyTitle: "Your footage never uploads.",
-    privacyTitleMuted: " Everything runs on your device.",
-    privacyBody:
-      "Person detection and effect rendering both finish inside your browser. Not a single camera frame reaches our servers. That isn't a promise — it's how this stack works.",
-
+    footerLine: "Little moments, a little more magical.",
+    footerPrivacy: "Privacy policy",
   },
 
   templates: {

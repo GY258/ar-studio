@@ -76,7 +76,8 @@ export function resolveControls(
       const cur = substance[field];
       substance[field] = mode === "scale" ? [cur[0] * k, cur[1] * k] : [raw, raw];
     } else {
-      const cur = substance[field];
+      // bounce 是可选字段，没写就是 0
+      const cur = substance[field] ?? 0;
       substance[field] = mode === "scale" ? cur * k : raw;
     }
   }
@@ -88,4 +89,26 @@ export function resolveControls(
   }
 
   return { substance, knobs, orphans };
+}
+
+/**
+ * 切模板时滑块值怎么继承。
+ *
+ * 同名滑块沿用上一个模板的值是刻意的（雪 → 金粉，「量」拨过一次就别再拨），
+ * 但**只在新模板的范围里才沿用**：糖果的 rate 是每秒几十颗，花洒是每秒上千滴，
+ * 都叫 rate。原样带过去的话从糖果切到花洒，水量是 34 —— 几乎不出水，滑块还顶在最左边。
+ * 离散档位同理，不是新模板里的某一档就退回默认。
+ */
+export function carryControls(prev: ControlValues, controls: Control[]): ControlValues {
+  const next: ControlValues = {};
+  for (const c of controls) {
+    const v = prev[c.key];
+    const fits =
+      typeof v === "number" &&
+      v >= c.min &&
+      v <= c.max &&
+      (!c.options || c.options.some((o) => o.value === v));
+    next[c.key] = fits ? v : c.default;
+  }
+  return next;
 }

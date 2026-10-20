@@ -927,6 +927,7 @@ export class ArEngine {
   setEmitterPos(x: number, y: number) {
     this.emitPos.x = Math.max(-0.48, Math.min(0.48, x));
     this.emitPos.y = Math.max(-0.3, Math.min(0.25, y));
+    this.layoutProp();
   }
 
   getEmitterPos() {
@@ -1081,9 +1082,13 @@ export class ArEngine {
 
   private layoutProp() {
     if (!this.cfg?.emitter) return;
-    const pw = this.W * 0.24 * (this.cfg.emitter.aspect > 0.7 ? 0.85 : 1) * (this.cfg.slug === "cloud" ? 1.4 : 1);
+    const pw = this.cfg.emitter.scale
+      ? Math.min(this.W, this.H) * this.cfg.emitter.scale
+      : this.W * 0.24 * (this.cfg.emitter.aspect > 0.7 ? 0.85 : 1) * (this.cfg.slug === "cloud" ? 1.4 : 1);
     const ph = pw * this.cfg.emitter.aspect;
     this.prop.scale.set(pw, ph, 1);
+    // 位置也在这里摆：以前只在推进粒子时摆，于是第一次推进之前（离线 t=0）道具停在画面正中
+    this.prop.position.set(this.emitPos.x * this.W, this.emitPos.y * this.H, 1);
   }
 
   resize() {
@@ -1330,6 +1335,12 @@ export class ArEngine {
    * 「把所有东西设成 t 时刻的值」，而是「从当前时刻一步步走到 t」。
    */
   private advance(t: number, nowMs = t * 1000) {
+    /*
+     * 粒子也在这里推进，离线 harness 才看得见它们。dt 取和上一次推进的差：
+     * stepTo 是定步长，所以离线渲染出来的粒子和步长绑定、可复现。
+     * 首次推进（simT < 0）和原地重渲染（dt = 0）都不推进粒子。
+     */
+    const dt = this.simT < 0 ? 0 : Math.min(t - this.simT, 0.05);
     this.perceive(nowMs);
     this.updateMask();
     this.setEffectTime(t);
@@ -1343,7 +1354,23 @@ export class ArEngine {
       this.poseTracker,
       this.poseTracker.frame(nowMs),
     );
+    if (dt > 0) this.stepParticles(dt, t);
     this.simT = t;
+  }
+
+  /** 发射 + 积分一帧粒子。实时循环和离线 advance 共用 */
+  private stepParticles(dt: number, t: number) {
+    if (this.templateType !== "particle" || !this.cfg?.emitter || !this.cfg.substance) return;
+    const e = this.cfg.emitter;
+    const pw = this.prop.scale.x;
+    const ph = this.prop.scale.y;
+    const ox = this.emitPos.x * this.W + e.port.x * pw;
+    const oy = this.emitPos.y * this.H - e.port.y * ph;
+
+    const { substance, knobs } = resolveControls(this.cfg.substance, this.cfg.controls, this.controls, this.degraded);
+
+    this.particles.emit(dt, knobs.rate, e, substance, pw, ph, ox, oy, this.W, this.H);
+    this.particles.step(dt, t, this.field, substance, knobs.wind, knobs.stick, this.W, this.H);
   }
 
   /**
@@ -1416,6 +1443,7 @@ export class ArEngine {
   private resetSim() {
     this.simT = -1;
     this.elements.resetState();
+    this.particles.clear();
   }
 
   /**
@@ -1542,24 +1570,7 @@ export class ArEngine {
       );
     }
 
-    if (this.templateType === "particle" && this.cfg && this.cfg.emitter && this.cfg.substance) {
-      const e = this.cfg.emitter;
-      const pw = this.prop.scale.x;
-      const ph = this.prop.scale.y;
-      const ox = this.emitPos.x * this.W + e.port.x * pw;
-      const oy = this.emitPos.y * this.H - e.port.y * ph;
-      this.prop.position.set(this.emitPos.x * this.W, this.emitPos.y * this.H, 1);
-
-      const { substance, knobs } = resolveControls(
-        this.cfg.substance,
-        this.cfg.controls,
-        this.controls,
-        this.degraded,
-      );
-
-      this.particles.emit(dt, knobs.rate, e, substance, pw, ph, ox, oy);
-      this.particles.step(dt, t, this.field, substance, knobs.wind, knobs.stick, this.W, this.H);
-    }
+    this.stepParticles(dt, t);
 
     this.renderer.render(this.scene, this.camera);
 
